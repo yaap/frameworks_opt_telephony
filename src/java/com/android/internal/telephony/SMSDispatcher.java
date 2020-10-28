@@ -81,6 +81,7 @@ import android.widget.TextView;
 import com.android.internal.R;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.GsmAlphabet.TextEncodingDetails;
+import com.android.internal.telephony.SmsUsageMonitor.SmsAuthorizationCallback;
 import com.android.internal.telephony.cdma.sms.UserData;
 import com.android.internal.telephony.uicc.UiccCard;
 import com.android.internal.telephony.uicc.UiccController;
@@ -116,7 +117,7 @@ public abstract class SMSDispatcher extends Handler {
     protected static final int EVENT_SEND_SMS_COMPLETE = 2;
 
     /** Retry sending a previously failed SMS message */
-    private static final int EVENT_SEND_RETRY = 3;
+    protected static final int EVENT_SEND_RETRY = 3;
 
     /** Confirmation required for sending a large number of messages. */
     private static final int EVENT_SEND_LIMIT_REACHED_CONFIRMATION = 4;
@@ -157,9 +158,9 @@ public abstract class SMSDispatcher extends Handler {
     protected final TelephonyManager mTelephonyManager;
 
     /** Maximum number of times to retry sending a failed SMS. */
-    private static final int MAX_SEND_RETRIES = 3;
+    protected static final int MAX_SEND_RETRIES = 3;
     /** Delay before next send attempt on a failed SMS, in milliseconds. */
-    private static final int SEND_RETRY_DELAY = 2000;
+    protected static final int SEND_RETRY_DELAY = 2000;
     /** Message sending queue limit */
     private static final int MO_MSG_QUEUE_LIMIT = 5;
 
@@ -1303,7 +1304,23 @@ public abstract class SMSDispatcher extends Handler {
             }
 
             for (SmsTracker tracker : trackers) {
-                sendSms(tracker);
+                if (mSmsDispatchersController.getUsageMonitor().isSmsAuthorizationEnabled()) {
+                    final SmsAuthorizationCallback callback = new SmsAuthorizationCallback() {
+                        @Override
+                        public void onAuthorizationResult(final boolean accepted) {
+                            if (accepted) {
+                                sendSms(tracker);
+                            } else {
+                                tracker.onFailed(mContext, RESULT_ERROR_GENERIC_FAILURE,
+                                        SmsUsageMonitor.ERROR_CODE_BLOCKED);
+                            }
+                        }
+                    };
+                   mSmsDispatchersController.getUsageMonitor().authorizeOutgoingSms(tracker.mAppInfo,
+                            tracker.mDestAddress,tracker.mFullMessageText, callback, this);
+                } else {
+                    sendSms(tracker);
+                }
             }
         }
 
@@ -1591,6 +1608,7 @@ public abstract class SMSDispatcher extends Handler {
         // Tag indicating that this SMS is being handled by the ImsSmsDispatcher. This tracker
         // should not try to use SMS over IMS over the RIL interface in this case when falling back.
         public boolean mUsesImsServiceForIms;
+        public boolean mIsFallBackRetry;
         @UnsupportedAppUsage
         public int mMessageRef;
         public boolean mExpectMore;
@@ -1665,6 +1683,7 @@ public abstract class SMSDispatcher extends Handler {
             mUserId = userId;
             mPriority = priority;
             mValidityPeriod = validityPeriod;
+            mIsFallBackRetry = false;
             mIsForVvm = isForVvm;
             mMessageId = messageId;
         }
