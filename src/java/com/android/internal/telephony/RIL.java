@@ -68,6 +68,7 @@ import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
 import android.os.RemoteException;
 import android.os.SystemClock;
+import android.os.SystemProperties;
 import android.os.WorkSource;
 import android.provider.Settings;
 import android.service.carrier.CarrierIdentifier;
@@ -236,6 +237,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
     AtomicBoolean mTestingEmergencyCall = new AtomicBoolean(false);
 
     final Integer mPhoneId;
+    private List<String> mOldRilFeatures;
 
     /**
      * A set that records if radio service is disabled in hal for
@@ -250,17 +252,17 @@ public class RIL extends BaseCommands implements CommandsInterface {
     Set<Integer> mDisabledOemHookServices = new HashSet();
 
     /* default work source which will blame phone process */
-    private WorkSource mRILDefaultWorkSource;
+    protected WorkSource mRILDefaultWorkSource;
 
     /* Worksource containing all applications causing wakelock to be held */
     private WorkSource mActiveWakelockWorkSource;
 
     /** Telephony metrics instance for logging metrics event */
-    private TelephonyMetrics mMetrics = TelephonyMetrics.getInstance();
+    protected TelephonyMetrics mMetrics = TelephonyMetrics.getInstance();
     /** Radio bug detector instance */
     private RadioBugDetector mRadioBugDetector = null;
 
-    boolean mIsCellularSupported;
+    protected boolean mIsCellularSupported;
     RadioResponse mRadioResponse;
     RadioIndication mRadioIndication;
     volatile IRadio mRadioProxy = null;
@@ -427,7 +429,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
         }
     }
 
-    private synchronized void resetProxyAndRequestList() {
+    protected synchronized void resetProxyAndRequestList() {
         mRadioProxy = null;
         mOemHookProxy = null;
 
@@ -655,6 +657,9 @@ public class RIL extends BaseCommands implements CommandsInterface {
             mRadioBugDetector = new RadioBugDetector(context, mPhoneId);
         }
 
+        final String oldRilFeatures = SystemProperties.get("ro.telephony.ril.config", "");
+        mOldRilFeatures = Arrays.asList(oldRilFeatures.split(","));
+
         TelephonyManager tm = (TelephonyManager) context.getSystemService(
                 Context.TELEPHONY_SERVICE);
         mIsCellularSupported = tm.isVoiceCapable() || tm.isSmsCapable() || tm.isDataCapable();
@@ -720,7 +725,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
         }
     }
 
-    private RILRequest obtainRequest(int request, Message result, WorkSource workSource) {
+    protected RILRequest obtainRequest(int request, Message result, WorkSource workSource) {
         RILRequest rr = RILRequest.obtain(request, result, workSource);
         addRequest(rr);
         return rr;
@@ -733,7 +738,13 @@ public class RIL extends BaseCommands implements CommandsInterface {
         return rr;
     }
 
-    private void handleRadioProxyExceptionForRR(RILRequest rr, String caller, Exception e) {
+    protected int obtainRequestSerial(int request, Message result, WorkSource workSource) {
+        RILRequest rr = RILRequest.obtain(request, result, workSource);
+        addRequest(rr);
+        return rr.mSerial;
+    }
+
+    protected void handleRadioProxyExceptionForRR(RILRequest rr, String caller, Exception e) {
         riljLoge(caller + ": " + e);
         resetProxyAndRequestList();
     }
@@ -2421,7 +2432,6 @@ public class RIL extends BaseCommands implements CommandsInterface {
             RadioAccessSpecifier ras) {
         android.hardware.radio.V1_1.RadioAccessSpecifier rasInHalFormat =
                 new android.hardware.radio.V1_1.RadioAccessSpecifier();
-        rasInHalFormat.radioAccessNetwork = ras.getRadioAccessNetwork();
         ArrayList<Integer> bands = new ArrayList<>();
         if (ras.getBands() != null) {
             for (int band : ras.getBands()) {
@@ -2430,12 +2440,16 @@ public class RIL extends BaseCommands implements CommandsInterface {
         }
         switch (ras.getRadioAccessNetwork()) {
             case AccessNetworkType.GERAN:
+                rasInHalFormat.radioAccessNetwork = AccessNetworkType.GERAN;
                 rasInHalFormat.geranBands = bands;
                 break;
             case AccessNetworkType.UTRAN:
+                rasInHalFormat.radioAccessNetwork = AccessNetworkType.UTRAN;
                 rasInHalFormat.utranBands = bands;
                 break;
-            case AccessNetworkType.EUTRAN:
+            case AccessNetworkType.EUTRAN: // fallthrough
+            case AccessNetworkType.NGRAN:
+                rasInHalFormat.radioAccessNetwork = AccessNetworkType.EUTRAN;
                 rasInHalFormat.eutranBands = bands;
                 break;
             default:
@@ -3469,7 +3483,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
         }
     }
 
-    private void constructCdmaSendSmsRilRequest(CdmaSmsMessage msg, byte[] pdu) {
+    protected void constructCdmaSendSmsRilRequest(CdmaSmsMessage msg, byte[] pdu) {
         int addrNbrOfDigits;
         int subaddrNbrOfDigits;
         int bearerDataLength;
@@ -4328,8 +4342,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
     }
 
     @Override
-    public void setUiccSubscription(int slotId, int appIndex, int subId,
-                                    int subStatus, Message result) {
+    public void setUiccSubscription(int appIndex, boolean activate, Message result) {
         IRadio radioProxy = getRadioProxy(result);
         if (radioProxy != null) {
             RILRequest rr = obtainRequest(RIL_REQUEST_SET_UICC_SUBSCRIPTION, result,
@@ -4337,15 +4350,14 @@ public class RIL extends BaseCommands implements CommandsInterface {
 
             if (RILJ_LOGD) {
                 riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
-                        + " slot = " + slotId + " appIndex = " + appIndex
-                        + " subId = " + subId + " subStatus = " + subStatus);
+                        + " appIndex: " + appIndex + " activate: " + activate);
             }
 
             SelectUiccSub info = new SelectUiccSub();
-            info.slot = slotId;
+            info.slot = mPhoneId;
             info.appIndex = appIndex;
-            info.subType = subId;
-            info.actStatus = subStatus;
+            info.subType = mPhoneId;
+            info.actStatus = activate ? 1 : 0;
 
             try {
                 radioProxy.setUiccSubscription(rr.mSerial, info);
@@ -5016,7 +5028,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
     }
 
     /** Converts from AccessNetworkType in frameworks to RadioAccessNetworks in HAL. */
-    private static int convertAntToRan(int accessNetworkType) {
+    protected static int convertAntToRan(int accessNetworkType) {
         switch (accessNetworkType) {
             case AccessNetworkType.GERAN:
                 return RadioAccessNetworks.GERAN;
@@ -5260,7 +5272,8 @@ public class RIL extends BaseCommands implements CommandsInterface {
         RILRequest rr = obtainRequest(RIL_REQUEST_ENABLE_UICC_APPLICATIONS,
                 onCompleteMessage, mRILDefaultWorkSource);
 
-        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest) +
+                " " + enable);
 
         try {
             radioProxy15.enableUiccApplications(rr.mSerial, enable);
@@ -5530,6 +5543,15 @@ public class RIL extends BaseCommands implements CommandsInterface {
         return rr;
     }
 
+    protected Message getMessageFromRequest(Object request) {
+        RILRequest rr = (RILRequest)request;
+        Message result = null;
+        if (rr != null) {
+                result = rr.mResult;
+        }
+        return result;
+    }
+
     /**
      * This is a helper function to be called at the end of all RadioResponse callbacks.
      * It takes care of sending error response, logging, decrementing wakelock if needed, and
@@ -5582,6 +5604,11 @@ public class RIL extends BaseCommands implements CommandsInterface {
             }
             rr.release();
         }
+    }
+
+    protected void processResponseDone(Object request, RadioResponseInfo responseInfo, Object ret) {
+        RILRequest rr = (RILRequest)request;
+        processResponseDone(rr, responseInfo, ret);
     }
 
     /**
@@ -5987,7 +6014,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
     }
 
     @UnsupportedAppUsage
-    static String requestToString(int request) {
+    protected static String requestToString(int request) {
         switch(request) {
             case RIL_REQUEST_GET_SIM_STATUS:
                 return "GET_SIM_STATUS";
@@ -6945,5 +6972,9 @@ public class RIL extends BaseCommands implements CommandsInterface {
      */
     public HalVersion getHalVersion() {
         return mRadioVersion;
+    }
+
+    public boolean needsOldRilFeature(String feature) {
+        return mOldRilFeatures.contains(feature);
     }
 }
