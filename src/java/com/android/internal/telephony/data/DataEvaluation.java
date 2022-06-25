@@ -256,6 +256,8 @@ public class DataEvaluation {
         EXTERNAL_QUERY(false),
         /** Tracking area code changed. */
         TAC_CHANGED(true),
+        /** Secure Mode state changed. */
+        SECURE_MODE_STATE_CHANGED,
         /** Unsatisfied network request detached. */
         UNSATISFIED_REQUEST_DETACHED(true),
         /** track bootstrap sim data usage */
