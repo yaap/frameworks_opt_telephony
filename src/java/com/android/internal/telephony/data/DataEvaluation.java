@@ -257,7 +257,12 @@ public class DataEvaluation {
         /** Tracking area code changed. */
         TAC_CHANGED(true),
         /** Secure Mode state changed. */
-        SECURE_MODE_STATE_CHANGED,
+        SECURE_MODE_STATE_CHANGED(true),
+        /**
+         * After DDS switch is complete, re-evaluate if any unsatisfied network requests
+         * are honor.
+         */
+        DDS_SWITCHED(true),
         /** Unsatisfied network request detached. */
         UNSATISFIED_REQUEST_DETACHED(true),
         /** track bootstrap sim data usage */
