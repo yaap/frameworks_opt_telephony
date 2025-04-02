@@ -9230,11 +9230,14 @@ public class SatelliteController extends Handler {
         if (isValidSubscriptionId(subId)) {
             Map<String, Integer> dataServicePolicy;
             synchronized (mSupportedSatelliteServicesLock) {
-                dataServicePolicy = mEntitlementDataServicePolicyMapPerCarrier.get(subId);
+                dataServicePolicy = getConfigForSubId(subId).getBoolean(
+                        KEY_SATELLITE_ENTITLEMENT_SUPPORTED_BOOL, false)
+                        ? mEntitlementDataServicePolicyMapPerCarrier.get(subId)
+                        : null;
             }
             plogd("getSatelliteDataServicePolicyForPlmn: dataServicePolicy=" + dataServicePolicy);
 
-            if (dataServicePolicy != null) {
+            if (dataServicePolicy != null && !dataServicePolicy.isEmpty()) {
                 if (!TextUtils.isEmpty(plmn) && dataServicePolicy.containsKey(plmn)) {
                     plogd("getSatelliteDataServicePolicyForPlmn: "
                             + "return policy using dataServicePolicy map");
@@ -9249,9 +9252,18 @@ public class SatelliteController extends Handler {
                             preferredPolicy = policy;
                         }
                     }
-                    plogd("getSatelliteDataServicePolicyForPlmn: "
-                            + "return preferredPolicy=" + preferredPolicy);
-                    return preferredPolicy;
+
+                    // when invoked getSatelliteDataServicePolicyPlmn() with empty plmn and data
+                    // service policy not provisioned i.e.data service policy info is empty with
+                    // or without plmn key, then ignore setting preferred data supported mode policy
+                    // as restricted and fallback to carrier configured data supported mode for the
+                    // subscription id.
+                    if (preferredPolicy
+                            > CarrierConfigManager.SATELLITE_DATA_SUPPORT_ONLY_RESTRICTED) {
+                        plogd("getSatelliteDataServicePolicyForPlmn: "
+                                + "return preferredPolicy=" + preferredPolicy);
+                        return preferredPolicy;
+                    }
                 }
             }
 
