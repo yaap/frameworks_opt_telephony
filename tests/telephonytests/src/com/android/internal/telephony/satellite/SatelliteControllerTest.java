@@ -2372,14 +2372,15 @@ public class SatelliteControllerTest extends TelephonyTest {
         // Add satellite attach restriction reason by user
         mIIntegerConsumerResults.clear();
         reset(mMockSatelliteModemInterface);
+        reset(mPhone);
         setUpResponseForRequestSetSatelliteEnabledForCarrier(false, SATELLITE_RESULT_SUCCESS);
         doReturn(true).when(mMockSatelliteModemInterface).isSatelliteServiceSupported();
         mSatelliteControllerUT.addAttachRestrictionForCarrier(SUB_ID,
                 SATELLITE_COMMUNICATION_RESTRICTION_REASON_USER, mIIntegerConsumer);
         processAllMessages();
         assertEquals(SATELLITE_RESULT_SUCCESS, (long) mIIntegerConsumerResults.get(0));
-        verify(mPhone, never())
-                .setSatelliteEnabledForCarrier(anyInt(), anyBoolean(), any(Message.class));
+        verify(mPhone, times(1))
+                .setSatelliteEnabledForCarrier(anyInt(), eq(false), any(Message.class));
         assertTrue(waitForIIntegerConsumerResult(1));
         restrictionSet =
                 mSatelliteControllerUT.getAttachRestrictionReasonsForCarrier(SUB_ID);
@@ -2388,6 +2389,7 @@ public class SatelliteControllerTest extends TelephonyTest {
         // remove satellite restriction reason by user
         mIIntegerConsumerResults.clear();
         reset(mMockSatelliteModemInterface);
+        reset(mPhone);
         setUpResponseForRequestSetSatelliteEnabledForCarrier(true, SATELLITE_RESULT_SUCCESS);
         doReturn(true).when(mMockSatelliteModemInterface).isSatelliteServiceSupported();
         mSatelliteControllerUT.removeAttachRestrictionForCarrier(SUB_ID,
@@ -2431,8 +2433,8 @@ public class SatelliteControllerTest extends TelephonyTest {
         restrictionSet =
                 mSatelliteControllerUT.getAttachRestrictionReasonsForCarrier(SUB_ID);
         assertTrue(restrictionSet.contains(SATELLITE_COMMUNICATION_RESTRICTION_REASON_GEOLOCATION));
-        verify(mPhone, never())
-                .setSatelliteEnabledForCarrier(anyInt(), anyBoolean(), any(Message.class));
+        verify(mPhone, times(1))
+                .setSatelliteEnabledForCarrier(anyInt(), eq(false), any(Message.class));
 
         // remove satellite attach restriction reason by geolocation
         mIIntegerConsumerResults.clear();
@@ -2448,8 +2450,8 @@ public class SatelliteControllerTest extends TelephonyTest {
                 mSatelliteControllerUT.getAttachRestrictionReasonsForCarrier(SUB_ID);
         assertTrue(!restrictionSet.contains(
                 SATELLITE_COMMUNICATION_RESTRICTION_REASON_GEOLOCATION));
-        verify(mPhone, never())
-                .setSatelliteEnabledForCarrier(anyInt(), anyBoolean(), any(Message.class));
+        verify(mPhone, times(2))
+                .setSatelliteEnabledForCarrier(anyInt(), eq(false), any(Message.class));
 
         // remove satellite restriction reason by user
         mIIntegerConsumerResults.clear();
@@ -2944,6 +2946,7 @@ public class SatelliteControllerTest extends TelephonyTest {
         // satellite service is disabled by entitlement server.
         mIIntegerConsumerResults.clear();
         reset(mMockSatelliteModemInterface);
+        reset(mPhone);
         Map<Integer, Boolean> enabledForCarrierArrayPerSub = new HashMap<>();
         enabledForCarrierArrayPerSub.put(SUB_ID, true);
         replaceInstance(SatelliteController.class, "mIsSatelliteAttachEnabledForCarrierArrayPerSub",
