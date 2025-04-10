@@ -7399,6 +7399,7 @@ public class SatelliteController extends Handler {
 
     public int getSelectedSatelliteSubId() {
         synchronized (mSatelliteTokenProvisionedLock) {
+            plogd("getSelectedSatelliteSubId: subId=" + mSelectedSatelliteSubId);
             return mSelectedSatelliteSubId;
         }
     }
@@ -7478,6 +7479,7 @@ public class SatelliteController extends Handler {
         }
         plogd("selectBindingSatelliteSubscription: SelectedSatelliteSubId=" + selectedSubId);
         handleEventSelectedNbIotSatelliteSubscriptionChanged(selectedSubId);
+        handleCarrierRoamingNtnAvailableServicesChanged();
     }
 
     @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
@@ -7700,7 +7702,7 @@ public class SatelliteController extends Handler {
             return;
         }
         persistNtnSmsSupportedByMessagesApp(ntnSmsSupported);
-        handleCarrierRoamingNtnAvailableServicesChanged(getSelectedSatelliteSubId());
+        handleCarrierRoamingNtnAvailableServicesChanged();
     }
 
     private void persistNtnSmsSupportedByMessagesApp(boolean ntnSmsSupported) {
@@ -7754,6 +7756,7 @@ public class SatelliteController extends Handler {
     @VisibleForTesting(visibility = VisibleForTesting.Visibility.PRIVATE)
     protected void setSelectedSatelliteSubId(int subId) {
         synchronized (mSatelliteTokenProvisionedLock) {
+            plogd("setSelectedSatelliteSubId: subId=" + subId);
             mSelectedSatelliteSubId = subId;
         }
     }
@@ -7926,7 +7929,9 @@ public class SatelliteController extends Handler {
                     synchronized (mSatelliteAccessConfigLock) {
                         mSatelliteAccessAllowed = isAllowed;
                     }
+                    evaluateESOSProfilesPrioritization();
                     evaluateCarrierRoamingNtnEligibilityChange();
+                    handleCarrierRoamingNtnAvailableServicesChanged();
                 }
 
                 @Override
@@ -8234,8 +8239,23 @@ public class SatelliteController extends Handler {
                         .build();
     }
 
+    private void handleCarrierRoamingNtnAvailableServicesChanged() {
+        int[] activeSubIds = mSubscriptionManagerService.getActiveSubIdList(true);
+        if (activeSubIds == null) {
+            plogd("handleCarrierRoamingNtnAvailableServicesChanged: activeSubIds is null.");
+            return;
+        }
+
+        plogd("handleCarrierRoamingNtnAvailableServicesChanged: activeSubIds size="
+                + activeSubIds.length);
+        for (int subId: activeSubIds) {
+            handleCarrierRoamingNtnAvailableServicesChanged(subId);
+        }
+    }
+
     @VisibleForTesting(visibility = VisibleForTesting.Visibility.PRIVATE)
     protected void handleCarrierRoamingNtnAvailableServicesChanged(int subId) {
+        plogd("handleCarrierRoamingNtnAvailableServicesChanged: subId=" + subId);
         if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
             plogd("handleCarrierRoamingNtnAvailableServicesChanged: "
                     + "carrierRoamingNbIotNtn flag is disabled");
