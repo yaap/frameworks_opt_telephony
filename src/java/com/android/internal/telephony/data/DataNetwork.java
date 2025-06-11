@@ -29,7 +29,6 @@ import android.net.LinkProperties;
 import android.net.NetworkAgent;
 import android.net.NetworkAgentConfig;
 import android.net.NetworkCapabilities;
-import android.net.NetworkFactory;
 import android.net.NetworkProvider;
 import android.net.NetworkRequest;
 import android.net.NetworkScore;
@@ -106,6 +105,7 @@ import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.metrics.DataCallSessionStats;
 import com.android.internal.telephony.metrics.DataNetworkValidationStats;
 import com.android.internal.telephony.metrics.TelephonyMetrics;
+import com.android.internal.telephony.satellite.SatelliteController;
 import com.android.internal.util.ArrayUtils;
 import com.android.internal.util.FunctionalUtils;
 import com.android.internal.util.IState;
@@ -1179,21 +1179,13 @@ public class DataNetwork extends StateMachine {
         }
 
         NetworkProvider provider;
-        if (mFlags.supportNetworkProvider()) {
-            provider = PhoneFactory.getNetworkProvider();
-        } else {
-            final NetworkFactory factory = PhoneFactory.getNetworkFactory(
-                    mPhone.getPhoneId());
-            provider = (null == factory) ? null : factory.getProvider();
-        }
+        provider = PhoneFactory.getNetworkProvider();
 
         NetworkScore.Builder builder = new NetworkScore.Builder()
                 .setKeepConnectedReason(isHandoverInProgress()
                         ? NetworkScore.KEEP_CONNECTED_FOR_HANDOVER
                         : NetworkScore.KEEP_CONNECTED_NONE);
-        if (mFlags.supportNetworkProvider()) {
-            builder.setTransportPrimary(mOnPreferredDataPhone);
-        }
+        builder.setTransportPrimary(mOnPreferredDataPhone);
         mNetworkScore = builder.build();
         logl("mNetworkScore: isPrimary=" + mNetworkScore.isTransportPrimary()
                 + ", keepConnectedReason=" + mNetworkScore.getKeepConnectedReason());
@@ -1258,15 +1250,13 @@ public class DataNetwork extends StateMachine {
             mDataNetworkController.getDataSettingsManager()
                     .registerCallback(mDataSettingsManagerCallback);
 
-            if (mFlags.supportNetworkProvider()) {
-                mPhoneSwitcherCallback = new PhoneSwitcherCallback(Runnable::run) {
-                    @Override
-                    public void onPreferredDataPhoneIdChanged(int phoneId) {
-                        sendMessage(EVENT_PREFERRED_DATA_SUBSCRIPTION_CHANGED, phoneId, 0);
-                    }
-                };
-                mPhoneSwitcher.registerCallback(mPhoneSwitcherCallback);
-            }
+            mPhoneSwitcherCallback = new PhoneSwitcherCallback(Runnable::run) {
+                @Override
+                public void onPreferredDataPhoneIdChanged(int phoneId) {
+                    sendMessage(EVENT_PREFERRED_DATA_SUBSCRIPTION_CHANGED, phoneId, 0);
+                }
+            };
+            mPhoneSwitcher.registerCallback(mPhoneSwitcherCallback);
 
             mPhone.getDisplayInfoController().registerForTelephonyDisplayInfoChanged(
                     getHandler(), EVENT_DISPLAY_INFO_CHANGED, null);
@@ -1324,6 +1314,8 @@ public class DataNetwork extends StateMachine {
                 mAccessNetworksManager.registerCallback(mAccessNetworksManagerCallback);
             }
 
+            mRil.registerForNotAvailable(getHandler(), EVENT_RADIO_NOT_AVAILABLE, null);
+
             // Only add symmetric code here, for example, registering and unregistering.
             // DefaultState.enter() is the starting point in the life cycle of the DataNetwork,
             // and DefaultState.exit() is the end. For non-symmetric initializing works, put them
@@ -1359,13 +1351,12 @@ public class DataNetwork extends StateMachine {
             mPhone.getServiceStateTracker().unregisterForServiceStateChanged(getHandler());
             mPhone.getDisplayInfoController().unregisterForTelephonyDisplayInfoChanged(
                     getHandler());
-            if (mFlags.supportNetworkProvider()) {
-                mPhoneSwitcher.unregisterCallback(mPhoneSwitcherCallback);
-            }
+            mPhoneSwitcher.unregisterCallback(mPhoneSwitcherCallback);
             mDataNetworkController.getDataSettingsManager()
                     .unregisterCallback(mDataSettingsManagerCallback);
             mRil.unregisterForPcoData(getHandler());
             mDataConfigManager.unregisterCallback(mDataConfigManagerCallback);
+            mRil.unregisterForNotAvailable(getHandler());
         }
 
         @Override
@@ -1406,8 +1397,14 @@ public class DataNetwork extends StateMachine {
                 }
                 case EVENT_DETACH_ALL_NETWORK_REQUESTS: {
                     for (TelephonyNetworkRequest networkRequest : mAttachedNetworkRequestList) {
-                        networkRequest.setState(TelephonyNetworkRequest.REQUEST_STATE_UNSATISFIED);
-                        networkRequest.setAttachedNetwork(null);
+                        // Check if the network request still belongs to this network, because
+                        // during data switch, the network request can be attached to other network
+                        // on a different SIM.
+                        if (networkRequest.getAttachedNetwork() == DataNetwork.this) {
+                            networkRequest.setState(
+                                    TelephonyNetworkRequest.REQUEST_STATE_UNSATISFIED);
+                            networkRequest.setAttachedNetwork(null);
+                        }
                     }
                     log("All network requests detached.");
                     mAttachedNetworkRequestList.clear();
@@ -1460,6 +1457,12 @@ public class DataNetwork extends StateMachine {
                             .transportTypeToString(msg.arg1) + " request.");
                     break;
                 case EVENT_RADIO_NOT_AVAILABLE:
+                    // Ignore this event when it isn't a WWAN data network.
+                    if (mTransport == AccessNetworkConstants.TRANSPORT_TYPE_WLAN) {
+                        loge(eventToString(msg.what)
+                                + ": ignored on IWLAN");
+                        break;
+                    }
                     mFailCause = DataFailCause.RADIO_NOT_AVAILABLE;
                     loge(eventToString(msg.what) + ": transition to disconnected state");
                     transitionTo(mDisconnectedState);
@@ -1540,10 +1543,6 @@ public class DataNetwork extends StateMachine {
                         setupData();
                     } else {
                         mRetryDelayMillis = DataCallResponse.RETRY_DURATION_UNDEFINED;
-                        if (!mFlags.keepEmptyRequestsNetwork()) {
-                            // This will mark the data profile as no retry perm failure.
-                            mFailCause = DataFailCause.NO_RETRY_FAILURE;
-                        }
                         transitionTo(mDisconnectedState);
                     }
                     break;
@@ -1668,15 +1667,6 @@ public class DataNetwork extends StateMachine {
                 }
 
                 updateDataNetwork(response);
-
-                if (!mFlags.keepEmptyRequestsNetwork() && mAttachedNetworkRequestList.isEmpty()) {
-                    log("Tear down the network since there is no live network request.");
-                    // Directly call onTearDown here. Calling tearDown will cause deadlock because
-                    // EVENT_TEAR_DOWN_NETWORK is deferred until state machine enters connected
-                    // state, which will never happen in this case.
-                    onTearDown(TEAR_DOWN_REASON_NO_LIVE_REQUEST);
-                    return;
-                }
 
                 if (mVcnManager != null && mVcnManager.applyVcnNetworkPolicy(mNetworkCapabilities,
                         mLinkProperties).isTeardownRequested()) {
@@ -1896,6 +1886,19 @@ public class DataNetwork extends StateMachine {
                     log("Defer message " + eventToString(msg.what));
                     deferMessage(msg);
                     break;
+                case EVENT_RADIO_NOT_AVAILABLE:
+                    if (mTransport == AccessNetworkConstants.TRANSPORT_TYPE_WWAN) {
+                        // Defer the request until handover to IWLAN succeeds or fails.
+                        log("Defer message " + eventToString(msg.what));
+                        deferMessage(msg);
+                    } else {
+                        // If this is during handover to cellular, always tear down the network as
+                        // we will never get success or failed response from the modem.
+                        mFailCause = DataFailCause.RADIO_NOT_AVAILABLE;
+                        loge(eventToString(msg.what) + ": transition to disconnected state");
+                        transitionTo(mDisconnectedState);
+                    }
+                    break;
                 case EVENT_NOTIFY_HANDOVER_STARTED_RESPONSE:
                     onStartHandover(msg.arg2, (DataHandoverRetryEntry) msg.obj);
                     break;
@@ -2072,7 +2075,6 @@ public class DataNetwork extends StateMachine {
     private void registerForWwanEvents() {
         registerForBandwidthUpdate();
         mKeepaliveTracker.registerForKeepaliveStatus();
-        mRil.registerForNotAvailable(this.getHandler(), EVENT_RADIO_NOT_AVAILABLE, null);
     }
 
     /**
@@ -2081,7 +2083,6 @@ public class DataNetwork extends StateMachine {
     private void unregisterForWwanEvents() {
         unregisterForBandwidthUpdate();
         mKeepaliveTracker.unregisterForKeepaliveStatus();
-        mRil.unregisterForNotAvailable(this.getHandler());
     }
 
     @Override
@@ -2153,14 +2154,19 @@ public class DataNetwork extends StateMachine {
     private void onDetachNetworkRequest(@NonNull TelephonyNetworkRequest networkRequest,
             boolean shouldRetry) {
         mAttachedNetworkRequestList.remove(networkRequest);
-        networkRequest.setState(TelephonyNetworkRequest.REQUEST_STATE_UNSATISFIED);
-        networkRequest.setAttachedNetwork(null);
+        // Check if the network request still belongs to this network, because
+        // during data switch, the network request can be attached to other network
+        // on a different SIM.
+        if (networkRequest.getAttachedNetwork() == DataNetwork.this) {
+            networkRequest.setState(TelephonyNetworkRequest.REQUEST_STATE_UNSATISFIED);
+            networkRequest.setAttachedNetwork(null);
 
-        if (shouldRetry) {
-            // Inform DataNetworkController that a network request was detached and should be
-            // scheduled to retry.
-            mDataNetworkCallback.invokeFromExecutor(
-                    () -> mDataNetworkCallback.onRetryUnsatisfiedNetworkRequest(networkRequest));
+            if (shouldRetry) {
+                // Inform DataNetworkController that a network request was detached and should be
+                // scheduled to retry.
+                mDataNetworkCallback.invokeFromExecutor(() ->
+                        mDataNetworkCallback.onRetryUnsatisfiedNetworkRequest(networkRequest));
+            }
         }
 
         if (mAttachedNetworkRequestList.isEmpty()) {
@@ -2356,16 +2362,9 @@ public class DataNetwork extends StateMachine {
     private void updateNetworkCapabilities() {
         final NetworkCapabilities.Builder builder = new NetworkCapabilities.Builder();
 
-        if (mFlags.satelliteInternet() && mIsSatellite
-                && mDataConfigManager.getForcedCellularTransportCapabilities().stream()
+        if (mIsSatellite && mDataConfigManager.getForcedCellularTransportCapabilities().stream()
                 .noneMatch(this::hasNetworkCapabilityInNetworkRequests)) {
-            // TODO: b/328622096 remove the try/catch
-            try {
-                builder.addTransportType(NetworkCapabilities.TRANSPORT_SATELLITE);
-            } catch (IllegalArgumentException exception) {
-                loge("TRANSPORT_SATELLITE is not supported.");
-                builder.addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR);
-            }
+            builder.addTransportType(NetworkCapabilities.TRANSPORT_SATELLITE);
         } else {
             builder.addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR);
         }
@@ -2571,9 +2570,18 @@ public class DataNetwork extends StateMachine {
         builder.setLinkUpstreamBandwidthKbps(mNetworkBandwidth.uplinkBandwidthKbps);
 
         // Configure the network as restricted/constrained for unrestricted satellite network.
-        if (mFlags.satelliteInternet() && mIsSatellite && builder.build()
-                .hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)) {
-            switch (mDataConfigManager.getSatelliteDataSupportMode()) {
+        if (mIsSatellite && builder.build().hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)) {
+
+            int dataPolicy;
+            if (mFlags.dataServiceCheck()) {
+                final SatelliteController satelliteController = SatelliteController.getInstance();
+                dataPolicy = satelliteController.getSatelliteDataServicePolicyForPlmn(mSubId,
+                        mPhone.getServiceState().getOperatorNumeric());
+            } else {
+                dataPolicy = mDataConfigManager.getSatelliteDataSupportMode();
+            }
+            switch (dataPolicy) {
                 case CarrierConfigManager.SATELLITE_DATA_SUPPORT_ONLY_RESTRICTED
                         -> builder.removeCapability(
                                 NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED);
@@ -3372,13 +3380,10 @@ public class DataNetwork extends StateMachine {
         int connectedReason = keepConnectedForHandover
                 ? NetworkScore.KEEP_CONNECTED_FOR_HANDOVER : NetworkScore.KEEP_CONNECTED_NONE;
         if (mNetworkScore.getKeepConnectedReason() != connectedReason
-                || (mFlags.supportNetworkProvider()
-                && mNetworkScore.isTransportPrimary() != mOnPreferredDataPhone)) {
+                || mNetworkScore.isTransportPrimary() != mOnPreferredDataPhone) {
             NetworkScore.Builder builder = new NetworkScore.Builder()
                     .setKeepConnectedReason(connectedReason);
-            if (mFlags.supportNetworkProvider()) {
-                builder.setTransportPrimary(mOnPreferredDataPhone);
-            }
+            builder.setTransportPrimary(mOnPreferredDataPhone);
             mNetworkScore = builder.build();
             mNetworkAgent.sendNetworkScore(mNetworkScore);
             logl("updateNetworkScore: isPrimary=" + mNetworkScore.isTransportPrimary()
@@ -3913,11 +3918,6 @@ public class DataNetwork extends StateMachine {
      */
     private void updateValidationStatus(
             @PreciseDataConnectionState.NetworkValidationStatus int networkValidationStatus) {
-        if (!mFlags.networkValidation()) {
-            // Do nothing, if network validation feature is disabled
-            return;
-        }
-
         // if network validation status is changed, notify preciseDataConnectionState.
         if (mNetworkValidationStatus != networkValidationStatus) {
             log("updateValidationStatus:"
