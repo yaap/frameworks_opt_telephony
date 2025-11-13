@@ -2955,6 +2955,23 @@ public class ImsPhone extends ImsPhoneBase {
                 == ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN);
     }
 
+    /**
+     * Update allowed IMS services.
+     *
+     * @param regTech Which technology is associated with this capability.
+     * @param enabled Whether this capability is enabled.
+     * @param isHomeOnly Whether this capability change is for home network only.
+     */
+    public void setAllowedImsServices(
+            @ImsRegistrationImplBase.ImsRegistrationTech int regTech,
+            boolean enabled, boolean isHomeOnly) {
+        if (isHomeOnly) {
+            mDefaultPhone.setAllowedImsServicesForHomeOnly(regTech, enabled);
+        } else {
+            mDefaultPhone.setAllowedImsServicesForAny(regTech, enabled);
+        }
+    }
+
     @Override
     public void dump(FileDescriptor fd, PrintWriter printWriter, String[] args) {
         IndentingPrintWriter pw = new IndentingPrintWriter(printWriter, "  ");

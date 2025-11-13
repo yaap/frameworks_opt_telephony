@@ -56,9 +56,7 @@ public class MccTableTest {
 
     @Parameterized.Parameters(name = "{0}")
     public static List<FlagsParameterization> getParams() {
-        return FlagsParameterization.allCombinationsOf(
-                Flags.FLAG_USE_I18N_FOR_MCC_MAPPING,
-                com.android.icu.Flags.FLAG_TELEPHONY_LOOKUP_MCC_EXTENSION);
+        return FlagsParameterization.allCombinationsOf(Flags.FLAG_USE_I18N_FOR_MCC_MAPPING);
     }
 
     @Rule
@@ -155,7 +153,6 @@ public class MccTableTest {
     @Test
     public void telephonyFinder_shouldBeIdenticalToTelephonyMccTable() {
         assumeTrue(Flags.useI18nForMccMapping());
-        assumeTrue(com.android.icu.Flags.telephonyLookupMccExtension());
 
         TelephonyNetworkFinder telephonyNetworkFinder =
                 TelephonyLookup.getInstance().getTelephonyNetworkFinder();

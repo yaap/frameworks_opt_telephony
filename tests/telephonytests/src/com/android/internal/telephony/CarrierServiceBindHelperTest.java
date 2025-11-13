@@ -16,6 +16,8 @@
 
 package com.android.internal.telephony;
 
+import static android.telephony.SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -150,30 +152,22 @@ public class CarrierServiceBindHelperTest extends TelephonyTest {
         verify(mTelephonyManager, never()).unregisterCarrierPrivilegesCallback(eq(phone0Callback));
     }
 
-    @Test
-    public void testCarrierAppConnectionLost_resetsCarrierNetworkChange() {
-        if (!Flags.disableCarrierNetworkChangeOnCarrierAppLost()) {
-            return;
-        }
-        // Static test data
-        String carrierServicePackageName = "android.test.package.carrier";
+    private void setupCarrierServiceMocks(
+            String carrierServicePackageName, String carrierServiceClassName) {
+        String carrierServiceFullName = carrierServicePackageName + "." + carrierServiceClassName;
         ComponentName carrierServiceComponentName =
-                new ComponentName("android.test.package", "carrier");
-        ArgumentCaptor<ServiceConnection> serviceConnectionCaptor =
-                ArgumentCaptor.forClass(ServiceConnection.class);
+                new ComponentName(carrierServicePackageName, carrierServiceClassName);
+
         ResolveInfo resolveInfo = new ResolveInfo();
         ServiceInfo serviceInfo = new ServiceInfo();
-        serviceInfo.packageName = carrierServicePackageName;
-        serviceInfo.name = "carrier";
+        serviceInfo.packageName = carrierServiceFullName;
+        serviceInfo.name = carrierServiceClassName;
         serviceInfo.metaData = new Bundle();
         serviceInfo.metaData.putBoolean("android.service.carrier.LONG_LIVED_BINDING", true);
         resolveInfo.serviceInfo = serviceInfo;
-
-        // Set up expectations for construction/initialization.
-        doReturn(carrierServicePackageName)
+        doReturn(carrierServiceFullName)
                 .when(mTelephonyManager)
                 .getCarrierServicePackageNameForLogicalSlot(PHONE_ID_0);
-        doReturn(1).when(mTelephonyManager).getActiveModemCount();
         doReturn(resolveInfo)
                 .when(mPackageManager)
                 .resolveService(any(), eq(PackageManager.GET_META_DATA));
@@ -181,9 +175,24 @@ public class CarrierServiceBindHelperTest extends TelephonyTest {
         mContextFixture.addService(
                 CarrierService.CARRIER_SERVICE_INTERFACE,
                 carrierServiceComponentName,
-                carrierServicePackageName,
+                carrierServiceFullName,
                 carrierServiceInterface,
                 serviceInfo);
+    }
+
+    @Test
+    public void testCarrierAppConnectionLost_resetsCarrierNetworkChange_withSubId() {
+        if (!Flags.disableCarrierNetworkChangeOnCarrierAppLost()) {
+            return;
+        }
+        setupCarrierServiceMocks("android.test.package", "carrier");
+        ComponentName carrierServiceComponentName =
+                new ComponentName("android.test.package", "carrier");
+
+        // Set up expectations for construction/initialization.
+        ArgumentCaptor<ServiceConnection> serviceConnectionCaptor =
+                ArgumentCaptor.forClass(ServiceConnection.class);
+        doReturn(1).when(mTelephonyManager).getActiveModemCount();
 
         mCarrierServiceBindHelper = new CarrierServiceBindHelper(mContext);
         processAllMessages();
@@ -202,43 +211,25 @@ public class CarrierServiceBindHelperTest extends TelephonyTest {
 
         // Test CarrierService disconnection
         serviceConnection.onServiceDisconnected(carrierServiceComponentName);
-        verify(mTelephonyRegistryManager).notifyCarrierNetworkChange(PHONE_ID_0, false);
+        verify(mTelephonyRegistryManager).notifyCarrierNetworkChange(
+                PHONE_ID_0, false);
+        verify(mTelephonyRegistryManager, never())
+                .notifyCarrierNetworkChange(PHONE_ID_0, INVALID_SUBSCRIPTION_ID, false);
     }
 
     @Test
-    public void testCarrierAppBindingLost_resetsCarrierNetworkChange() {
+    public void testCarrierAppBindingLost_resetsCarrierNetworkChange_withSubId() {
         if (!Flags.disableCarrierNetworkChangeOnCarrierAppLost()) {
             return;
         }
-        // Static test data
-        String carrierServicePackageName = "android.test.package.carrier";
+        setupCarrierServiceMocks("android.test.package", "carrier");
         ComponentName carrierServiceComponentName =
                 new ComponentName("android.test.package", "carrier");
-        ArgumentCaptor<ServiceConnection> serviceConnectionCaptor =
-                ArgumentCaptor.forClass(ServiceConnection.class);
-        ResolveInfo resolveInfo = new ResolveInfo();
-        ServiceInfo serviceInfo = new ServiceInfo();
-        serviceInfo.packageName = carrierServicePackageName;
-        serviceInfo.name = "carrier";
-        serviceInfo.metaData = new Bundle();
-        serviceInfo.metaData.putBoolean("android.service.carrier.LONG_LIVED_BINDING", true);
-        resolveInfo.serviceInfo = serviceInfo;
 
         // Set up expectations for construction/initialization.
-        doReturn(carrierServicePackageName)
-                .when(mTelephonyManager)
-                .getCarrierServicePackageNameForLogicalSlot(PHONE_ID_0);
+        ArgumentCaptor<ServiceConnection> serviceConnectionCaptor =
+                ArgumentCaptor.forClass(ServiceConnection.class);
         doReturn(1).when(mTelephonyManager).getActiveModemCount();
-        doReturn(resolveInfo)
-                .when(mPackageManager)
-                .resolveService(any(), eq(PackageManager.GET_META_DATA));
-        ICarrierService carrierServiceInterface = Mockito.mock(ICarrierService.class);
-        mContextFixture.addService(
-                CarrierService.CARRIER_SERVICE_INTERFACE,
-                carrierServiceComponentName,
-                carrierServicePackageName,
-                carrierServiceInterface,
-                serviceInfo);
 
         mCarrierServiceBindHelper = new CarrierServiceBindHelper(mContext);
         processAllMessages();
@@ -257,7 +248,89 @@ public class CarrierServiceBindHelperTest extends TelephonyTest {
 
         // Test CarrierService disconnection
         serviceConnection.onBindingDied(carrierServiceComponentName);
-        verify(mTelephonyRegistryManager).notifyCarrierNetworkChange(PHONE_ID_0, false);
+        verify(mTelephonyRegistryManager).notifyCarrierNetworkChange(
+                PHONE_ID_0, false);
+        verify(mTelephonyRegistryManager, never())
+                .notifyCarrierNetworkChange(PHONE_ID_0, INVALID_SUBSCRIPTION_ID, false);
+    }
+
+    @Test
+    public void testCarrierAppBindingLost_resetsCarrierNetworkChange_withPhoneId() {
+        if (!Flags.disableCarrierNetworkChangeOnCarrierAppLost()) {
+            return;
+        }
+        if (!Flags.cleanupCarrierNetworkChangeByPhoneid()) {
+            return;
+        }
+        setupCarrierServiceMocks("android.test.package", "carrier");
+        ComponentName carrierServiceComponentName =
+                new ComponentName("android.test.package", "carrier");
+
+        // Set up expectations for construction/initialization.
+        ArgumentCaptor<ServiceConnection> serviceConnectionCaptor =
+                ArgumentCaptor.forClass(ServiceConnection.class);
+        Mockito.when(mTelephonyManager.getActiveModemCount()).thenReturn(1).thenReturn(0);
+
+        mCarrierServiceBindHelper = new CarrierServiceBindHelper(mContext);
+        processAllMessages();
+
+        CarrierPrivilegesCallback phoneCallback =
+                expectRegisterCarrierPrivilegesCallback(PHONE_ID_0);
+        assertNotNull(phoneCallback);
+        phoneCallback.onCarrierServiceChanged(null, 0);
+        processAllMessages();
+
+        // Grab the ServiceConnection for CarrierService
+        verify(mContext)
+                .bindService(any(Intent.class), anyInt(), any(), serviceConnectionCaptor.capture());
+        ServiceConnection serviceConnection = serviceConnectionCaptor.getAllValues().get(0);
+        assertNotNull(serviceConnection);
+
+        // Test CarrierService disconnection
+        serviceConnection.onBindingDied(carrierServiceComponentName);
+        verify(mTelephonyRegistryManager, never()).notifyCarrierNetworkChange(
+                PHONE_ID_0, false);
+        verify(mTelephonyRegistryManager).notifyCarrierNetworkChange(
+                PHONE_ID_0, INVALID_SUBSCRIPTION_ID, false);
+    }
+
+    @Test
+    public void testCarrierAppConnectionLost_resetsCarrierNetworkChange_withPhoneId() {
+        if (!Flags.disableCarrierNetworkChangeOnCarrierAppLost()) {
+            return;
+        }
+        if (!Flags.cleanupCarrierNetworkChangeByPhoneid()) {
+            return;
+        }
+        setupCarrierServiceMocks("android.test.package", "carrier");
+        ComponentName carrierServiceComponentName =
+                new ComponentName("android.test.package", "carrier");
+
+        // Set up expectations for construction/initialization.
+        ArgumentCaptor<ServiceConnection> serviceConnectionCaptor =
+                ArgumentCaptor.forClass(ServiceConnection.class);
+        Mockito.when(mTelephonyManager.getActiveModemCount()).thenReturn(1).thenReturn(0);
+
+        mCarrierServiceBindHelper = new CarrierServiceBindHelper(mContext);
+        processAllMessages();
+
+        CarrierPrivilegesCallback phoneCallback =
+                expectRegisterCarrierPrivilegesCallback(PHONE_ID_0);
+        assertNotNull(phoneCallback);
+        phoneCallback.onCarrierServiceChanged(null, 0);
+        processAllMessages();
+
+        // Grab the ServiceConnection for CarrierService
+        verify(mContext)
+                .bindService(any(Intent.class), anyInt(), any(), serviceConnectionCaptor.capture());
+        ServiceConnection serviceConnection = serviceConnectionCaptor.getAllValues().get(0);
+        assertNotNull(serviceConnection);
+
+        // Test CarrierService disconnection
+        serviceConnection.onServiceDisconnected(carrierServiceComponentName);
+        verify(mTelephonyRegistryManager, never()).notifyCarrierNetworkChange(PHONE_ID_0, false);
+        verify(mTelephonyRegistryManager).notifyCarrierNetworkChange(
+                PHONE_ID_0, INVALID_SUBSCRIPTION_ID, false);
     }
     // TODO (b/232461097): Add UT cases to cover more scenarios (user unlock, SIM state change...)
 }

@@ -112,6 +112,8 @@ public class SatelliteStats {
         private final int mCountOfOutgoingDatagramTypeSmsFail;
         private final int mCountOfIncomingDatagramTypeSmsSuccess;
         private final int mCountOfIncomingDatagramTypeSmsFail;
+        private static int sCarrierRoamingSatelliteConfigVersion;
+        private static int sMaxAllowedDataMode;
 
         private SatelliteControllerParams(Builder builder) {
             this.mCountOfSatelliteServiceEnablementsSuccess =
@@ -199,6 +201,16 @@ public class SatelliteStats {
             this.mCountOfIncomingDatagramTypeSmsSuccess =
                     builder.mCountOfIncomingDatagramTypeSmsSuccess;
             this.mCountOfIncomingDatagramTypeSmsFail = builder.mCountOfIncomingDatagramTypeSmsFail;
+
+            // carrier roaming satellite config version should be updated only when it's meaningful.
+            if (builder.mCarrierRoamingSatelliteConfigVersion.isPresent()) {
+                this.sCarrierRoamingSatelliteConfigVersion =
+                        builder.mCarrierRoamingSatelliteConfigVersion.get();
+            }
+            // max allowed data mode value should be updated only when it is meaningful.
+            if (builder.mMaxAllowedDataMode.isPresent()) {
+                this.sMaxAllowedDataMode = builder.mMaxAllowedDataMode.get();
+            }
         }
 
         public int getCountOfSatelliteServiceEnablementsSuccess() {
@@ -373,6 +385,14 @@ public class SatelliteStats {
             return mCountOfIncomingDatagramTypeSmsFail;
         }
 
+        public static int getCarrierRoamingSatelliteConfigVersion() {
+            return sCarrierRoamingSatelliteConfigVersion;
+        }
+
+        public static int getMaxAllowedDataMode() {
+            return sMaxAllowedDataMode;
+        }
+
         /**
          * A builder class to create {@link SatelliteControllerParams} data structure class
          */
@@ -420,6 +440,9 @@ public class SatelliteStats {
             private int mCountOfOutgoingDatagramTypeSmsFail;
             private int mCountOfIncomingDatagramTypeSmsSuccess;
             private int mCountOfIncomingDatagramTypeSmsFail;
+            private Optional<Integer> mCarrierRoamingSatelliteConfigVersion = Optional.empty();
+            private Optional<Integer> mMaxAllowedDataMode = Optional.empty();
+
 
             /**
              * Sets countOfSatelliteServiceEnablementsSuccess value of {@link SatelliteController}
@@ -849,6 +872,26 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets carrier roaming satellite config version of {@link SatelliteController} atom
+             * then returns Builder class
+             */
+            public Builder setCarrierRoamingSatelliteConfigVersion(
+                    int carrierRoamingSatelliteConfigVersion) {
+                this.mCarrierRoamingSatelliteConfigVersion =
+                        Optional.of(carrierRoamingSatelliteConfigVersion);
+                return this;
+            }
+
+            /**
+             * Sets max allowed data mode value of {@link SatelliteController} atom
+             * then returns Builder class
+             */
+            public Builder setMaxAllowedDataMode(int maxAllowedDataMode) {
+                this.mMaxAllowedDataMode = Optional.of(maxAllowedDataMode);
+                return this;
+            }
+
+            /**
              * Returns ControllerParams, which contains whole component of
              * {@link SatelliteController} atom
              */
@@ -918,6 +961,9 @@ public class SatelliteStats {
                     + ", countOfIncomingDatagramTypeSmsSuccess="
                     + mCountOfIncomingDatagramTypeSmsSuccess
                     + ", countOfIncomingDatagramTypeSmsFail=" + mCountOfIncomingDatagramTypeSmsFail
+                    + ", carrierRoamingSatelliteConfigVersion="
+                    + sCarrierRoamingSatelliteConfigVersion
+                    + ", maxAllowedDataMode=" + sMaxAllowedDataMode
                     + ")";
         }
     }
@@ -1887,6 +1933,19 @@ public class SatelliteStats {
         private final long mSatelliteDataConsumedBytes;
         private final boolean mIsMultiSim;
         private final boolean mIsNbIotNtn;
+        private final int mCountOfDataConnections;
+        private final int[] mLastFailCauses;
+        private final int mCountOfDataDisconnections;
+        private final int mCountOfDataStalls;
+        private final int mAverageUplinkBandwidthKbps;
+        private final int mAverageDownlinkBandwidthKbps;
+        private final int mMinUplinkBandwidthKbps;
+        private final int mMaxUplinkBandwidthKbps;
+        private final int mMinDownlinkBandwidthKbps;
+        private final int mMaxDownlinkBandwidthKbps;
+        private final String[] mSatelliteSupportedApps;
+        private final int[] mSatelliteSupportedUids;
+        private final long[] mPerAppSatelliteDataConsumedBytes;
 
         private CarrierRoamingSatelliteSessionParams(Builder builder) {
             this.mCarrierId = builder.mCarrierId;
@@ -1912,6 +1971,19 @@ public class SatelliteStats {
                     builder.mSatelliteDataConsumedBytes;
             this.mIsMultiSim = builder.mIsMultiSim;
             this.mIsNbIotNtn = builder.mIsNbIotNtn;
+            this.mCountOfDataConnections = builder.mCountOfDataConnections;
+            this.mLastFailCauses = builder.mLastFailCauses;
+            this.mCountOfDataDisconnections = builder.mCountOfDataDisconnections;
+            this.mCountOfDataStalls = builder.mCountOfDataStalls;
+            this.mAverageUplinkBandwidthKbps =  builder.mAverageUplinkBandwidthKbps;
+            this.mAverageDownlinkBandwidthKbps = builder.mAverageDownlinkBandwidthKbps;
+            this.mMinUplinkBandwidthKbps = builder.mMinUplinkBandwidthKbps;
+            this.mMaxUplinkBandwidthKbps = builder.mMaxUplinkBandwidthKbps;
+            this.mMinDownlinkBandwidthKbps = builder.mMinDownlinkBandwidthKbps;
+            this.mMaxDownlinkBandwidthKbps = builder.mMaxDownlinkBandwidthKbps;
+            this.mSatelliteSupportedApps = builder.mSatelliteSupportedApps;
+            this.mSatelliteSupportedUids = builder.mSatelliteSupportedUids;
+            this.mPerAppSatelliteDataConsumedBytes = builder.mPerAppSatelliteDataConsumedBytes;
         }
 
         public int getCarrierId() {
@@ -1998,6 +2070,58 @@ public class SatelliteStats {
             return mIsNbIotNtn;
         }
 
+        public int getCountOfDataConnections() {
+            return mCountOfDataConnections;
+        }
+
+        public int[] getLastFailCauses() {
+            return mLastFailCauses;
+        }
+
+        public int getCountOfDataDisconnections() {
+            return mCountOfDataDisconnections;
+        }
+
+        public int getCountOfDataStalls() {
+            return mCountOfDataStalls;
+        }
+
+        public int getAverageUplinkBandwidthKbps() {
+            return mAverageUplinkBandwidthKbps;
+        }
+
+        public int getAverageDownlinkBandwidthKbps() {
+            return mAverageDownlinkBandwidthKbps;
+        }
+
+        public int getMinimumUplinkBandwidthKbps() {
+            return mMinUplinkBandwidthKbps;
+        }
+
+        public int getMaximumUplinkBandwidthKbps() {
+            return mMaxUplinkBandwidthKbps;
+        }
+
+        public int getMinimumDownlinkBandwidthKbps() {
+            return mMinDownlinkBandwidthKbps;
+        }
+
+        public int getMaximumDownlinkBandwidthKbps() {
+            return mMaxDownlinkBandwidthKbps;
+        }
+
+        public String[] getSatelliteSupportedApps() {
+            return mSatelliteSupportedApps;
+        }
+
+        public int[] getSatelliteSupportedUids() {
+            return mSatelliteSupportedUids;
+        }
+
+        public long[] getPerAppSatelliteDataConsumedBytes() {
+            return mPerAppSatelliteDataConsumedBytes;
+        }
+
         /**
          * A builder class to create {@link CarrierRoamingSatelliteSessionParams} data structure
          * class
@@ -2025,6 +2149,20 @@ public class SatelliteStats {
             long mSatelliteDataConsumedBytes = 0L;
             private boolean mIsMultiSim = false;
             private boolean mIsNbIotNtn = false;
+            private int mCountOfDataConnections = 0;
+            private int[] mLastFailCauses = new int[5];
+            private int mCountOfDataDisconnections = 0;
+            private int mCountOfDataStalls = 0;
+            private int mAverageUplinkBandwidthKbps = 0;
+            private int mAverageDownlinkBandwidthKbps = 0;
+            private int mMinUplinkBandwidthKbps = Integer.MAX_VALUE;
+            private int mMaxUplinkBandwidthKbps = 0;
+            private int mMinDownlinkBandwidthKbps = Integer.MAX_VALUE;
+            private int mMaxDownlinkBandwidthKbps = 0;
+            private String[] mSatelliteSupportedApps = null;
+            private int[] mSatelliteSupportedUids = new int[5];
+            private long[] mPerAppSatelliteDataConsumedBytes = new long[]{0L};
+
 
             /**
              * Sets carrierId value of {@link CarrierRoamingSatelliteSession} atom
@@ -2228,6 +2366,125 @@ public class SatelliteStats {
                 this.mIsNbIotNtn = isNbIotNtn;
                 return this;
             }
+
+            /**
+             * Sets countOfDataConnections value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setCountOfDataConnections(int countOfDataConnections) {
+                this.mCountOfDataConnections = countOfDataConnections;
+                return this;
+            }
+
+            /**
+             * Sets lastFailCauses value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setLastFailCauses(int[] lastFailCauses) {
+                this.mLastFailCauses = lastFailCauses;
+                Arrays.sort(this.mLastFailCauses);
+                return this;
+            }
+
+            /**
+             * Sets countOfDataDisconnections value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setCountOfDataDisconnections(int countOfDataDisconnections) {
+                this.mCountOfDataDisconnections = countOfDataDisconnections;
+                return this;
+            }
+
+            /**
+             * Sets countOfDataStalls value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setCountOfDataStalls(int countOfDataStalls) {
+                this.mCountOfDataStalls = countOfDataStalls;
+                return this;
+            }
+
+            /**
+             * Sets averageUplinkBandwidth value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setAverageUplinkBandwidthKbps(int averageUplinkBandwidthKbps) {
+                this.mAverageUplinkBandwidthKbps = averageUplinkBandwidthKbps;
+                return this;
+            }
+
+            /**
+             * Sets averageDownlinkBandwidth value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setAverageDownlinkBandwidthKbps(int averageDownlinkBandwidthKbps) {
+                this.mAverageDownlinkBandwidthKbps = averageDownlinkBandwidthKbps;
+                return this;
+            }
+
+            /**
+             * Sets minUplinkBandwidth value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setMinimumUplinkBandwidthKbps(int minUplinkBandwidthKbps) {
+                this.mMinUplinkBandwidthKbps = minUplinkBandwidthKbps;
+                return this;
+            }
+
+            /**
+             * Sets maxUplinkBandwidth value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setMaximumUplinkBandwidthKbps(int maxUplinkBandwidthKbps) {
+                this.mMaxUplinkBandwidthKbps = maxUplinkBandwidthKbps;
+                return this;
+            }
+
+            /**
+             * Sets minDownlinkBandwidth value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setMinimumDownlinkBandwidthKbps(int minDownlinkBandwidthKbps) {
+                this.mMinDownlinkBandwidthKbps = minDownlinkBandwidthKbps;
+                return this;
+            }
+
+            /**
+             * Sets maxUplinkBandwidth value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setMaximumDownlinkBandwidthKbps(int maxDownlinkBandwidthKbps) {
+                this.mMaxDownlinkBandwidthKbps = maxDownlinkBandwidthKbps;
+                return this;
+            }
+
+            /**
+             * Sets satelliteSupportedApps value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setSatelliteSupportedApps(String[] satelliteSupportedApps) {
+                this.mSatelliteSupportedApps = satelliteSupportedApps;
+                return this;
+            }
+
+            /**
+             * Sets satelliteSupportedUids value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setSatelliteSupportedUids(int[] satelliteSupportedUids) {
+                this.mSatelliteSupportedUids = satelliteSupportedUids;
+                return this;
+            }
+
+            /**
+             * Sets perAppSatelliteDataConsumedBytes value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class
+             */
+            public Builder setPerAppSatelliteDataConsumedBytes(
+                    long[] perAppSatelliteDataConsumedBytes) {
+                this.mPerAppSatelliteDataConsumedBytes = perAppSatelliteDataConsumedBytes;
+                return this;
+            }
         }
 
         @Override
@@ -2255,6 +2512,20 @@ public class SatelliteStats {
                     + ", SatelliteDataConsumedBytes=" + mSatelliteDataConsumedBytes
                     + ", isMultiSim=" + mIsMultiSim
                     + ", isNbIotNtn=" + mIsNbIotNtn
+                    + ", countOfDataConnections=" + mCountOfDataConnections
+                    + ", lastFailCauses=" +  Arrays.toString(mLastFailCauses)
+                    + ", countOfDataDisconnections=" + mCountOfDataDisconnections
+                    + ", countOfDataStalls=" + mCountOfDataStalls
+                    + ", averageUplinkBandwidthKbps=" + mAverageUplinkBandwidthKbps
+                    + ", averageDownlinkBandwidthKbps=" + mAverageDownlinkBandwidthKbps
+                    + ", minUplinkBandwidthKbps=" + mMinUplinkBandwidthKbps
+                    + ", maxUplinkBandwidthKbps=" + mMaxUplinkBandwidthKbps
+                    + ", minDownlinkBandwidthKbps=" + mMinDownlinkBandwidthKbps
+                    + ", maxDownlinkBandwidthKbps=" + mMaxDownlinkBandwidthKbps
+                    + ", satelliteSupportedApps=" + Arrays.toString(mSatelliteSupportedApps)
+                    + ", satelliteSupportedUids=" + Arrays.toString(mSatelliteSupportedUids)
+                    + ", perAppSatelliteDataConsumedBytes=" + Arrays.toString(
+                    mPerAppSatelliteDataConsumedBytes)
                     + ")";
         }
     }
@@ -3087,6 +3358,10 @@ public class SatelliteStats {
         proto.countOfIncomingDatagramTypeSmsSuccess =
                 param.getCountOfIncomingDatagramTypeSmsSuccess();
         proto.countOfIncomingDatagramTypeSmsFail = param.getCountOfIncomingDatagramTypeSmsFail();
+        proto.carrierRoamingSatelliteConfigVersion =
+                param.getCarrierRoamingSatelliteConfigVersion();
+        proto.maxAllowedDataMode = param.getMaxAllowedDataMode();
+
         if (DBG) logd("onSatelliteControllerMetrics" + param);
         mAtomsStorage.addSatelliteControllerStats(proto);
     }
@@ -3206,6 +3481,19 @@ public class SatelliteStats {
         proto.satelliteDataConsumedBytes = param.mSatelliteDataConsumedBytes;
         proto.isMultiSim = param.isMultiSim();
         proto.isNbIotNtn = param.isNbIotNtn();
+        proto.countOfDataConnections = param.mCountOfDataConnections;
+        proto.lastFailCauses = param.mLastFailCauses;
+        proto.countOfDataDisconnections = param.mCountOfDataDisconnections;
+        proto.countOfDataStalls = param.mCountOfDataStalls;
+        proto.averageUplinkBandwidthKbps = param.mAverageUplinkBandwidthKbps;
+        proto.averageDownlinkBandwidthKbps = param.mAverageDownlinkBandwidthKbps;
+        proto.minUplinkBandwidthKbps = param.mMinUplinkBandwidthKbps;
+        proto.maxUplinkBandwidthKbps = param.mMaxUplinkBandwidthKbps;
+        proto.minDownlinkBandwidthKbps = param.mMinDownlinkBandwidthKbps;
+        proto.maxDownlinkBandwidthKbps = param.mMaxDownlinkBandwidthKbps;
+        proto.satelliteSupportedApps = param.mSatelliteSupportedApps;
+        proto.satelliteSupportedUids = param.mSatelliteSupportedUids;
+        proto.perAppSatelliteDataConsumedBytes = param.mPerAppSatelliteDataConsumedBytes;
         if (DBG) logd("onCarrierRoamingSatelliteSessionMetrics: " + param);
         mAtomsStorage.addCarrierRoamingSatelliteSessionStats(proto);
     }

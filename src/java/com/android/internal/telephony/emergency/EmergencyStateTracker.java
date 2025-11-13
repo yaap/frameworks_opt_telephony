@@ -1492,6 +1492,18 @@ public class EmergencyStateTracker {
             return CompletableFuture.completedFuture(DisconnectCause.ERROR_UNSPECIFIED);
         }
 
+        // If the radio is/will be turned off when an emergency SMS is being sent,
+        // the SMS is not allowed and will follow the SMS retry logic on failure.
+        //
+        // This can occur when an emergency SMS is sent by ELS(Emergency Location System)
+        // while the radio is turned on by making an emergency call in airplane mode.
+        // NOTE: ELS uses AML(Advanced Mobile Location) protocol to transfer data from mobile
+        // to emergency call centre using either SMS or HTTP.
+        if (!phone.isRadioOn() || !phone.getServiceStateTracker().getDesiredPowerState()) {
+            Rlog.e(TAG, "Emergency SMS is not allowed while radio is/will be turned off.");
+            return CompletableFuture.completedFuture(DisconnectCause.POWER_OFF);
+        }
+
         mSmsPhone = phone;
         mIsTestEmergencyNumberForSms = isTestEmergencyNumber;
         mOngoingEmergencySmsIds.add(smsId);

@@ -114,6 +114,9 @@ java_library {
         enabled: true,
         shrink: true,
         obfuscate: false,
+        // TODO(b/421510447): Remove compat mode override after resolving
+        // issues with API signatures in full mode.
+        proguard_compatibility: true,
         proguard_flags_files: ["proguard.flags"],
     },
     lint: {

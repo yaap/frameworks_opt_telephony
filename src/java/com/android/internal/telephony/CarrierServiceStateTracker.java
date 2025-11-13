@@ -715,10 +715,15 @@ public class CarrierServiceStateTracker extends Handler {
          * notification
          */
         private Notification.Action createDoNotShowAgainAction(Context c) {
+            Intent broadcastIntent = new Intent(ACTION_NEVER_ASK_AGAIN);
+            if (mFeatureFlags.immediatelyProcessDoNotShowAgainBroadcast()) {
+                // Ensure immediate delivery of the broadcast to the receiver!
+                broadcastIntent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+            }
             final PendingIntent pendingIntent = PendingIntent.getBroadcast(
                     c,
                     0,
-                    new Intent(ACTION_NEVER_ASK_AGAIN),
+                    broadcastIntent,
                     PendingIntent.FLAG_IMMUTABLE);
             CharSequence text = "Do Not Ask Again";
             if (c != null && mFeatureFlags.dynamicDoNotAskAgainText()) {

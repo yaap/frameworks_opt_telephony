@@ -390,12 +390,13 @@ public class ControllerMetricsStats {
     }
 
     /** Capture the latest provisioned state for satellite service */
-    @VisibleForTesting
-    public void setIsProvisioned(boolean isProvisioned) {
-        logd("setIsProvisioned:" + isProvisioned);
+    public void setIsProvisioned(int carrierId, boolean isProvisioned, boolean isNtnOnlyCarrier) {
+        logd("setIsProvisioned: carrierId=" + carrierId + ", isProvisioned=" + isProvisioned);
         mSatelliteStats.onSatelliteControllerMetrics(
                 new SatelliteStats.SatelliteControllerParams.Builder()
+                        .setCarrierId(carrierId)
                         .setIsProvisioned(isProvisioned)
+                        .setIsNtnOnlyCarrier(isNtnOnlyCarrier)
                         .build());
     }
 
@@ -444,6 +445,32 @@ public class ControllerMetricsStats {
         mSatelliteStats.onSatelliteControllerMetrics(
                 new SatelliteStats.SatelliteControllerParams.Builder()
                         .setVersionOfSatelliteAccessControl(version)
+                        .build());
+    }
+
+    /**
+     * Report a current version of carrier roaming satellite config.
+     */
+    public void reportCurrentVersionOfCarrierRoamingSatelliteConfig(int cid, int version) {
+        logd("reportCurrentVersionOfCarrierRoamingSatelliteConfig: cid=" + cid
+                + " version=" + version);
+        mSatelliteStats.onSatelliteControllerMetrics(
+                new SatelliteStats.SatelliteControllerParams.Builder()
+                        .setCarrierId(cid)
+                        .setCarrierRoamingSatelliteConfigVersion(version)
+                        .build());
+    }
+
+    /**
+     * Report a current max allowed data mode.
+     */
+    public void reportCurrentMaxAllowedDataMode(int cid, int maxAllowedDataMode) {
+        logd("reportCurrentMaxAllowedDataMode: cid=" + cid
+                + " maxAllowedDataMode=" + maxAllowedDataMode);
+        mSatelliteStats.onSatelliteControllerMetrics(
+                new SatelliteStats.SatelliteControllerParams.Builder()
+                        .setCarrierId(cid)
+                        .setMaxAllowedDataMode(maxAllowedDataMode)
                         .build());
     }
 

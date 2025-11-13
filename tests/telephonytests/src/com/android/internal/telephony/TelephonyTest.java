@@ -20,8 +20,8 @@ import static com.android.internal.telephony.TelephonyStatsLog.CELLULAR_SERVICE_
 
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
@@ -61,8 +61,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.os.Message;
-import android.os.MessageQueue;
 import android.os.RegistrantList;
 import android.os.ServiceManager;
 import android.os.StrictMode;
@@ -564,11 +562,13 @@ public abstract class TelephonyTest {
         mDomainSelectionResolver = Mockito.mock(DomainSelectionResolver.class);
         mNullCipherNotifier = Mockito.mock(NullCipherNotifier.class);
 
-        lenient().doReturn(true).when(mFeatureFlags).hsumBroadcast();
-        lenient().doReturn(true).when(mFeatureFlags).hsumPackageManager();
         lenient().doReturn(true).when(mFeatureFlags).dataServiceCheck();
         lenient().doReturn(true).when(mFeatureFlags).phoneTypeCleanup();
         lenient().doReturn(true).when(mFeatureFlags).cleanupCdma();
+        lenient().doReturn(true).when(mFeatureFlags).threadShred();
+        lenient().doReturn(true).when(mFeatureFlags).dynamicModemShutdown();
+        lenient().doReturn(true).when(mFeatureFlags).dataServiceNotifyImsDataNetwork();
+        lenient().doReturn(true).when(mFeatureFlags).keepWfcOnApm();
 
         WorkerThread.reset();
         TelephonyManager.disableServiceHandleCaching();
@@ -600,6 +600,7 @@ public abstract class TelephonyTest {
                 .queryLocalInterface(anyString());
 
         mPhone.mCi = mSimulatedCommands;
+        mPhone.mCT = mCT;
         mCT.mCi = mSimulatedCommands;
         lenient().doReturn(mUiccCard).when(mPhone).getUiccCard();
         lenient().doReturn(mUiccCard).when(mUiccSlot).getUiccCard();

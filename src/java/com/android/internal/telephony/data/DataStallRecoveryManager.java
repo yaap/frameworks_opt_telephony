@@ -34,6 +34,7 @@ import android.os.Message;
 import android.os.SystemClock;
 import android.os.UserHandle;
 import android.provider.Settings;
+import android.telecom.TelecomManager;
 import android.telephony.Annotation.RadioPowerState;
 import android.telephony.Annotation.ValidationStatus;
 import android.telephony.CellSignalStrength;
@@ -344,6 +345,13 @@ public class DataStallRecoveryManager extends Handler {
                                     : "All InternetDataNetwork Disconnected");
                         }
                     }
+                    @Override
+                    public void onSimStateChanged(int simState) {
+                        if (simState == TelephonyManager.SIM_STATE_ABSENT) {
+                            log("SIM state is ABSENT, reset DSRM.");
+                            reset(true);
+                        }
+                    }
                 });
         mPhone.mCi.registerForRadioStateChanged(this, EVENT_RADIO_STATE_CHANGED, null);
 
@@ -549,8 +557,13 @@ public class DataStallRecoveryManager extends Handler {
     /**
      * Called when internet validation status passed. We will initialize all parameters.
      */
-    private void reset() {
-        mIsValidNetwork = true;
+    private void reset(boolean isSimAbsent) {
+        if (isSimAbsent) {
+            // state set to never passed due to SIM absent
+            mIsValidNetwork = false;
+        } else {
+            mIsValidNetwork = true;
+        }
         mRecoveryTriggered = false;
         mIsAttemptedAllSteps = false;
         mRadioStateChangedDuringDataStall = false;
@@ -578,7 +591,7 @@ public class DataStallRecoveryManager extends Handler {
         if (isValid) {
             // Broadcast intent that data stall recovered.
             broadcastDataStallDetected(mLastAction);
-            reset();
+            reset(false);
         } else if (isRecoveryNeeded(true)) {
             // Set the network as invalid, because recovery is needed
             mIsValidNetwork = false;
@@ -616,6 +629,12 @@ public class DataStallRecoveryManager extends Handler {
      */
     @VisibleForTesting
     public void setRecoveryAction(@RecoveryAction int action) {
+        if (!mIsValidNetwork && !isRecoveryAlreadyStarted()) {
+            log(
+                    "Skip set recovery action because the network still remains invalid and"
+                    + " recovery was not started yet.");
+            return;
+        }
         // Reset the validation count for action change
         if (mRecoveryAction != action) {
             mActionValidationCount = 0;
@@ -710,12 +729,8 @@ public class DataStallRecoveryManager extends Handler {
         // Put the bundled stats extras on the intent.
         intent.putExtra("EXTRA_DSRS_STATS_BUNDLE", bundle);
 
-        if (mFeatureFlags.hsumBroadcast()) {
-            mPhone.getContext().sendBroadcastAsUser(intent, UserHandle.ALL,
-                    READ_PRIVILEGED_PHONE_STATE);
-        } else {
-            mPhone.getContext().sendBroadcast(intent, READ_PRIVILEGED_PHONE_STATE);
-        }
+        mPhone.getContext().sendBroadcastAsUser(intent, UserHandle.ALL,
+                READ_PRIVILEGED_PHONE_STATE);
     }
 
     /** Recovery Action: RECOVERY_ACTION_GET_DATA_CALL_LIST */
@@ -800,6 +815,12 @@ public class DataStallRecoveryManager extends Handler {
             return false;
         }
 
+        // Skip recovery if it can cause an emergrncy call to drop
+        if (isInEmergencyCall()) {
+            logl("skip data stall recovery as there is in an emergency call");
+            return false;
+        }
+
         // Skip recovery if it can cause a call to drop
         if (!isPhoneStateIdle() && getRecoveryAction() > RECOVERY_ACTION_CLEANUP) {
             logl("skip data stall recovery as there is an active call");
@@ -860,6 +881,31 @@ public class DataStallRecoveryManager extends Handler {
             }
         }
         return true;
+    }
+
+    /**
+     * Checks if any of the available phones are currently in an emergency call
+     * or in Emergency Callback Mode (ECM).
+     *
+     * @return {@code true} if the device is currently in an emergency call
+     * or if at least one of the available phones is in ECM;
+     * {@code false} otherwise.
+     */
+    private boolean isInEmergencyCall() {
+        TelecomManager mTelecomManager = mPhone
+                .getContext().getSystemService(TelecomManager.class);
+        if (mTelecomManager != null && mTelecomManager.isInEmergencyCall()) {
+            logl("Emergency call detected on the device");
+            return true;
+        }
+
+        for (Phone phone : PhoneFactory.getPhones()) {
+            if (phone.isInEcm()) {
+                logl("ECM detected on phone" + phone.getPhoneId());
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

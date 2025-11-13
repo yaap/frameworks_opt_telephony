@@ -77,7 +77,6 @@ import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneConfigurationManager;
 import com.android.internal.telephony.PhoneFactory;
 import com.android.internal.telephony.RadioConfig;
-import com.android.internal.telephony.TelephonyIntents;
 import com.android.internal.telephony.data.DataNetworkController.NetworkRequestList;
 import com.android.internal.telephony.data.DataSettingsManager.DataSettingsManagerCallback;
 import com.android.internal.telephony.flags.FeatureFlags;
@@ -627,19 +626,14 @@ public class PhoneSwitcher extends Handler {
         };
         mAutoDataSwitchController = new AutoDataSwitchController(context, looper, this,
                 mFlags, mAutoDataSwitchCallback);
-        if (!mFlags.ddsCallback()) {
-            mContext.registerReceiver(mDefaultDataChangedReceiver,
-                    new IntentFilter(TelephonyIntents.ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED));
-        } else {
-            mSubscriptionManagerService.registerCallback(new SubscriptionManagerServiceCallback(
-                    this::post) {
-                @Override
-                public void onDefaultDataSubscriptionChanged(int subId) {
-                    evaluateIfImmediateDataSwitchIsNeeded("default data sub changed to " + subId,
-                            DataSwitch.Reason.DATA_SWITCH_REASON_MANUAL);
-                }
-            });
-        }
+        mSubscriptionManagerService.registerCallback(new SubscriptionManagerServiceCallback(
+                this::post) {
+            @Override
+            public void onDefaultDataSubscriptionChanged(int subId) {
+                evaluateIfImmediateDataSwitchIsNeeded("default data sub changed to " + subId,
+                        DataSwitch.Reason.DATA_SWITCH_REASON_MANUAL);
+            }
+        });
 
         PhoneConfigurationManager.registerForMultiSimConfigChange(
                 this, EVENT_MULTI_SIM_CONFIG_CHANGED, null);

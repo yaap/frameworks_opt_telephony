@@ -24,12 +24,15 @@ import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import android.os.AsyncResult;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Message;
+import android.os.SystemProperties;
 import android.preference.PreferenceManager;
 import android.telephony.TelephonyManager;
 import android.telephony.UiccCardInfo;
@@ -72,6 +75,7 @@ public class UiccControllerTest extends TelephonyTest {
     private EuiccCard mMockEuiccCard;
     private UiccProfile mMockProfile;
     private UiccPort mMockPort;
+    private UiccControllerTest mSpyUiccControllerTest;
 
     private IccCardApplicationStatus composeUiccApplicationStatus(
             IccCardApplicationStatus.AppType appType,
@@ -122,6 +126,7 @@ public class UiccControllerTest extends TelephonyTest {
         mIccCardStatus.mSlotPortMapping = new IccSlotPortMapping();
         mIccCardStatus.mSlotPortMapping.mPhysicalSlotIndex = 0;
         mUiccControllerUT = UiccController.make(mContext, mFeatureFlags);
+        mSpyUiccControllerTest = spy(this);
         // reset sLastSlotStatus so that onGetSlotStatusDone always sees a change in the slot status
         mUiccControllerUT.sLastSlotStatus = null;
         processAllMessages();
@@ -146,6 +151,7 @@ public class UiccControllerTest extends TelephonyTest {
         replaceInstance(UiccController.class, "mInstance", null, null);
         mUiccControllerUT.dispose();
         mUiccControllerUT = UiccController.make(mContext, mFeatureFlags);
+        mSpyUiccControllerTest = spy(this);
         processAllMessages();
     }
 
@@ -721,5 +727,40 @@ public class UiccControllerTest extends TelephonyTest {
 
         // status should be treated different from last status
         assertTrue(mUiccControllerUT.slotStatusChanged(status));
+    }
+
+    @Test
+    @SmallTest
+    public void testNumPhysicalSlotsAdjusted() throws Exception {
+        // Mock first API level to be older than V
+        doReturn(Build.VERSION_CODES.TIRAMISU).when(mSpyUiccControllerTest).getFirstApiLevel();
+        // Mock the resource config_num_physical_slots
+        mContextFixture.putIntResource(com.android.internal.R.integer.config_num_physical_slots,
+                PHONE_COUNT - 1);
+
+        // Verify that numPhysicalSlots is adjusted to PHONE_COUNT
+        assertEquals(PHONE_COUNT, mUiccControllerUT.getUiccSlots().length);
+    }
+
+    @Test
+    @SmallTest
+    public void testNumPhysicalSlotsNotAdjustedForNewerApiLevel() throws Exception {
+        // Mock first API level to be newer than V
+        doReturn(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+                .when(mSpyUiccControllerTest).getFirstApiLevel();
+        // Mock the resource config_num_physical_slots
+        mContextFixture.putIntResource(com.android.internal.R.integer.config_num_physical_slots,
+                PHONE_COUNT);
+
+        // Verify that numPhysicalSlots is not adjusted
+        assertEquals(PHONE_COUNT, mUiccControllerUT.getUiccSlots().length);
+    }
+
+    /**
+     * Wrapper method to get the first api level to allow mocking it in tests.
+     */
+    public int getFirstApiLevel() {
+        return SystemProperties.getInt(
+                "ro.vendor.api_level", Build.VERSION.DEVICE_INITIAL_SDK_INT);
     }
 }

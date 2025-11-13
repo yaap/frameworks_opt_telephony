@@ -118,6 +118,8 @@ public class SatelliteStatsTest extends TelephonyTest {
                         .setCountOfOutgoingDatagramTypeSmsFail(4)
                         .setCountOfIncomingDatagramTypeSmsSuccess(5)
                         .setCountOfIncomingDatagramTypeSmsFail(6)
+                        .setCarrierRoamingSatelliteConfigVersion(19)
+                        .setMaxAllowedDataMode(0)
                         .build();
 
         mSatelliteStats.onSatelliteControllerMetrics(param);
@@ -203,6 +205,11 @@ public class SatelliteStatsTest extends TelephonyTest {
                 stats.countOfIncomingDatagramTypeSmsSuccess);
         assertEquals(param.getCountOfIncomingDatagramTypeSmsSuccess(),
                 stats.countOfIncomingDatagramTypeSmsSuccess);
+        assertEquals(
+                SatelliteStats.SatelliteControllerParams.getCarrierRoamingSatelliteConfigVersion(),
+                stats.carrierRoamingSatelliteConfigVersion);
+        assertEquals(SatelliteStats.SatelliteControllerParams.getMaxAllowedDataMode(),
+                stats.maxAllowedDataMode);
 
         verifyNoMoreInteractions(mPersistAtomsStorage);
     }

@@ -2815,6 +2815,74 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
         }
     }
 
+    @Test
+    public void testAllowedImsServicesForVowifi() {
+        doReturn(true).when(mFeatureFlags).allowedServices();
+        ImsManager.ImsStatsCallback imsStatsCallback = mCTUT.getImsStatsCallback();
+        when(mImsManager.isWfcRoamingEnabledByUser()).thenReturn(false);
+        imsStatsCallback.onEnabledMmTelCapabilitiesChanged(
+                MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE,
+                ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN, /*isEnabled= */ true);
+        verify(mImsPhone, times(1)).setAllowedImsServices(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN), eq(true), eq(true));
+
+        imsStatsCallback.onEnabledMmTelCapabilitiesChanged(
+                MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE,
+                ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN, /*isEnabled= */ false);
+        verify(mImsPhone, times(1)).setAllowedImsServices(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN), eq(false), eq(true));
+
+        when(mImsManager.isWfcRoamingEnabledByUser()).thenReturn(true);
+        imsStatsCallback.onEnabledMmTelCapabilitiesChanged(
+                MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE,
+                ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN, /*isEnabled= */ true);
+        verify(mImsPhone, times(1)).setAllowedImsServices(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN), eq(true), eq(false));
+
+        imsStatsCallback.onEnabledMmTelCapabilitiesChanged(
+                MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE,
+                ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN, /*isEnabled= */ false);
+        verify(mImsPhone, times(2)).setAllowedImsServices(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN), eq(false), eq(true));
+    }
+
+    @Test
+    public void testAllowedImsServicesForVolte() {
+        doReturn(true).when(mFeatureFlags).allowedServices();
+        ImsManager.ImsStatsCallback imsStatsCallback = mCTUT.getImsStatsCallback();
+        PersistableBundle bundle = mContextFixture.getCarrierConfigBundle();
+        bundle.putBoolean(CarrierConfigManager.KEY_CARRIER_CONFIG_APPLIED_BOOL, true);
+        bundle.putBoolean(
+                CarrierConfigManager.ImsVoice.KEY_CARRIER_VOLTE_ROAMING_AVAILABLE_BOOL, true);
+        sendCarrierConfigChanged();
+        verify(mImsPhone, never()).setAllowedImsServices(anyInt(), anyBoolean(), anyBoolean());
+
+        imsStatsCallback.onEnabledMmTelCapabilitiesChanged(
+                MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE,
+                ImsRegistrationImplBase.REGISTRATION_TECH_LTE, /*isEnabled= */ true);
+        verify(mImsPhone, times(1)).setAllowedImsServices(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_LTE), eq(true), eq(false));
+
+        imsStatsCallback.onEnabledMmTelCapabilitiesChanged(
+                MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE,
+                ImsRegistrationImplBase.REGISTRATION_TECH_LTE, /*isEnabled= */ false);
+        verify(mImsPhone, times(1)).setAllowedImsServices(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_LTE), eq(false), eq(true));
+
+        bundle.putBoolean(CarrierConfigManager.KEY_CARRIER_CONFIG_APPLIED_BOOL, true);
+        bundle.putBoolean(
+                CarrierConfigManager.ImsVoice.KEY_CARRIER_VOLTE_ROAMING_AVAILABLE_BOOL, false);
+        sendCarrierConfigChanged();
+        verify(mImsPhone, times(2)).setAllowedImsServices(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_LTE), eq(false), eq(true));
+
+        imsStatsCallback.onEnabledMmTelCapabilitiesChanged(
+                MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE,
+                ImsRegistrationImplBase.REGISTRATION_TECH_LTE, /*isEnabled= */ true);
+        verify(mImsPhone, times(1)).setAllowedImsServices(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_LTE), eq(true), eq(true));
+    }
+
     private ImsPhoneConnection placeCallAndMakeActive() {
         ImsPhoneConnection connection = placeCall();
         ImsCall imsCall = connection.getImsCall();

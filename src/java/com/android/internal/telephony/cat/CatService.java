@@ -19,6 +19,7 @@ package com.android.internal.telephony.cat;
 import static com.android.internal.telephony.cat.CatCmdMessage.SetupEventListConstants.IDLE_SCREEN_AVAILABLE_EVENT;
 import static com.android.internal.telephony.cat.CatCmdMessage.SetupEventListConstants.LANGUAGE_SELECTION_EVENT;
 import static com.android.internal.telephony.cat.CatCmdMessage.SetupEventListConstants.USER_ACTIVITY_EVENT;
+import static com.android.internal.telephony.uicc.IccCardApplicationStatus.AppType.APPTYPE_UNKNOWN;
 
 import android.app.Activity;
 import android.app.ActivityManager;
@@ -52,6 +53,7 @@ import com.android.internal.telephony.ProxyController;
 import com.android.internal.telephony.SmsController;
 import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.flags.FeatureFlagsImpl;
+import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.subscription.SubscriptionManagerService;
 import com.android.internal.telephony.uicc.IccCardStatus.CardState;
 import com.android.internal.telephony.uicc.IccFileHandler;
@@ -218,6 +220,34 @@ public class CatService extends Handler implements AppInterface {
         mContext.registerReceiver(mSmsBroadcastReceiver, new IntentFilter(SMS_SENT_ACTION));
     }
 
+    private static UiccCardApplication getValidUiccApplication(UiccProfile uiccProfile) {
+        UiccCardApplication ca = null;
+        if (uiccProfile != null) {
+            /* Since Cat is not tied to any application, but rather is Uicc application
+             * in itself - just get first FileHandler and IccRecords object
+             */
+            ca = uiccProfile.getApplicationIndex(0);
+
+            /**
+             * Case where the SIMs reporting "UNKNOWN" application type.
+             * If an "UNKNOWN" application is detected, its file handler won't be initialized
+             * correctly.
+             * To avoid issues, always use the file handler from a known, valid SIM application.
+             */
+            if (Flags.catServiceCreationFix() && ca.getType() == APPTYPE_UNKNOWN
+                    && uiccProfile.getNumApplications() > 1) {
+                for (int i = 1; i < uiccProfile.getNumApplications(); i++) {
+                    UiccCardApplication tmpCa = uiccProfile.getApplicationIndex(i);
+                    if (tmpCa.getType() != APPTYPE_UNKNOWN) {
+                        ca = tmpCa;
+                        break;
+                    }
+                }
+            }
+        }
+        return ca;
+    }
+
     /**
      * Used for instantiating the Service from the Card.
      *
@@ -238,15 +268,10 @@ public class CatService extends Handler implements AppInterface {
         UiccCardApplication ca = null;
         IccFileHandler fh = null;
         IccRecords ir = null;
-        if (uiccProfile != null) {
-            /* Since Cat is not tied to any application, but rather is Uicc application
-             * in itself - just get first FileHandler and IccRecords object
-             */
-            ca = uiccProfile.getApplicationIndex(0);
-            if (ca != null) {
-                fh = ca.getIccFileHandler();
-                ir = ca.getIccRecords();
-            }
+        ca = getValidUiccApplication(uiccProfile);
+        if (ca != null) {
+            fh = ca.getIccFileHandler();
+            ir = ca.getIccRecords();
         }
 
         synchronized (sInstanceLock) {
@@ -722,11 +747,7 @@ public class CatService extends Handler implements AppInterface {
         intent.setComponent(AppInterface.getDefaultSTKApplication());
         CatLog.d(this, "Sending CmdMsg: " + cmdMsg+ " on slotid:" + mSlotId);
 
-        if (sFlags.hsumBroadcast()) {
-            mContext.sendBroadcastAsUser(intent, UserHandle.ALL, AppInterface.STK_PERMISSION);
-        } else {
-            mContext.sendBroadcast(intent, AppInterface.STK_PERMISSION);
-        }
+        mContext.sendBroadcastAsUser(intent, UserHandle.ALL, AppInterface.STK_PERMISSION);
     }
 
     /**
@@ -740,11 +761,7 @@ public class CatService extends Handler implements AppInterface {
         Intent intent = new Intent(AppInterface.CAT_SESSION_END_ACTION);
         intent.putExtra("SLOT_ID", mSlotId);
         intent.setComponent(AppInterface.getDefaultSTKApplication());
-        if (sFlags.hsumBroadcast()) {
-            mContext.sendBroadcastAsUser(intent, UserHandle.ALL, AppInterface.STK_PERMISSION);
-        } else {
-            mContext.sendBroadcast(intent, AppInterface.STK_PERMISSION);
-        }
+        mContext.sendBroadcastAsUser(intent, UserHandle.ALL, AppInterface.STK_PERMISSION);
     }
 
 
@@ -1108,11 +1125,7 @@ public class CatService extends Handler implements AppInterface {
         intent.putExtra("SLOT_ID", mSlotId);
         CatLog.d(this, "Sending Card Status: "
                 + cardState + " " + "cardPresent: " + cardPresent +  "SLOT_ID: " +  mSlotId);
-        if (sFlags.hsumBroadcast()) {
-            mContext.sendBroadcastAsUser(intent, UserHandle.ALL, AppInterface.STK_PERMISSION);
-        } else {
-            mContext.sendBroadcast(intent, AppInterface.STK_PERMISSION);
-        }
+        mContext.sendBroadcastAsUser(intent, UserHandle.ALL, AppInterface.STK_PERMISSION);
     }
 
     private void broadcastAlphaMessage(String alphaString) {
@@ -1122,11 +1135,7 @@ public class CatService extends Handler implements AppInterface {
         intent.putExtra(AppInterface.ALPHA_STRING, alphaString);
         intent.putExtra("SLOT_ID", mSlotId);
         intent.setComponent(AppInterface.getDefaultSTKApplication());
-        if (sFlags.hsumBroadcast()) {
-            mContext.sendBroadcastAsUser(intent, UserHandle.ALL, AppInterface.STK_PERMISSION);
-        } else {
-            mContext.sendBroadcast(intent, AppInterface.STK_PERMISSION);
-        }
+        mContext.sendBroadcastAsUser(intent, UserHandle.ALL, AppInterface.STK_PERMISSION);
     }
 
     @Override
@@ -1318,15 +1327,9 @@ public class CatService extends Handler implements AppInterface {
             Context context, UiccProfile uiccProfile) {
         UiccCardApplication ca = null;
         IccRecords ir = null;
-
-        if (uiccProfile != null) {
-            /* Since Cat is not tied to any application, but rather is Uicc application
-             * in itself - just get first FileHandler and IccRecords object
-             */
-            ca = uiccProfile.getApplicationIndex(0);
-            if (ca != null) {
-                ir = ca.getIccRecords();
-            }
+        ca = getValidUiccApplication(uiccProfile);
+        if (ca != null) {
+            ir = ca.getIccRecords();
         }
 
         synchronized (sInstanceLock) {

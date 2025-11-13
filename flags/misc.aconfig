@@ -1,15 +1,6 @@
 package: "com.android.internal.telephony.flags"
 container: "system"
 
-# OWNER=tjstuart TARGET=24Q3
-flag {
-  name: "do_not_override_precise_label"
-  namespace: "telephony"
-  description: "When set, Telecom will not override the precise label for certain disconnect causes."
-  bug: "296968778"
-  is_fixed_read_only: true
-}
-
 # OWNER=tnd TARGET=24Q1
 flag {
   name: "log_mms_sms_database_access_info"
@@ -33,14 +24,6 @@ flag {
   namespace: "telephony"
   description: "Enable system api isWpsCallNumber. Its an utility api to check if the dialed number is for Wireless Priority Service call."
   bug: "304272356"
-}
-
-# OWNER=grantmenke TARGET=24Q3
-flag {
-  name: "ensure_access_to_call_settings_is_restricted"
-  namespace: "telephony"
-  description: "Check if access to mobile network configs restricted before displaying call options"
-  bug: "309655251"
 }
 
 # OWNER=rambowang TARGET=24Q3
@@ -87,17 +70,6 @@ flag {
     }
 }
 
-# OWNER=sasindran TARGET=24Q3
-flag {
-    name: "use_relaxed_id_match"
-    namespace: "telephony"
-    description: "This flag supports relaxed id match for radio state changes"
-    bug:"336916327"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
 # OWNER=joonhunshin TARGET=24Q4
 flag {
     name: "use_carrier_config_for_cfnry_time_via_mmi"
@@ -109,34 +81,12 @@ flag {
     }
 }
 
-# OWNER=jackyu TARGET=25Q2
-flag {
-    name: "hsum_broadcast"
-    namespace: "telephony"
-    description: "Fixed the bug that broadcast intent is only sent to the system user."
-    bug:"362554272"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
 # OWNER=rambowang TARGET=25Q2
 flag {
     name: "support_carrier_services_for_hsum"
     namespace: "telephony"
     description: "Support Carrier Services (APIs) for HSUM."
     bug:"345522246"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-# OWNER=jackyu TARGET=25Q2
-flag {
-    name: "hsum_package_manager"
-    namespace: "telephony"
-    description: "Fixed the bug that package manager is not for the right user"
-    bug:"356827794"
     metadata {
         purpose: PURPOSE_BUGFIX
     }
@@ -210,12 +160,23 @@ flag {
     }
 }
 
-# OWNER=jackyu TARGET=25Q2
+# OWNER=tjstuart TARGET=25Q3
 flag {
-    name: "carrier_config_changed_callback_fix"
+    name: "immediately_process_do_not_show_again_broadcast"
     namespace: "telephony"
-    description: "Carrier config callback race condition fix"
-    bug:"375526692"
+    description: "Ensure the Do Not Show Again broadcast is immediately processed by receiver"
+    bug:"368690328"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=rmao TARGET=26Q1
+flag {
+    name: "dynamic_modem_shutdown"
+    namespace: "telephony"
+    description: "Allow shutdown and turn on the modem while the overall system is on"
+    bug:"416563298"
     metadata {
         purpose: PURPOSE_BUGFIX
     }

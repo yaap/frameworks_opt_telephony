@@ -1603,6 +1603,39 @@ public class EmergencyStateTrackerTest extends TelephonyTest {
 
     @Test
     @SmallTest
+    public void testStartEmergencySmsWhileRadioOff() {
+        EmergencyStateTracker emergencyStateTracker = setupEmergencyStateTracker(
+                /* isSuplDdsSwitchRequiredForEmergencyCall= */ true);
+        Phone phone0 = setupTestPhoneForEmergencyCall(/* isRoaming= */ false,
+                /* isRadioOn= */ false);
+        CompletableFuture<Integer> future = emergencyStateTracker.startEmergencySms(phone0,
+                TEST_SMS_ID, false);
+
+        assertTrue(future.isDone());
+        // Returns DisconnectCause#POWER_OFF immediately.
+        assertEquals(future.getNow(DisconnectCause.ERROR_UNSPECIFIED),
+                Integer.valueOf(DisconnectCause.POWER_OFF));
+    }
+
+    @Test
+    @SmallTest
+    public void testStartEmergencySmsWhileRadioBeingTurnedOff() {
+        EmergencyStateTracker emergencyStateTracker = setupEmergencyStateTracker(
+                /* isSuplDdsSwitchRequiredForEmergencyCall= */ true);
+        Phone phone0 = setupTestPhoneForEmergencyCall(/* isRoaming= */ false,
+                /* isRadioOn= */ true);
+        when(mSST.getDesiredPowerState()).thenReturn(false);
+        CompletableFuture<Integer> future = emergencyStateTracker.startEmergencySms(phone0,
+                TEST_SMS_ID, false);
+
+        assertTrue(future.isDone());
+        // Returns DisconnectCause#POWER_OFF immediately.
+        assertEquals(future.getNow(DisconnectCause.ERROR_UNSPECIFIED),
+                Integer.valueOf(DisconnectCause.POWER_OFF));
+    }
+
+    @Test
+    @SmallTest
     public void testStartEmergencyCallActiveAndSmsOnSamePhone() {
         EmergencyStateTracker emergencyStateTracker = setupEmergencyStateTracker(
                 /* isSuplDdsSwitchRequiredForEmergencyCall= */ true);
@@ -3296,6 +3329,8 @@ public class EmergencyStateTrackerTest extends TelephonyTest {
 
         // Airplane mode is ON, but radio power state is still ON
         Settings.Global.putInt(mContext.getContentResolver(), Settings.Global.AIRPLANE_MODE_ON, 1);
+        // Radio is being turning off.
+        when(mSST.getDesiredPowerState()).thenReturn(false);
 
         CompletableFuture<Integer> unused = emergencyStateTracker.startEmergencyCall(testPhone,
                 mTestConnection1, false);
@@ -3694,6 +3729,7 @@ public class EmergencyStateTrackerTest extends TelephonyTest {
         doReturn(2).when(mTelephonyManagerProxy).getPhoneCount();
         when(mPhoneFactoryProxy.getPhones()).thenReturn(phones.toArray(new Phone[phones.size()]));
         testPhone0.getServiceState().setRoaming(isRoaming);
+        when(mSST.getDesiredPowerState()).thenReturn(isRadioOn);
         return testPhone0;
     }
 

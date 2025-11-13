@@ -790,11 +790,7 @@ public class MultiSimSettingController extends Handler {
         intent.putExtra(EXTRA_DEFAULT_SUBSCRIPTION_SELECT_TYPE, type);
         intent.putExtra(EXTRA_SUBSCRIPTION_ID, defaultSubId);
 
-        if (mFeatureFlags.hsumBroadcast()) {
-            mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
-        } else {
-            mContext.sendBroadcast(intent);
-        }
+        mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
     }
 
     private void sendSubChangeNotificationIfNeeded(int change, boolean dataSelected,
@@ -832,11 +828,7 @@ public class MultiSimSettingController extends Handler {
             if (simCombinationParams.mWarningType == EXTRA_SIM_COMBINATION_WARNING_TYPE_DUAL_CDMA) {
                 intent.putExtra(EXTRA_SIM_COMBINATION_NAMES, simCombinationParams.mSimNames);
             }
-            if (mFeatureFlags.hsumBroadcast()) {
-                mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
-            } else {
-                mContext.sendBroadcast(intent);
-            }
+            mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
         }
     }
 

@@ -87,6 +87,7 @@ import android.util.IndentingPrintWriter;
 import android.util.LocalLog;
 import android.util.SparseArray;
 import android.util.SparseBooleanArray;
+import android.util.SparseIntArray;
 
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.Phone;
@@ -333,6 +334,8 @@ public class DataNetworkController extends Handler {
 
     /** {@code true} indicating at least one data network exists. */
     private boolean mAnyDataNetworkExisting;
+    /** {@code true} indicating at least one cellular data network exists. */
+    private boolean mAnyCellularDataNetworkExisting;
 
     /**
      * Contain the last 10 data networks that were connected. This is for debugging purposes only.
@@ -396,9 +399,12 @@ public class DataNetworkController extends Handler {
     @NonNull
     private final SparseArray<ImsStateCallback> mImsStateCallbacks = new SparseArray<>();
 
-    /** Registered IMS features. Unregistered IMS features are removed from the set. */
-    @NonNull
-    private final Set<Integer> mRegisteredImsFeatures = new ArraySet<>();
+
+    /**
+     * The transport on which IMS features are registered. Key is the IMS feature, value is the
+     * transport. Unregistered IMS features are removed from the set.
+     */
+    private final @NonNull SparseIntArray mRegisteredImsFeaturesTransport = new SparseIntArray(2);
 
     /** IMS feature package names. Key is the IMS feature, value is the package name. */
     @NonNull
@@ -666,7 +672,8 @@ public class DataNetworkController extends Handler {
          * existing regardless of its state. {@code false} indicating all data networks are
          * disconnected.
          */
-        public void onAnyDataNetworkExistingChanged(boolean anyDataExisting) {}
+        public void onAnyDataNetworkExistingChanged(boolean anyDataExisting,
+                boolean anyCellularDataExisting) {}
 
         /**
          * Called when {@link SubscriptionPlan}s change or an unmetered or congested subscription
@@ -702,6 +709,13 @@ public class DataNetworkController extends Handler {
          * @param qosBearerSessions The latest QOS bearer sessions.
          */
         public void onQosSessionsChanged(@NonNull List<QosBearerSession> qosBearerSessions) {}
+
+        /**
+         * Called when the SIM state changed.
+         *
+         * @param simState The SIM state.
+         */
+        public void onSimStateChanged(@SimState int simState) {}
     }
 
     /**
@@ -904,12 +918,9 @@ public class DataNetworkController extends Handler {
         log("DataNetworkController created.");
 
         mAccessNetworksManager = phone.getAccessNetworksManager();
-        mDataServiceManagers.put(AccessNetworkConstants.TRANSPORT_TYPE_WWAN,
-                new DataServiceManager(mPhone, looper, AccessNetworkConstants.TRANSPORT_TYPE_WWAN));
-        if (!mAccessNetworksManager.isInLegacyMode()) {
-            mDataServiceManagers.put(AccessNetworkConstants.TRANSPORT_TYPE_WLAN,
-                    new DataServiceManager(mPhone, looper,
-                            AccessNetworkConstants.TRANSPORT_TYPE_WLAN));
+        for (int transport : mAccessNetworksManager.getAvailableTransports()) {
+            mDataServiceManagers.put(transport,
+                    new DataServiceManager(mPhone, looper, transport, featureFlags));
         }
 
         mDataConfigManager = new DataConfigManager(mPhone, looper, featureFlags);
@@ -931,7 +942,7 @@ public class DataNetworkController extends Handler {
 
         mDataSettingsManager = TelephonyComponentFactory.getInstance().inject(
                 DataSettingsManager.class.getName())
-                .makeDataSettingsManager(mPhone, this, mFeatureFlags, looper,
+                .makeDataSettingsManager(mPhone, this, mDataServiceManagers, mFeatureFlags, looper,
                         new DataSettingsManagerCallback(this::post) {
                             @Override
                             public void onDataEnabledChanged(boolean enabled,
@@ -1217,10 +1228,18 @@ public class DataNetworkController extends Handler {
             case EVENT_REGISTER_DATA_NETWORK_CONTROLLER_CALLBACK:
                 DataNetworkControllerCallback callback = (DataNetworkControllerCallback) msg.obj;
                 mDataNetworkControllerCallbacks.add(callback);
-                // Notify upon registering if no data networks currently exist.
-                if (mDataNetworkList.isEmpty()) {
-                    callback.invokeFromExecutor(
-                            () -> callback.onAnyDataNetworkExistingChanged(false));
+                if (mFeatureFlags.keepWfcOnApm()) {
+                    // Notify upon registering if no data networks currently exist.
+                    if (!mAnyDataNetworkExisting || !mAnyCellularDataNetworkExisting) {
+                        callback.onAnyDataNetworkExistingChanged(mAnyDataNetworkExisting,
+                                mAnyCellularDataNetworkExisting);
+                    }
+                } else {
+                    // Notify upon registering if no data networks currently exist.
+                    if (mDataNetworkList.isEmpty()) {
+                        callback.invokeFromExecutor(
+                                () -> callback.onAnyDataNetworkExistingChanged(false, false));
+                    }
                 }
                 break;
             case EVENT_UNREGISTER_DATA_NETWORK_CONTROLLER_CALLBACK:
@@ -1560,12 +1579,53 @@ public class DataNetworkController extends Handler {
     /**
      * @return {@code true} if all data networks are disconnected.
      */
-    public boolean areAllDataDisconnected() {
-        if (!mDataNetworkList.isEmpty()) {
-            log("areAllDataDisconnected false due to: " + mDataNetworkList.stream()
-                    .map(DataNetwork::name).collect(Collectors.joining(", ")));
+    public boolean areAllDataDisconnected(boolean cellularOnly) {
+        if (mFeatureFlags.keepWfcOnApm() && cellularOnly) {
+            List<DataNetwork> cellularNetworks = getCellularDataNetworks();
+            if (!cellularNetworks.isEmpty()) {
+                log("areAllCellular DataDisconnected false due to: " + cellularNetworks.stream()
+                        .map(DataNetwork::name).collect(Collectors.joining(", ")));
+            }
+            return cellularNetworks.isEmpty();
+        } else {
+            if (!mDataNetworkList.isEmpty()) {
+                log("areAllDataDisconnected false due to: " + mDataNetworkList.stream()
+                        .map(DataNetwork::name).collect(Collectors.joining(", ")));
+            }
+            return mDataNetworkList.isEmpty();
         }
-        return mDataNetworkList.isEmpty();
+    }
+
+    /**
+     * Notify the first cellular sustained data network came into existence, or the last cellular
+     * data network disconnected.
+     * @param anyCellularNetworkExists Whether exists any cellular data networks.
+     */
+    private void updateCellularDataNetworkExistence(boolean anyDataNetworkExisting,
+            boolean anyCellularNetworkExists) {
+        if (anyDataNetworkExisting != mAnyDataNetworkExisting
+                || anyCellularNetworkExists != mAnyCellularDataNetworkExisting) {
+            mAnyDataNetworkExisting = anyDataNetworkExisting;
+            mAnyCellularDataNetworkExisting = anyCellularNetworkExists;
+            mDataNetworkControllerCallbacks.forEach(callback -> callback.invokeFromExecutor(
+                    () -> callback.onAnyDataNetworkExistingChanged(mAnyDataNetworkExisting,
+                            mAnyCellularDataNetworkExisting)));
+        }
+    }
+
+
+    /**
+     * @return A list of existing data networks that are/will be sustained by cellular transport.
+     */
+    private @NonNull List<DataNetwork> getCellularDataNetworks() {
+        return mDataNetworkList.stream().filter(dataNetwork ->
+                        // WWAN networks that don't intend to handover.
+                (dataNetwork.getTransport() == AccessNetworkConstants.TRANSPORT_TYPE_WWAN
+                                && !dataNetwork.isHandoverInProgress())
+                        // WLAN networks that intend to handover.
+                        || (dataNetwork.getTransport() == AccessNetworkConstants.TRANSPORT_TYPE_WLAN
+                        && dataNetwork.isHandoverInProgress()))
+                .toList();
     }
 
     /**
@@ -2091,6 +2151,16 @@ public class DataNetworkController extends Handler {
                     && mDataRetryManager.isDataNetworkHandoverRetryStopped(dataNetwork)) {
                 evaluation.addDataDisallowedReason(DataDisallowedReason.HANDOVER_RETRY_STOPPED);
             }
+        }
+
+        // Check if the request is preferred on cellular and radio is/will be turned off.
+        // Using getDesiredPowerState() instead of isRadioOn() because we want to
+        // tear down the network if it was temporarily exempted due to handover.
+        if (mFeatureFlags.keepWfcOnApm()
+                && dataNetwork.getTransport() == AccessNetworkConstants.TRANSPORT_TYPE_WWAN
+                && (!mPhone.getServiceStateTracker().getDesiredPowerState()
+                || !mPhone.getServiceStateTracker().isRadioOn())) {
+            evaluation.addDataDisallowedReason(DataDisallowedReason.RADIO_POWER_OFF);
         }
 
         // Check if data is disabled
@@ -2656,14 +2726,15 @@ public class DataNetworkController extends Handler {
                     public void onRegistered(@NonNull ImsRegistrationAttributes attributes) {
                         log("IMS " + DataUtils.imsFeatureToString(imsFeature)
                                 + " registered. Attributes=" + attributes);
-                        mRegisteredImsFeatures.add(imsFeature);
+                        mRegisteredImsFeaturesTransport.put(
+                                imsFeature, attributes.getTransportType());
                     }
 
                     @Override
                     public void onUnregistered(@NonNull ImsReasonInfo info) {
                         log("IMS " + DataUtils.imsFeatureToString(imsFeature)
                                 + " deregistered. Info=" + info);
-                        mRegisteredImsFeatures.remove(imsFeature);
+                        mRegisteredImsFeaturesTransport.delete(imsFeature);
                         evaluatePendingImsDeregDataNetworks();
                     }
                 };
@@ -3039,10 +3110,17 @@ public class DataNetworkController extends Handler {
                     }
                 }
         ));
-        if (!mAnyDataNetworkExisting) {
-            mAnyDataNetworkExisting = true;
-            mDataNetworkControllerCallbacks.forEach(callback -> callback.invokeFromExecutor(
-                    () -> callback.onAnyDataNetworkExistingChanged(mAnyDataNetworkExisting)));
+        if (mFeatureFlags.keepWfcOnApm()) {
+            updateCellularDataNetworkExistence(true/*any data network*/,
+                    transport == AccessNetworkConstants.TRANSPORT_TYPE_WWAN
+                            || mAnyCellularDataNetworkExisting/*any cellular network*/);
+        } else {
+            if (!mAnyDataNetworkExisting) {
+                mAnyDataNetworkExisting = true;
+                mDataNetworkControllerCallbacks.forEach(callback -> callback.invokeFromExecutor(
+                        () -> callback.onAnyDataNetworkExistingChanged(
+                                mAnyDataNetworkExisting, false)));
+            }
         }
     }
 
@@ -3061,10 +3139,16 @@ public class DataNetworkController extends Handler {
                 + DataFailCause.toString(cause) + ", retryDelayMillis=" + retryDelayMillis + "ms.");
         mDataNetworkList.remove(dataNetwork);
         trackSetupDataCallFailure(dataNetwork.getTransport(), cause);
-        if (mAnyDataNetworkExisting && mDataNetworkList.isEmpty()) {
-            mAnyDataNetworkExisting = false;
-            mDataNetworkControllerCallbacks.forEach(callback -> callback.invokeFromExecutor(
-                    () -> callback.onAnyDataNetworkExistingChanged(mAnyDataNetworkExisting)));
+        if (mFeatureFlags.keepWfcOnApm()) {
+            updateCellularDataNetworkExistence(!mDataNetworkList.isEmpty(),
+                    !getCellularDataNetworks().isEmpty());
+        } else {
+            if (mAnyDataNetworkExisting && mDataNetworkList.isEmpty()) {
+                mAnyDataNetworkExisting = false;
+                mDataNetworkControllerCallbacks.forEach(callback -> callback.invokeFromExecutor(
+                        () -> callback.onAnyDataNetworkExistingChanged(
+                                mAnyDataNetworkExisting, false/*placeholder*/)));
+            }
         }
 
         requestList.removeIf(request -> !mAllNetworkRequestList.contains(request));
@@ -3402,11 +3486,17 @@ public class DataNetworkController extends Handler {
             mImsDataNetworkState = TelephonyManager.DATA_DISCONNECTED;
         }
 
-        if (mAnyDataNetworkExisting && mDataNetworkList.isEmpty()) {
-            log("All data networks disconnected now.");
-            mAnyDataNetworkExisting = false;
-            mDataNetworkControllerCallbacks.forEach(callback -> callback.invokeFromExecutor(
-                    () -> callback.onAnyDataNetworkExistingChanged(mAnyDataNetworkExisting)));
+        if (mFeatureFlags.keepWfcOnApm()) {
+            updateCellularDataNetworkExistence(!mDataNetworkList.isEmpty(),
+                    !getCellularDataNetworks().isEmpty());
+        } else {
+            if (mAnyDataNetworkExisting && mDataNetworkList.isEmpty()) {
+                log("All data networks disconnected now.");
+                mAnyDataNetworkExisting = false;
+                mDataNetworkControllerCallbacks.forEach(callback -> callback.invokeFromExecutor(
+                        () -> callback.onAnyDataNetworkExistingChanged(
+                                mAnyDataNetworkExisting, false/*placeholder*/)));
+            }
         }
 
         // Immediately reestablish on target transport if network was torn down due to policy
@@ -3426,6 +3516,11 @@ public class DataNetworkController extends Handler {
     private void onDataNetworkHandoverSucceeded(@NonNull DataNetwork dataNetwork) {
         logl("Handover successfully. " + dataNetwork + " to " + AccessNetworkConstants
                 .transportTypeToString(dataNetwork.getTransport()));
+        if (mFeatureFlags.keepWfcOnApm()) {
+            updateCellularDataNetworkExistence(mAnyDataNetworkExisting,
+                    dataNetwork.getTransport() == AccessNetworkConstants.TRANSPORT_TYPE_WWAN
+                            || mAnyCellularDataNetworkExisting);
+        }
         // The preferred transport might be changed when handover was in progress. We need to
         // evaluate again to make sure we are not out-of-sync with the input from access network
         // manager.
@@ -3456,6 +3551,11 @@ public class DataNetworkController extends Handler {
         logl("Handover failed. " + dataNetwork + ", cause=" + DataFailCause.toString(cause)
                 + ", retryDelayMillis=" + retryDelayMillis + "ms, handoverFailureMode="
                 + DataCallResponse.failureModeToString(handoverFailureMode));
+        if (mFeatureFlags.keepWfcOnApm()) {
+            updateCellularDataNetworkExistence(mAnyDataNetworkExisting,
+                    dataNetwork.getTransport() == AccessNetworkConstants.TRANSPORT_TYPE_WWAN
+                            || mAnyCellularDataNetworkExisting);
+        }
         // There might be network we didn't tear down in the last evaluation due to handover in
         // progress. We should evaluate again.
         sendMessage(obtainMessage(EVENT_REEVALUATE_EXISTING_DATA_NETWORKS,
@@ -3597,9 +3697,13 @@ public class DataNetworkController extends Handler {
             mSimState = simState;
             if (simState == TelephonyManager.SIM_STATE_ABSENT) {
                 onSimAbsent();
+                mDataNetworkControllerCallbacks.forEach(callback -> callback.invokeFromExecutor(
+                        () -> callback.onSimStateChanged(simState)));
             } else if (simState == TelephonyManager.SIM_STATE_LOADED) {
                 sendMessage(obtainMessage(EVENT_REEVALUATE_UNSATISFIED_NETWORK_REQUESTS,
                         DataEvaluationReason.SIM_LOADED));
+                mDataNetworkControllerCallbacks.forEach(callback -> callback.invokeFromExecutor(
+                        () -> callback.onSimStateChanged(simState)));
             }
         }
     }
@@ -3885,15 +3989,15 @@ public class DataNetworkController extends Handler {
             return false;
         }
 
-        if (areNetworkAvailableServicesChanged(oldPsNri, newPsNri)) {
-            return true;
-        }
-
         if (oldPsNri == null
                 || oldPsNri.getAccessNetworkTechnology() != newPsNri.getAccessNetworkTechnology()
                 || (!oldPsNri.isInService() && newPsNri.isInService())
                 // Some CarrierConfig allows vops in nonVops area for specified home/roaming.
                 || (oldPsNri.isRoaming() != newPsNri.isRoaming())) {
+            return true;
+        }
+
+        if (areNetworkAvailableServicesChanged(oldPsNri, newPsNri)) {
             return true;
         }
 
@@ -4168,7 +4272,11 @@ public class DataNetworkController extends Handler {
             return;
         }
 
-        for (DataNetwork dataNetwork : mDataNetworkList) {
+        // If airplane mode is on, tear down only cellular data networks.
+        List<DataNetwork> dataNetworks = mFeatureFlags.keepWfcOnApm()
+                && reason == DataNetwork.TEAR_DOWN_REASON_AIRPLANE_MODE_ON
+                ? getCellularDataNetworks() : mDataNetworkList;
+        for (DataNetwork dataNetwork : dataNetworks) {
             if (!dataNetwork.isDisconnecting()) {
                 tearDownGracefully(dataNetwork, reason);
             }
@@ -4210,13 +4318,13 @@ public class DataNetworkController extends Handler {
             return true;
         }
         for (int imsFeature : SUPPORTED_IMS_FEATURES) {
-            String imsFeaturePackage = mImsFeaturePackageName.get(imsFeature);
-            if (imsFeaturePackage != null) {
-                if (dataNetwork.getAttachedNetworkRequestList()
+            int registeredOnTransport = mRegisteredImsFeaturesTransport.get(imsFeature,
+                    AccessNetworkConstants.TRANSPORT_TYPE_INVALID);
+            if (dataNetwork.getTransport() == registeredOnTransport) {
+                String imsFeaturePackage = mImsFeaturePackageName.get(imsFeature);
+                if (imsFeaturePackage != null && dataNetwork.getAttachedNetworkRequestList()
                         .hasNetworkRequestsFromPackage(imsFeaturePackage)) {
-                    if (mRegisteredImsFeatures.contains(imsFeature)) {
-                        return false;
-                    }
+                    return false;
                 }
             }
         }
@@ -4240,13 +4348,19 @@ public class DataNetworkController extends Handler {
     private void tearDownGracefully(@NonNull DataNetwork dataNetwork, @TearDownReason int reason) {
         long deregDelay = mDataConfigManager.getImsDeregistrationDelay();
         if (isImsGracefulTearDownSupported() && !isSafeToTearDown(dataNetwork)) {
+            int mmtelTransport = mRegisteredImsFeaturesTransport.get(ImsFeature.FEATURE_MMTEL,
+                    AccessNetworkConstants.TRANSPORT_TYPE_INVALID);
+            int rcsTransport = mRegisteredImsFeaturesTransport.get(ImsFeature.FEATURE_RCS,
+                    AccessNetworkConstants.TRANSPORT_TYPE_INVALID);
             log("tearDownGracefully: Not safe to tear down " + dataNetwork
                     + " at this point. Wait for IMS de-registration or timeout. MMTEL="
-                    + (mRegisteredImsFeatures.contains(ImsFeature.FEATURE_MMTEL)
-                    ? "registered" : "not registered")
+                    + (mmtelTransport != AccessNetworkConstants.TRANSPORT_TYPE_INVALID
+                    ? "registered on " + AccessNetworkConstants.transportTypeToString(
+                    mmtelTransport) : "not registered")
                     + ", RCS="
-                    + (mRegisteredImsFeatures.contains(ImsFeature.FEATURE_RCS)
-                    ? "registered" : "not registered")
+                    + (rcsTransport != AccessNetworkConstants.TRANSPORT_TYPE_INVALID
+                    ? "registered on " + AccessNetworkConstants.transportTypeToString(
+                    rcsTransport) : "not registered")
             );
             Runnable runnable = dataNetwork.tearDownWhenConditionMet(reason, deregDelay);
             if (runnable != null) {
@@ -4399,15 +4513,22 @@ public class DataNetworkController extends Handler {
         }
         pw.decreaseIndent();
 
+        int mmtelTransport = mRegisteredImsFeaturesTransport.get(ImsFeature.FEATURE_MMTEL,
+                AccessNetworkConstants.TRANSPORT_TYPE_INVALID);
+        int rcsTransport = mRegisteredImsFeaturesTransport.get(ImsFeature.FEATURE_RCS,
+                AccessNetworkConstants.TRANSPORT_TYPE_INVALID);
         pw.println("IMS features registration state: MMTEL="
-                + (mRegisteredImsFeatures.contains(ImsFeature.FEATURE_MMTEL)
-                ? "registered" : "not registered")
+                + (mmtelTransport != AccessNetworkConstants.TRANSPORT_TYPE_INVALID
+                ? "registered on " + AccessNetworkConstants.transportTypeToString(
+                mmtelTransport) : "not registered")
                 + ", RCS="
-                + (mRegisteredImsFeatures.contains(ImsFeature.FEATURE_RCS)
-                ? "registered" : "not registered"));
+                + (rcsTransport != AccessNetworkConstants.TRANSPORT_TYPE_INVALID
+                ? "registered on " + AccessNetworkConstants.transportTypeToString(
+                rcsTransport) : "not registered"));
         pw.println("mServiceState=" + mServiceState);
         pw.println("mPsRestricted=" + mPsRestricted);
         pw.println("mAnyDataNetworkExisting=" + mAnyDataNetworkExisting);
+        pw.println("mAnyCellularDataNetworkExisting=" + mAnyCellularDataNetworkExisting);
         pw.println("mInternetDataNetworkState="
                 + TelephonyUtils.dataStateToString(mInternetDataNetworkState));
         pw.println("mImsDataNetworkState="

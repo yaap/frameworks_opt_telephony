@@ -209,6 +209,7 @@ public class NetworkTypeController extends StateMachine {
     private int mLtePlusThresholdBandwidth;
     private int mNrAdvancedThresholdBandwidth;
     private boolean mIncludeLteForNrAdvancedThresholdBandwidth;
+    private boolean mNrAdvancedRequiresSingleCcAboveBandwidthThreshold;
     private boolean mRatchetPccFieldsForSameAnchorNrCell;
     @NonNull private final Set<Integer> mAdditionalNrAdvancedBands = new HashSet<>();
     @NonNull private String mPrimaryTimerState;
@@ -235,7 +236,7 @@ public class NetworkTypeController extends StateMachine {
     @NonNull private Set<Integer> mRatchetedNrBands = new HashSet<>();
     // TODO(b/316425811 remove the workaround)
     private boolean mLastShownNrDueToAdvancedBand = false;
-    private int mRatchetedNrBandwidths = 0;
+    private List<Integer> mRatchetedNrBandwidths = new ArrayList<>();
     private int mLastAnchorNrCellId = PhysicalChannelConfig.PHYSICAL_CELL_ID_UNKNOWN;
     private boolean mDoesPccListIndicateIdle = false;
 
@@ -247,37 +248,27 @@ public class NetworkTypeController extends StateMachine {
     private final ConnectivityManager.NetworkCallback mNetworkCallback =
             new ConnectivityManager.NetworkCallback() {
                 @Override
-                public void onAvailable(Network network) {
-                    log("On Available: " + network);
-                    if (network != null) {
-                        if (mConnectivityManager != null) {
-                            NetworkCapabilities capabilities =
-                                    mConnectivityManager.getNetworkCapabilities(network);
-                            updateBandwidthConstrainedStatus(capabilities);
-                        } else {
-                            log("network is null");
+                public void onAvailable(@NonNull Network network) {
+                    if (mConnectivityManager != null) {
+                        NetworkCapabilities capabilities =
+                                mConnectivityManager.getNetworkCapabilities(network);
+                        if (capabilities != null) {
+                            updateBandwidthConstrainedStatus(
+                                    isBandwidthConstrainedCapabilitySupported(capabilities));
                         }
                     }
                 }
 
                 @Override
-                public void onCapabilitiesChanged(Network network,
-                        NetworkCapabilities networkCapabilities) {
-                    log("onCapabilitiesChanged: " + network);
-                    if (network != null) {
-                        updateBandwidthConstrainedStatus(networkCapabilities);
-                    } else {
-                        log("network is null");
-                    }
+                public void onCapabilitiesChanged(@NonNull Network network,
+                        @NonNull NetworkCapabilities networkCapabilities) {
+                    updateBandwidthConstrainedStatus(
+                            isBandwidthConstrainedCapabilitySupported(networkCapabilities));
                 }
 
                 @Override
-                public void onLost(Network network) {
-                    log("Network Lost");
-                    if (mIsSatelliteConstrainedData) {
-                        mIsSatelliteConstrainedData = false;
-                        mDisplayInfoController.updateTelephonyDisplayInfo();
-                    }
+                public void onLost(@NonNull Network network) {
+                    updateBandwidthConstrainedStatus(false);
                 }
             };
 
@@ -296,14 +287,13 @@ public class NetworkTypeController extends StateMachine {
         }
     }
 
-    private void updateBandwidthConstrainedStatus(NetworkCapabilities capabilities) {
-        if (capabilities != null) {
-            mIsSatelliteConstrainedData
-                    = isBandwidthConstrainedCapabilitySupported(capabilities);
-            log("satellite constrained data status : " + mIsSatelliteConstrainedData);
-            mDisplayInfoController.updateTelephonyDisplayInfo();
-        } else {
-            log("capabilities is null");
+    private void updateBandwidthConstrainedStatus(boolean isConstrained) {
+        if (isConstrained != mIsSatelliteConstrainedData) {
+            mIsSatelliteConstrainedData = isConstrained;
+            log("Reset timers because satellite constrained data status changed to "
+                    + mIsSatelliteConstrainedData);
+            resetAllTimers();
+            transitionToCurrentState();
         }
     }
 
@@ -468,6 +458,8 @@ public class NetworkTypeController extends StateMachine {
                 CarrierConfigManager.KEY_LTE_PLUS_THRESHOLD_BANDWIDTH_KHZ_INT);
         mNrAdvancedThresholdBandwidth = config.getInt(
                 CarrierConfigManager.KEY_NR_ADVANCED_THRESHOLD_BANDWIDTH_KHZ_INT);
+        mNrAdvancedRequiresSingleCcAboveBandwidthThreshold = config.getBoolean(CarrierConfigManager
+                .KEY_NR_ADVANCED_REQUIRES_SINGLE_CC_ABOVE_BANDWIDTH_THRESHOLD_BOOL);
         mIncludeLteForNrAdvancedThresholdBandwidth = config.getBoolean(
                 CarrierConfigManager.KEY_INCLUDE_LTE_FOR_NR_ADVANCED_THRESHOLD_BANDWIDTH_BOOL);
         mRatchetPccFieldsForSameAnchorNrCell = config.getBoolean(
@@ -776,7 +768,7 @@ public class NetworkTypeController extends StateMachine {
                     if (DBG) log("Reset timers since radio is off or unavailable.");
                     resetAllTimers();
                     mRatchetedNrBands.clear();
-                    mRatchetedNrBandwidths = 0;
+                    mRatchetedNrBandwidths.clear();
                     mLastAnchorNrCellId = PhysicalChannelConfig.PHYSICAL_CELL_ID_UNKNOWN;
                     mDoesPccListIndicateIdle = false;
                     mIsNrAdvancedAllowedByPco = false;
@@ -1366,7 +1358,7 @@ public class NetworkTypeController extends StateMachine {
 
         int anchorNrCellId = PhysicalChannelConfig.PHYSICAL_CELL_ID_UNKNOWN;
         int anchorLteCellId = PhysicalChannelConfig.PHYSICAL_CELL_ID_UNKNOWN;
-        int nrBandwidths = 0;
+        List<Integer> nrBandwidths = new ArrayList<>();
         Set<Integer> nrBands = new HashSet<>();
         if (physicalChannelConfigs != null) {
             for (PhysicalChannelConfig config : physicalChannelConfigs) {
@@ -1375,7 +1367,7 @@ public class NetworkTypeController extends StateMachine {
                             && anchorNrCellId == PhysicalChannelConfig.PHYSICAL_CELL_ID_UNKNOWN) {
                         anchorNrCellId = config.getPhysicalCellId();
                     }
-                    nrBandwidths += config.getCellBandwidthDownlinkKhz();
+                    nrBandwidths.add(config.getCellBandwidthDownlinkKhz());
                     nrBands.add(config.getBand());
                 } else if (config.getNetworkType() == TelephonyManager.NETWORK_TYPE_LTE) {
                     if (config.getConnectionStatus() == CellInfo.CONNECTION_PRIMARY_SERVING
@@ -1383,7 +1375,7 @@ public class NetworkTypeController extends StateMachine {
                         anchorLteCellId = config.getPhysicalCellId();
                     }
                     if (mIncludeLteForNrAdvancedThresholdBandwidth) {
-                        nrBandwidths += config.getCellBandwidthDownlinkKhz();
+                        nrBandwidths.add(config.getCellBandwidthDownlinkKhz());
                     }
                 }
             }
@@ -1400,11 +1392,13 @@ public class NetworkTypeController extends StateMachine {
                 log("Ignoring physical channel config fields without an anchor NR cell, "
                         + "either due to LTE-only configs or an unspecified cell ID.");
             }
-            mRatchetedNrBandwidths = 0;
+            mRatchetedNrBandwidths.clear();
             mRatchetedNrBands.clear();
         } else if (anchorNrCellId == mLastAnchorNrCellId && mRatchetPccFieldsForSameAnchorNrCell) {
             log("Ratchet physical channel config fields since anchor NR cell is the same.");
-            mRatchetedNrBandwidths = Math.max(mRatchetedNrBandwidths, nrBandwidths);
+            mRatchetedNrBandwidths =
+                    getNrBandwidth(nrBandwidths) > getNrBandwidth(mRatchetedNrBandwidths)
+                    ? nrBandwidths : mRatchetedNrBandwidths;
             mRatchetedNrBands.addAll(nrBands);
         } else {
             mRatchetedNrBandwidths = nrBandwidths;
@@ -1427,10 +1421,11 @@ public class NetworkTypeController extends StateMachine {
             }
         }
 
+        mPciChangedDuringPrimaryTimer = (mLastAnchorNrCellId != anchorNrCellId)
+                && mIsPrimaryTimerActive;
         mLastAnchorNrCellId = anchorNrCellId;
         mPhysicalChannelConfigs = physicalChannelConfigs;
         mDoesPccListIndicateIdle = false;
-        mPciChangedDuringPrimaryTimer = mIsPrimaryTimerActive;
         if (DBG) {
             log("Physical channel configs updated: anchorNrCell=" + mLastAnchorNrCellId
                     + ", nrBandwidths=" + mRatchetedNrBandwidths + ", nrBands=" +  mRatchetedNrBands
@@ -1733,7 +1728,7 @@ public class NetworkTypeController extends StateMachine {
         return isNrAdvancedForPccFields(mRatchetedNrBandwidths, mRatchetedNrBands);
     }
 
-    private boolean isNrAdvancedForPccFields(int bandwidths, Set<Integer> bands) {
+    private boolean isNrAdvancedForPccFields(List<Integer> bandwidths, Set<Integer> bands) {
         // Check PCO requirement. For carriers using PCO to indicate whether the data connection is
         // NR advanced capable, mNrAdvancedCapablePcoId should be configured to non-zero.
         if (mNrAdvancedCapablePcoId > 0 && !mIsNrAdvancedAllowedByPco) {
@@ -1748,9 +1743,11 @@ public class NetworkTypeController extends StateMachine {
             return false;
         }
 
+
         // Check if meeting minimum bandwidth requirement. For most carriers, there is no minimum
         // bandwidth requirement and mNrAdvancedThresholdBandwidth is 0.
-        if (mNrAdvancedThresholdBandwidth > 0 && bandwidths < mNrAdvancedThresholdBandwidth) {
+        if (mNrAdvancedThresholdBandwidth > 0
+                && getNrBandwidth(bandwidths) < mNrAdvancedThresholdBandwidth) {
             if (DBG) {
                 log("isNrAdvanced: false because bandwidths=" + bandwidths
                         + " does not meet the threshold=" + mNrAdvancedThresholdBandwidth);
@@ -1765,6 +1762,16 @@ public class NetworkTypeController extends StateMachine {
 
     private boolean isNrMmwave() {
         return mServiceState.getNrFrequencyRange() == ServiceState.FREQUENCY_RANGE_MMWAVE;
+    }
+
+    private int getNrBandwidth(@NonNull List<Integer> bandwidths) {
+        if (mNrAdvancedRequiresSingleCcAboveBandwidthThreshold) {
+            // Returns the max bandwidth if wide single CC is required for NR Advanced.
+            return bandwidths.stream().max(Integer::compare).orElse(0);
+        } else {
+            // Returns the sum of bandwidths, typically for aggregated NR carriers.
+            return bandwidths.stream().mapToInt(Integer::intValue).sum();
+        }
     }
 
     private boolean isAdditionalNrAdvancedBand(Set<Integer> bands) {

@@ -2033,6 +2033,26 @@ public class SimulatedCommands extends BaseCommands
         resultSuccess(result, null);
     };
 
+    @Override
+    public void setUserDataEnabled(Message result, boolean enabled) {
+        SimulatedCommandsVerifier.getInstance().setUserDataEnabled(result, enabled);
+        resultSuccess(result, null);
+    }
+
+    @Override
+    public void setUserDataRoamingEnabled(Message result, boolean enabled) {
+        SimulatedCommandsVerifier.getInstance().setUserDataRoamingEnabled(result, enabled);
+        resultSuccess(result, null);
+    }
+
+    @Override
+    public void notifyImsDataNetwork(int accessNetwork, int dataNetworkState,
+            int physicalTransportType, int physicalNetworkSlotIndex, Message result) {
+        SimulatedCommandsVerifier.getInstance().notifyImsDataNetwork(accessNetwork,
+                dataNetworkState, physicalTransportType, physicalNetworkSlotIndex, result);
+        resultSuccess(result, null);
+    }
+
     public void setImsRegistrationState(int[] regState) {
         mImsRegState = regState;
     }

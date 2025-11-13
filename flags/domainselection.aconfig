@@ -34,14 +34,6 @@ flag {
     bug:"258112541"
 }
 
-# OWNER=jdyou TARGET=24Q4
-flag {
-    name: "hangup_emergency_call_for_cross_sim_redialing"
-    namespace: "telephony"
-    description: "This flag controls the behavior of terminating an emergency call for cross SIM redialing."
-    bug:"336398541"
-}
-
 # OWNER=avinashmp TARGET=25Q1
 flag {
     name: "add_ims_redial_codes_for_emergency_calls"

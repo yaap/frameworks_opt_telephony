@@ -2222,6 +2222,65 @@ public class NetworkTypeControllerTest extends TelephonyTest {
     }
 
     @Test
+    public void testNrAdvancedRequiresWideSingleCc() {
+        // Set up the carrier config to require wide single CC for NR Advanced.
+        mBundle.putBoolean(CarrierConfigManager
+                .KEY_NR_ADVANCED_REQUIRES_SINGLE_CC_ABOVE_BANDWIDTH_THRESHOLD_BOOL, true);
+        // Set a bandwidth threshold that is relevant for a single wide band.
+        mBundle.putInt(CarrierConfigManager.KEY_NR_ADVANCED_THRESHOLD_BANDWIDTH_KHZ_INT, 100000);
+        sendCarrierConfigChanged();
+
+        // Ensure NR is mmWave.
+        doReturn(NetworkRegistrationInfo.NR_STATE_CONNECTED).when(mServiceState).getNrState();
+        doReturn(ServiceState.FREQUENCY_RANGE_MMWAVE).when(mServiceState).getNrFrequencyRange();
+
+        // Case 1: Multiple NR PCCs, one is wide enough (100MHz), others are not.
+        // Expected: Should qualify for NR_ADVANCED because the *maximum* bandwidth
+        // (100000 KHz) meets the 100000 KHz threshold.
+        List<PhysicalChannelConfig> pccs1 = new ArrayList<>();
+        pccs1.add(new PhysicalChannelConfig.Builder()
+                .setNetworkType(TelephonyManager.NETWORK_TYPE_NR)
+                .setCellConnectionStatus(CellInfo.CONNECTION_PRIMARY_SERVING)
+                .setCellBandwidthDownlinkKhz(90000) // 90 MHz - Not wide enough alone
+                .setPhysicalCellId(1)
+                .build());
+        pccs1.add(new PhysicalChannelConfig.Builder()
+                .setNetworkType(TelephonyManager.NETWORK_TYPE_NR)
+                .setCellConnectionStatus(CellInfo.CONNECTION_SECONDARY_SERVING)
+                .setCellBandwidthDownlinkKhz(100000) // 100 MHz - Wide enough!
+                .setPhysicalCellId(2)
+                .build());
+        // Total sum = 190000 KHz; Max = 100000 KHz.
+        // Since mNrAdvancedRequiresWideSingleCc is true, max is considered.
+        doReturn(pccs1).when(mSST).getPhysicalChannelConfigList();
+        sendCarrierConfigChanged();
+        assertEquals(TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED,
+                mNetworkTypeController.getOverrideNetworkType());
+
+        // Case 2: Multiple NR PCCs, none are individually wide enough.
+        // Expected: Should NOT qualify for NR_ADVANCED because no single CC meets the threshold.
+        List<PhysicalChannelConfig> pccs2 = new ArrayList<>();
+        pccs2.add(new PhysicalChannelConfig.Builder()
+                .setNetworkType(TelephonyManager.NETWORK_TYPE_NR)
+                .setCellConnectionStatus(CellInfo.CONNECTION_PRIMARY_SERVING)
+                .setCellBandwidthDownlinkKhz(70000) // 70 MHz
+                .setPhysicalCellId(3)
+                .build());
+        pccs2.add(new PhysicalChannelConfig.Builder()
+                .setNetworkType(TelephonyManager.NETWORK_TYPE_NR)
+                .setCellConnectionStatus(CellInfo.CONNECTION_SECONDARY_SERVING)
+                .setCellBandwidthDownlinkKhz(80000) // 80 MHz
+                .setPhysicalCellId(4)
+                .build());
+        // Total sum = 150000 KHz (would qualify if summing); Max = 80000 KHz (does NOT qualify).
+        // Since mNrAdvancedRequiresWideSingleCc is true, max is considered.
+        doReturn(pccs2).when(mSST).getPhysicalChannelConfigList();
+        sendCarrierConfigChanged();
+        assertEquals(TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA, // Not NR_ADVANCED
+                mNetworkTypeController.getOverrideNetworkType());
+    }
+
+    @Test
     public void testNrAdvancedDisabledWhileRoaming() throws Exception {
         assertEquals("DefaultState", getCurrentState().getName());
         doReturn(true).when(mServiceState).getDataRoaming();

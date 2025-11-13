@@ -275,7 +275,7 @@ public class SmsBroadcastUndelivered {
                     if (phone != null) {
                         phone.getSmsStats().onDroppedIncomingMultipartSms(message.mIs3gpp2, rows,
                                 message.mMessageCount, TelephonyManager.from(context)
-                                        .isEmergencyNumber(message.mAddress));
+                                        .isEmergencyNumber(message.mAddress), 0);
                         TelephonyAnalytics telephonyAnalytics = phone.getTelephonyAnalytics();
                         if (telephonyAnalytics != null) {
                             SmsMmsAnalytics smsMmsAnalytics =

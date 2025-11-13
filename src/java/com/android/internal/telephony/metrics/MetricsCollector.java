@@ -1176,7 +1176,8 @@ public class MetricsCollector implements StatsManager.StatsPullAtomCallback {
                 sms.isManagedProfile,
                 sms.isNtn,
                 sms.isEmergency,
-                sms.isNbIotNtn);
+                sms.isNbIotNtn,
+                sms.pduLength);
     }
 
     private static StatsEvent buildStatsEvent(OutgoingSms sms) {
@@ -1203,7 +1204,10 @@ public class MetricsCollector implements StatsManager.StatsPullAtomCallback {
                 sms.isEmergency,
                 sms.isNtn,
                 sms.isMtSmsPolling,
-                sms.isNbIotNtn);
+                sms.isNbIotNtn,
+                sms.pduLength,
+                sms.callingPackageName,
+                sms.appUid);
     }
 
     private static StatsEvent buildStatsEvent(DataCallSession dataCallSession) {
@@ -1497,7 +1501,9 @@ public class MetricsCollector implements StatsManager.StatsPullAtomCallback {
                 satelliteController.countOfOutgoingDatagramTypeSmsSuccess,
                 satelliteController.countOfOutgoingDatagramTypeSmsFail,
                 satelliteController.countOfIncomingDatagramTypeSmsSuccess,
-                satelliteController.countOfIncomingDatagramTypeSmsFail);
+                satelliteController.countOfIncomingDatagramTypeSmsFail,
+                satelliteController.carrierRoamingSatelliteConfigVersion,
+                satelliteController.maxAllowedDataMode);
     }
 
     private static StatsEvent buildStatsEvent(SatelliteSession satelliteSession) {
@@ -1610,7 +1616,20 @@ public class MetricsCollector implements StatsManager.StatsPullAtomCallback {
                 stats.serviceDataPolicy,
                 stats.satelliteDataConsumedBytes,
                 stats.isMultiSim,
-                stats.isNbIotNtn);
+                stats.isNbIotNtn,
+                stats.countOfDataConnections,
+                stats.lastFailCauses,
+                stats.countOfDataDisconnections,
+                stats.countOfDataStalls,
+                stats.averageUplinkBandwidthKbps,
+                stats.averageDownlinkBandwidthKbps,
+                stats.minUplinkBandwidthKbps,
+                stats.maxUplinkBandwidthKbps,
+                stats.minDownlinkBandwidthKbps,
+                stats.maxDownlinkBandwidthKbps,
+                stats.satelliteSupportedApps,
+                stats.satelliteSupportedUids,
+                stats.perAppSatelliteDataConsumedBytes);
     }
 
     private static StatsEvent buildStatsEvent(CarrierRoamingSatelliteControllerStats stats) {

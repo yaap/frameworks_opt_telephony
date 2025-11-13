@@ -1077,7 +1077,8 @@ public interface PhoneInternalInterface {
     *        IMSI and IMPI. This includes the Key type, the Public key
     *        {@link java.security.PublicKey} and the Key identifier.
     */
-    public void setCarrierInfoForImsiEncryption(ImsiEncryptionInfo imsiEncryptionInfo);
+    public void setCarrierInfoForImsiEncryption(ImsiEncryptionInfo imsiEncryptionInfo,
+            boolean saveToDb);
 
     /**
      * Returns Carrier specific information that will be used to encrypt the IMSI and IMPI.

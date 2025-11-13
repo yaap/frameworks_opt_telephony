@@ -27,6 +27,9 @@ import android.os.Message;
 import android.os.WorkSource;
 import android.telephony.AccessNetworkConstants;
 import android.telephony.AccessNetworkConstants.AccessNetworkType;
+import android.telephony.AccessNetworkConstants.RadioAccessNetworkType;
+import android.telephony.AccessNetworkConstants.TransportType;
+import android.telephony.Annotation.DataState;
 import android.telephony.BarringInfo;
 import android.telephony.CarrierRestrictionRules;
 import android.telephony.ClientRequestStats;
@@ -55,6 +58,7 @@ import com.android.internal.telephony.uicc.IccCardStatus;
 import com.android.internal.telephony.uicc.SimPhonebookRecord;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * {@hide}
@@ -2588,6 +2592,28 @@ public interface CommandsInterface {
     default void cancelHandover(Message result, int callId) {};
 
     /**
+     * Tells the modem if user data setting is enabled or disabled.
+     *
+     * This API is for informational purposes. The modem must not block any subsequent setup data
+     * call requests.
+     *
+     * @param result  Message that will be sent back to handler.
+     * @param enabled Whether the user mobile data is enabled.
+     */
+    default void setUserDataEnabled(Message result, boolean enabled) {};
+
+    /**
+     * Tells the modem if user data roaming setting is enabled or disabled.
+     *
+     * This API is for informational purposes. The modem must not block any subsequent setup data
+     * call requests.
+     *
+     * @param result  Message that will be sent back to handler.
+     * @param enabled Whether the user mobile data roaming is enabled.
+     */
+    default void setUserDataRoamingEnabled(Message result, boolean enabled) {};
+
+    /**
      * Control the data throttling at modem.
      *
      * @param result Message that will be sent back to the requester
@@ -2987,4 +3013,35 @@ public interface CommandsInterface {
      * @param result Callback message to receive the result.
      */
     default void isSatelliteEnabledForCarrier(int simSlot, Message result) {}
+
+    /**
+     * Update allowed IMS services to the modem. The modem can use the information for 3GPP
+     * specifications and carriers' requirements e.g. system determination.
+     *
+     * @param allowedImsServicesAny Which IMS services are allowed for both home and roaming state.
+     * @param allowedImsServicesHomeOnly Which IMS services are allowed for home state only.
+     * @param result Callback message to receive the result.
+     */
+    default void updateAllowedImsServices(@NonNull Set<Integer> allowedImsServicesAny,
+            @NonNull Set<Integer> allowedImsServicesHomeOnly, @Nullable Message result) {}
+
+    /**
+     * Notify IMS data network to the modem.
+     *
+     * @param accessNetwork The access network type.
+     * @param dataNetworkState The data network connection state.
+     * @param physicalTransportType The physical transport type of the data network.
+     * @param physicalNetworkSlotIndex The slot index while the physical transport type is
+     *        {@link AccessNetworkConstants#TRANSPORT_TYPE_WWAN}. If the physical transport type is
+     *        {@link AccessNetworkConstants#TRANSPORT_TYPE_WLAN}, this slot index will be
+     *        {@link SubscriptionManager#INVALID_SIM_SLOT_INDEX}.
+     * @param result Callback message to receive the result.
+     *
+     * Response function is IRadioDataResponse.notifyImsDataNetworkResponse()
+     *
+     * This is available when android.hardware.telephony.data is defined.
+     */
+    default void notifyImsDataNetwork(@RadioAccessNetworkType int accessNetwork,
+            @DataState int dataNetworkState, @TransportType int physicalTransportType,
+            int physicalNetworkSlotIndex, @Nullable Message result) {}
 }

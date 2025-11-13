@@ -76,7 +76,6 @@ import com.android.internal.telephony.SmsConstants.MessageClass;
 import com.android.internal.telephony.analytics.TelephonyAnalytics;
 import com.android.internal.telephony.analytics.TelephonyAnalytics.SmsMmsAnalytics;
 import com.android.internal.telephony.flags.FeatureFlags;
-import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.metrics.TelephonyMetrics;
 import com.android.internal.telephony.satellite.SatelliteController;
 import com.android.internal.telephony.satellite.metrics.CarrierRoamingSatelliteSessionStats;
@@ -780,7 +779,7 @@ public abstract class InboundSmsHandler extends StateMachine {
         if (result != Intents.RESULT_SMS_HANDLED && result != Activity.RESULT_OK) {
             mMetrics.writeIncomingSmsError(mPhone.getPhoneId(), is3gpp2(), smsSource, result);
             mPhone.getSmsStats().onIncomingSmsError(is3gpp2(), smsSource, result,
-                    isEmergencyNumber(smsb.getOriginatingAddress()));
+                    isEmergencyNumber(smsb.getOriginatingAddress()), 0);
             if (mPhone != null) {
                 TelephonyAnalytics telephonyAnalytics = mPhone.getTelephonyAnalytics();
                 if (telephonyAnalytics != null) {
@@ -832,12 +831,8 @@ public abstract class InboundSmsHandler extends StateMachine {
             Intent intent = new Intent(Intents.SMS_REJECTED_ACTION);
             intent.putExtra("result", result);
             intent.putExtra("subId", mPhone.getSubId());
-            if (mFeatureFlags.hsumBroadcast()) {
-                mContext.sendBroadcastAsUser(intent, UserHandle.ALL,
-                        android.Manifest.permission.RECEIVE_SMS);
-            } else {
-                mContext.sendBroadcast(intent, android.Manifest.permission.RECEIVE_SMS);
-            }
+            mContext.sendBroadcastAsUser(intent, UserHandle.ALL,
+                    android.Manifest.permission.RECEIVE_SMS);
         }
         acknowledgeLastIncomingSms(success, result, response);
     }
@@ -1059,7 +1054,7 @@ public abstract class InboundSmsHandler extends StateMachine {
             logeWithLocalLog(errorMsg, tracker.getMessageId());
             mPhone.getSmsStats().onIncomingSmsError(
                     is3gpp2(), tracker.getSource(), RESULT_SMS_NULL_PDU,
-                    isEmergencyNumber(tracker.getAddress()));
+                    isEmergencyNumber(tracker.getAddress()), 0);
             if (mPhone != null) {
                 TelephonyAnalytics telephonyAnalytics = mPhone.getTelephonyAnalytics();
                 if (telephonyAnalytics != null) {
@@ -1089,7 +1084,7 @@ public abstract class InboundSmsHandler extends StateMachine {
                                 tracker.getMessageId());
                         mPhone.getSmsStats().onIncomingSmsWapPush(tracker.getSource(),
                                 messageCount, RESULT_SMS_NULL_MESSAGE, tracker.getMessageId(),
-                                isEmergencyNumber(tracker.getAddress()));
+                                isEmergencyNumber(tracker.getAddress()), 0);
                         return false;
                     }
                 }
@@ -1121,10 +1116,12 @@ public abstract class InboundSmsHandler extends StateMachine {
             // needs to be ignored, so treating it as a success case.
             boolean wapPushResult =
                     result == Activity.RESULT_OK || result == Intents.RESULT_SMS_HANDLED;
+            int pduLength = wapPushResult ? output.size() : 0;
             mMetrics.writeIncomingWapPush(mPhone.getPhoneId(), tracker.getSource(),
                     format, timestamps, wapPushResult, tracker.getMessageId());
             mPhone.getSmsStats().onIncomingSmsWapPush(tracker.getSource(), messageCount,
-                    result, tracker.getMessageId(), isEmergencyNumber(tracker.getAddress()));
+                    result, tracker.getMessageId(), isEmergencyNumber(tracker.getAddress()),
+                    pduLength);
             // result is Activity.RESULT_OK if an ordered broadcast was sent
             if (result == Activity.RESULT_OK) {
                 return true;
@@ -1145,7 +1142,7 @@ public abstract class InboundSmsHandler extends StateMachine {
                 format, timestamps, block, tracker.getMessageId());
         mPhone.getSmsStats().onIncomingSmsSuccess(is3gpp2(), tracker.getSource(),
                 messageCount, block, tracker.getMessageId(),
-                isEmergencyNumber(tracker.getAddress()));
+                isEmergencyNumber(tracker.getAddress()), getTotalPduLength(pdus));
         CarrierRoamingSatelliteSessionStats sessionStats =
                 CarrierRoamingSatelliteSessionStats.getInstance(mPhone.getSubId());
         sessionStats.onIncomingSms(mPhone.getSubId());
@@ -2020,6 +2017,24 @@ public abstract class InboundSmsHandler extends StateMachine {
             & RECEIVE_OPTIONS_SKIP_NOTIFY_WHEN_CREDENTIAL_PROTECTED_STORAGE_UNAVAILABLE) > 0;
     }
 
+    /** Determines pdu length in bytes from the given SmsMessageBase. */
+    public static int getPduLength(SmsMessageBase sms) {
+        byte[] pduBytes = sms != null ? sms.getPdu() : null;
+        return (pduBytes != null) ? pduBytes.length : 0;
+    }
+
+    private int getTotalPduLength(byte[][] pdus) {
+        int totalPduLength = 0;
+        if (pdus != null) {
+            for (byte[] p : pdus) {
+                if (p != null) {
+                    totalPduLength += p.length;
+                }
+            }
+        }
+        return totalPduLength;
+    }
+
     /**
      * Log with debug level in logcat and LocalLog
      * @param logMsg msg to log
@@ -2196,9 +2211,7 @@ public abstract class InboundSmsHandler extends StateMachine {
                 UserManager userManager =
                         (UserManager) context.getSystemService(Context.USER_SERVICE);
                 PackageManager pm = context.getPackageManager();
-                if (Flags.hsumPackageManager()) {
-                    pm = context.createContextAsUser(UserHandle.CURRENT, 0).getPackageManager();
-                }
+                pm = context.createContextAsUser(UserHandle.CURRENT, 0).getPackageManager();
                 if (userManager.isUserUnlocked()) {
                     context.startActivityAsUser(pm.getLaunchIntentForPackage(
                             Telephony.Sms.getDefaultSmsPackage(context)), UserHandle.CURRENT);

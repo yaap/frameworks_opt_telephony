@@ -91,6 +91,7 @@ import android.telephony.TelephonyManager;
 import android.telephony.UiccAccessRule;
 import android.telephony.UssdResponse;
 import android.telephony.ims.ImsCallProfile;
+import android.telephony.ims.stub.ImsRegistrationImplBase;
 import android.text.TextUtils;
 import android.util.ArraySet;
 import android.util.Log;
@@ -453,7 +454,8 @@ public class GsmCdmaPhone extends Phone {
                 int newPreferredTtyMode = intent.getIntExtra(
                         TelecomManager.EXTRA_TTY_PREFERRED_MODE, TelecomManager.TTY_MODE_OFF);
                 updateUiTtyMode(newPreferredTtyMode);
-            } else if (TelephonyManager.ACTION_SIM_APPLICATION_STATE_CHANGED.equals(action)) {
+            } else if (TelephonyManager.ACTION_SIM_APPLICATION_STATE_CHANGED.equals(action)
+                           || TelephonyManager.ACTION_SIM_CARD_STATE_CHANGED.equals(action)) {
                 if (mPhoneId == intent.getIntExtra(
                         SubscriptionManager.EXTRA_SLOT_INDEX,
                         SubscriptionManager.INVALID_SIM_SLOT_INDEX)) {
@@ -462,6 +464,11 @@ public class GsmCdmaPhone extends Phone {
                     if (mSimState == TelephonyManager.SIM_STATE_LOADED
                             && currentSlotSubIdChanged()) {
                         setNetworkSelectionModeAutomatic(null);
+                    } else if (mSimState == TelephonyManager.SIM_STATE_ABSENT
+                            || mSimState == TelephonyManager.SIM_STATE_UNKNOWN) {
+                        // Clear allowed services while SIM is absent or unknown e.g. modem crash.
+                        // Telephony will update allowed services after SIM is loaded.
+                        clearAllowedImsServices();
                     }
                 }
             }
@@ -529,6 +536,9 @@ public class GsmCdmaPhone extends Phone {
         filter.addAction(TelecomManager.ACTION_CURRENT_TTY_MODE_CHANGED);
         filter.addAction(TelecomManager.ACTION_TTY_PREFERRED_MODE_CHANGED);
         filter.addAction(TelephonyManager.ACTION_SIM_APPLICATION_STATE_CHANGED);
+        if (mFeatureFlags.allowedServices()) {
+            filter.addAction(TelephonyManager.ACTION_SIM_CARD_STATE_CHANGED);
+        }
         mContext.registerReceiver(mBroadcastReceiver, filter,
                 android.Manifest.permission.MODIFY_PHONE_STATE, null, Context.RECEIVER_EXPORTED);
 
@@ -2121,8 +2131,12 @@ public class GsmCdmaPhone extends Phone {
     }
 
     @Override
-    public void setCarrierInfoForImsiEncryption(ImsiEncryptionInfo imsiEncryptionInfo) {
-        CarrierInfoManager.setCarrierInfoForImsiEncryption(imsiEncryptionInfo, mContext, mPhoneId);
+    public void setCarrierInfoForImsiEncryption(ImsiEncryptionInfo imsiEncryptionInfo,
+            boolean saveToDb) {
+        if (saveToDb) {
+            CarrierInfoManager.setCarrierInfoForImsiEncryption(imsiEncryptionInfo, mContext,
+                    mPhoneId);
+        }
         mCi.setCarrierInfoForImsiEncryption(imsiEncryptionInfo, null);
     }
 
@@ -5325,6 +5339,7 @@ public class GsmCdmaPhone extends Phone {
         boolean enbleVonr = mIsVonrEnabledByCarrier
                 && (setting == 1 || (setting == -1 && mDefaultVonr));
         mCi.setVoNrEnabled(enbleVonr, obtainMessage(EVENT_SET_VONR_ENABLED_DONE), null);
+        super.setAllowedImsServicesForAny(ImsRegistrationImplBase.REGISTRATION_TECH_NR, enbleVonr);
     }
 
     private void updateCdmaRoamingSettingsAfterCarrierConfigChanged(

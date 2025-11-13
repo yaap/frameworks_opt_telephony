@@ -126,6 +126,7 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_IS_SECURIT
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_IS_VONR_ENABLED;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_LAST_CALL_FAIL_CAUSE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_LAST_DATA_CALL_FAIL_CAUSE;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_NOTIFY_IMS_DATA_NETWORK;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_NV_READ_ITEM;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_NV_RESET_CONFIG;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_NV_WRITE_CDMA_PRL;
@@ -195,6 +196,8 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_UICC_S
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_UNSOLICITED_RESPONSE_FILTER;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_UNSOL_CELL_INFO_LIST_RATE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_USAGE_SETTING;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_USER_DATA_ENABLED;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_USER_DATA_ROAMING_ENABLED;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SHUTDOWN;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SIGNAL_STRENGTH;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SIM_AUTHENTICATION;
@@ -224,6 +227,7 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SWITCH_WAI
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_TRIGGER_EMERGENCY_NETWORK_SCAN;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_TRIGGER_EPS_FALLBACK;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_UDUB;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_UPDATE_ALLOWED_IMS_SERVICES;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_UPDATE_IMS_CALL_STATUS;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_UPDATE_IMS_REGISTRATION_INFO;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_UPDATE_SIM_PHONEBOOK_RECORD;
@@ -310,6 +314,7 @@ import android.os.SystemClock;
 import android.service.carrier.CarrierIdentifier;
 import android.telephony.AccessNetworkConstants;
 import android.telephony.Annotation;
+import android.telephony.Annotation.DataState;
 import android.telephony.BarringInfo;
 import android.telephony.CarrierInfo;
 import android.telephony.CarrierRestrictionRules;
@@ -374,6 +379,7 @@ import android.telephony.ims.feature.ConnectionFailureInfo;
 import android.telephony.ims.feature.MmTelFeature;
 import android.telephony.ims.stub.ImsRegistrationImplBase;
 import android.telephony.ims.stub.ImsRegistrationImplBase.ImsDeregistrationReason;
+import android.telephony.ims.stub.ImsRegistrationImplBase.ImsRegistrationTech;
 import android.text.TextUtils;
 import android.util.ArraySet;
 import android.util.SparseArray;
@@ -1506,28 +1512,6 @@ public class RILUtils {
         if ((raf & android.hardware.radio.V1_0.RadioAccessFamily.EDGE) != 0) {
             networkTypeRaf |= TelephonyManager.NETWORK_TYPE_BITMASK_EDGE;
         }
-        // convert both IS95A/IS95B to CDMA as network mode doesn't support CDMA
-        if ((raf & android.hardware.radio.V1_0.RadioAccessFamily.IS95A) != 0) {
-            networkTypeRaf |= TelephonyManager.NETWORK_TYPE_BITMASK_CDMA;
-        }
-        if ((raf & android.hardware.radio.V1_0.RadioAccessFamily.IS95B) != 0) {
-            networkTypeRaf |= TelephonyManager.NETWORK_TYPE_BITMASK_CDMA;
-        }
-        if ((raf & android.hardware.radio.V1_0.RadioAccessFamily.ONE_X_RTT) != 0) {
-            networkTypeRaf |= TelephonyManager.NETWORK_TYPE_BITMASK_1xRTT;
-        }
-        if ((raf & android.hardware.radio.V1_0.RadioAccessFamily.EVDO_0) != 0) {
-            networkTypeRaf |= TelephonyManager.NETWORK_TYPE_BITMASK_EVDO_0;
-        }
-        if ((raf & android.hardware.radio.V1_0.RadioAccessFamily.EVDO_A) != 0) {
-            networkTypeRaf |= TelephonyManager.NETWORK_TYPE_BITMASK_EVDO_A;
-        }
-        if ((raf & android.hardware.radio.V1_0.RadioAccessFamily.EVDO_B) != 0) {
-            networkTypeRaf |= TelephonyManager.NETWORK_TYPE_BITMASK_EVDO_B;
-        }
-        if ((raf & android.hardware.radio.V1_0.RadioAccessFamily.EHRPD) != 0) {
-            networkTypeRaf |= TelephonyManager.NETWORK_TYPE_BITMASK_EHRPD;
-        }
         if ((raf & android.hardware.radio.V1_0.RadioAccessFamily.HSUPA) != 0) {
             networkTypeRaf |= TelephonyManager.NETWORK_TYPE_BITMASK_HSUPA;
         }
@@ -1580,25 +1564,6 @@ public class RILUtils {
         if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_EDGE) != 0) {
             raf |= android.hardware.radio.V1_0.RadioAccessFamily.EDGE;
         }
-        // convert CDMA to IS95A, consistent with ServiceState.networkTypeToRilRadioTechnology
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_CDMA) != 0) {
-            raf |= android.hardware.radio.V1_0.RadioAccessFamily.IS95A;
-        }
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_1xRTT) != 0) {
-            raf |= android.hardware.radio.V1_0.RadioAccessFamily.ONE_X_RTT;
-        }
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_EVDO_0) != 0) {
-            raf |= android.hardware.radio.V1_0.RadioAccessFamily.EVDO_0;
-        }
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_EVDO_A) != 0) {
-            raf |= android.hardware.radio.V1_0.RadioAccessFamily.EVDO_A;
-        }
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_EVDO_B) != 0) {
-            raf |= android.hardware.radio.V1_0.RadioAccessFamily.EVDO_B;
-        }
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_EHRPD) != 0) {
-            raf |= android.hardware.radio.V1_0.RadioAccessFamily.EHRPD;
-        }
         if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_HSUPA) != 0) {
             raf |= android.hardware.radio.V1_0.RadioAccessFamily.HSUPA;
         }
@@ -1650,25 +1615,6 @@ public class RILUtils {
         }
         if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_EDGE) != 0) {
             raf |= android.hardware.radio.RadioAccessFamily.EDGE;
-        }
-        // convert CDMA to IS95A, consistent with ServiceState.networkTypeToRilRadioTechnology
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_CDMA) != 0) {
-            raf |= android.hardware.radio.RadioAccessFamily.IS95A;
-        }
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_1xRTT) != 0) {
-            raf |= android.hardware.radio.RadioAccessFamily.ONE_X_RTT;
-        }
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_EVDO_0) != 0) {
-            raf |= android.hardware.radio.RadioAccessFamily.EVDO_0;
-        }
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_EVDO_A) != 0) {
-            raf |= android.hardware.radio.RadioAccessFamily.EVDO_A;
-        }
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_EVDO_B) != 0) {
-            raf |= android.hardware.radio.RadioAccessFamily.EVDO_B;
-        }
-        if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_EHRPD) != 0) {
-            raf |= android.hardware.radio.RadioAccessFamily.EHRPD;
         }
         if ((networkTypeBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_HSUPA) != 0) {
             raf |= android.hardware.radio.RadioAccessFamily.HSUPA;
@@ -3506,6 +3452,9 @@ public class RILUtils {
             }
         }
 
+        result.mtuV4 = normalizeMtu(result.mtuV4);
+        result.mtuV6 = normalizeMtu(result.mtuV6);
+
         return new DataCallResponse.Builder()
                 .setCause(result.cause)
                 .setRetryDurationMillis(result.suggestedRetryTime)
@@ -3528,6 +3477,13 @@ public class RILUtils {
                         : convertHalSliceInfo(result.sliceInfo))
                 .setTrafficDescriptors(trafficDescriptors)
                 .build();
+    }
+
+    private static int normalizeMtu(int rawMtu) {
+        // Ensure it's within unsigned 16-bit range.
+        int mtu = Math.min(rawMtu, 65535);
+        // Ensure even number, otherwise round down.
+        return mtu & ~1;
     }
 
     private static NetworkSliceInfo convertHalSliceInfo(android.hardware.radio.V1_6.SliceInfo si) {
@@ -4817,6 +4773,80 @@ public class RILUtils {
         return ConnectionFailureInfo.REASON_UNSPECIFIED;
     }
 
+    /**
+     * Convert to an array of HAL IMS service.
+     *
+     * @param allowedImsServicesAny Which allowed services for both home and roaming state.
+     * @param allowedImsServicesHomeOnly Which allowed services for home state only.
+     * @return The array of HAL IMS service.
+     */
+    public static android.hardware.radio.ims.ImsService[] convertImsServices(
+            @NonNull Set<Integer> allowedImsServicesAny,
+            @NonNull Set<Integer> allowedImsServicesHomeOnly) {
+        int length = allowedImsServicesAny.size() + allowedImsServicesHomeOnly.size();
+        if (length == 0) {
+            return new android.hardware.radio.ims.ImsService[0];
+        }
+        android.hardware.radio.ims.ImsService[] imsServices =
+                new android.hardware.radio.ims.ImsService[length];
+        int index = 0;
+        for (Integer regTech : allowedImsServicesAny) {
+            imsServices[index] = new android.hardware.radio.ims.ImsService();
+            imsServices[index].serviceType = convertToImsServiceTypeAidl(regTech);
+            imsServices[index].roamingType = android.hardware.radio.ims.ImsService.RoamingType.ANY;
+            index++;
+        }
+        for (Integer regTech : allowedImsServicesHomeOnly) {
+            imsServices[index] = new android.hardware.radio.ims.ImsService();
+            imsServices[index].serviceType = convertToImsServiceTypeAidl(regTech);
+            imsServices[index].roamingType =
+                    android.hardware.radio.ims.ImsService.RoamingType.HOME_ONLY;
+            index++;
+        }
+        return imsServices;
+    }
+
+    /**
+     * Convert to HAL IMS service type.
+     *
+     * @param regTech The IMS service radio technology.
+     * @return The HAL IMS service type.
+     */
+    private static int convertToImsServiceTypeAidl(@ImsRegistrationTech int regTech) {
+        return switch (regTech) {
+            case ImsRegistrationImplBase.REGISTRATION_TECH_LTE ->
+                    android.hardware.radio.ims.ImsServiceType.VOLTE;
+            case ImsRegistrationImplBase.REGISTRATION_TECH_NR ->
+                    android.hardware.radio.ims.ImsServiceType.VONR;
+            case ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN ->
+                    android.hardware.radio.ims.ImsServiceType.VOWIFI;
+            default -> android.hardware.radio.ims.ImsServiceType.INVALID;
+        };
+    }
+
+    /**
+     * Convert to HAL data network state.
+     * @param state Telephony data state.
+     * @return The converted HAL data network state.
+     */
+    public static int convertToHalDataNetworkState(@DataState int state) {
+        return switch (state) {
+            case TelephonyManager.DATA_UNKNOWN ->
+                    android.hardware.radio.data.DataNetworkState.UNKNOWN;
+            case TelephonyManager.DATA_DISCONNECTED ->
+                    android.hardware.radio.data.DataNetworkState.DISCONNECTED;
+            case TelephonyManager.DATA_CONNECTING ->
+                    android.hardware.radio.data.DataNetworkState.CONNECTING;
+            case TelephonyManager.DATA_CONNECTED ->
+                    android.hardware.radio.data.DataNetworkState.CONNECTED;
+            case TelephonyManager.DATA_DISCONNECTING ->
+                    android.hardware.radio.data.DataNetworkState.DISCONNECTING;
+            default ->
+                    // Throw an exception for any unsupported state.
+                    throw new IllegalArgumentException("Unsupported data state: " + state);
+        };
+    }
+
     /** Append the data to the end of an ArrayList */
     public static void appendPrimitiveArrayToArrayList(byte[] src, ArrayList<Byte> dst) {
         for (byte b : src) {
@@ -5321,6 +5351,14 @@ public class RILUtils {
                 return "SET_SATELLITE_ENABLED_FOR_CARRIER";
             case RIL_REQUEST_IS_SATELLITE_ENABLED_FOR_CARRIER:
                 return "IS_SATELLITE_ENABLED_FOR_CARRIER";
+            case RIL_REQUEST_SET_USER_DATA_ENABLED:
+                return "SET_USER_DATA_ENABLED";
+            case RIL_REQUEST_SET_USER_DATA_ROAMING_ENABLED:
+                return "SET_USER_DATA_ROAMING_ENABLED";
+            case RIL_REQUEST_UPDATE_ALLOWED_IMS_SERVICES:
+                return "UPDATE_ALLOWED_IMS_SERVICES";
+            case RIL_REQUEST_NOTIFY_IMS_DATA_NETWORK:
+                return "NOTIFY_IMS_DATA_NETWORK";
             default:
                 return "<unknown request " + request + ">";
         }
@@ -5781,6 +5819,7 @@ public class RILUtils {
             case ImsRegistrationImplBase.REGISTRATION_TECH_LTE:
                 return android.hardware.radio.AccessNetwork.EUTRAN;
             case ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN:
+            case ImsRegistrationImplBase.REGISTRATION_TECH_CROSS_SIM:
                 return android.hardware.radio.AccessNetwork.IWLAN;
             case ImsRegistrationImplBase.REGISTRATION_TECH_NR:
                 return android.hardware.radio.AccessNetwork.NGRAN;

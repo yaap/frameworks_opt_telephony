@@ -506,11 +506,7 @@ public class CarrierResolver extends Handler {
             intent.putExtra(TelephonyManager.EXTRA_SPECIFIC_CARRIER_ID, mSpecificCarrierId);
             intent.putExtra(TelephonyManager.EXTRA_SPECIFIC_CARRIER_NAME, mSpecificCarrierName);
             intent.putExtra(TelephonyManager.EXTRA_SUBSCRIPTION_ID, mPhone.getSubId());
-            if (mFeatureFlags.hsumBroadcast()) {
-                mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
-            } else {
-                mContext.sendBroadcast(intent);
-            }
+            mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
 
             // notify content observers for specific carrier id change event.
             ContentValues cv = new ContentValues();
@@ -545,11 +541,7 @@ public class CarrierResolver extends Handler {
             intent.putExtra(TelephonyManager.EXTRA_CARRIER_ID, mCarrierId);
             intent.putExtra(TelephonyManager.EXTRA_CARRIER_NAME, mCarrierName);
             intent.putExtra(TelephonyManager.EXTRA_SUBSCRIPTION_ID, mPhone.getSubId());
-            if (mFeatureFlags.hsumBroadcast()) {
-                mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
-            } else {
-                mContext.sendBroadcast(intent);
-            }
+            mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
 
             // notify content observers for carrier id change event
             ContentValues cv = new ContentValues();
@@ -1030,7 +1022,21 @@ public class CarrierResolver extends Handler {
      * @return the best matching carrier id.
      */
     public static int getCarrierIdFromIdentifier(@NonNull Context context,
-                                                 @NonNull CarrierIdentifier carrierIdentifier) {
+            @NonNull CarrierIdentifier carrierIdentifier) {
+        return getCarrierIdFromIdentifier(context, carrierIdentifier, false);
+    }
+
+    /**
+     * a util function to convert carrierIdentifier to the best matching carrier id.
+     *
+     * @param useParentCid {@code true} to indicate that the parent carrier ID is required to be
+     *                     returned if it has valid value.
+     *
+     * @return the best matching carrier id.
+     */
+
+    public static int getCarrierIdFromIdentifier(@NonNull Context context,
+            @NonNull CarrierIdentifier carrierIdentifier, boolean useParentCid) {
         final String mccmnc = carrierIdentifier.getMcc() + carrierIdentifier.getMnc();
         final String gid1 = carrierIdentifier.getGid1();
         final String gid2 = carrierIdentifier.getGid2();
@@ -1059,7 +1065,11 @@ public class CarrierResolver extends Handler {
             rule.match(targetRule);
             if (rule.mScore > maxScore) {
                 maxScore = rule.mScore;
-                carrierId = rule.mCid;
+                if (useParentCid && rule.mParentCid != TelephonyManager.UNKNOWN_CARRIER_ID) {
+                    carrierId = rule.mParentCid;
+                } else {
+                    carrierId = rule.mCid;
+                }
             }
         }
         return carrierId;

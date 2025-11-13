@@ -161,6 +161,7 @@ public class GsmCdmaPhoneTest extends TelephonyTest {
 
         doReturn(false).when(mSST).isDeviceShuttingDown();
         doReturn(true).when(mImsManager).isVolteEnabledByPlatform();
+        doReturn(true).when(mFeatureFlags).allowedServices();
 
         mPhoneUT = new GsmCdmaPhone(mContext, mSimulatedCommands, mNotifier, true, 0,
             PhoneConstants.PHONE_TYPE_GSM, mTelephonyComponentFactory, (c, p) -> mImsManager,
@@ -2757,6 +2758,64 @@ public class GsmCdmaPhoneTest extends TelephonyTest {
         verify(mNullCipherNotifier, times(1)).disable(eq(mContext));
         verify(mMockCi, times(1)).setSecurityAlgorithmsUpdatedEnabled(eq(false),
                 any(Message.class));
+    }
+
+    @Test
+    public void testAllowedImsServices() {
+        mPhoneUT.mCi = mMockCi;
+        // Update allowed IMS service for VoLTE and VoWiFi
+        mPhoneUT.setAllowedImsServicesForAny(ImsRegistrationImplBase.REGISTRATION_TECH_LTE, true);
+        verify(mMockCi, times(1)).updateAllowedImsServices(any(), any(), any());
+        mPhoneUT.setAllowedImsServicesForHomeOnly(
+                ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN, true);
+        verify(mMockCi, times(2)).updateAllowedImsServices(any(), any(), any());
+
+        // Do not update allowed IMS services to modem if no change
+        mPhoneUT.setAllowedImsServicesForAny(ImsRegistrationImplBase.REGISTRATION_TECH_LTE, true);
+        verify(mMockCi, times(2)).updateAllowedImsServices(any(), any(), any());
+
+        // Update allowed IMS service for VoWiFi
+        mPhoneUT.setAllowedImsServicesForAny(
+                ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN, true);
+        verify(mMockCi, times(3)).updateAllowedImsServices(any(), any(), any());
+    }
+
+    @Test
+    public void testClearAllowedImsServicesOnSimAbsent() {
+        mPhoneUT.mCi = mMockCi;
+        // Set allowed IMS service for VoLTE.
+        mPhoneUT.setAllowedImsServicesForAny(ImsRegistrationImplBase.REGISTRATION_TECH_LTE, true);
+        verify(mMockCi, times(1)).updateAllowedImsServices(any(), any(), any());
+
+        // Clear allowed IMS service on SIM absent.
+        Intent intent = new Intent(TelephonyManager.ACTION_SIM_CARD_STATE_CHANGED);
+        intent.putExtra(SubscriptionManager.EXTRA_SLOT_INDEX, mPhone.getPhoneId());
+        intent.putExtra(TelephonyManager.EXTRA_SIM_STATE, TelephonyManager.SIM_STATE_ABSENT);
+        mContext.sendBroadcast(intent);
+        processAllFutureMessages();
+
+        // Set allowed IMS service for VoLTE.
+        mPhoneUT.setAllowedImsServicesForAny(ImsRegistrationImplBase.REGISTRATION_TECH_LTE, true);
+        verify(mMockCi, times(2)).updateAllowedImsServices(any(), any(), any());
+    }
+
+    @Test
+    public void testClearAllowedImsServicesOnSimUnknown() {
+        mPhoneUT.mCi = mMockCi;
+        // Set allowed IMS service for VoLTE.
+        mPhoneUT.setAllowedImsServicesForAny(ImsRegistrationImplBase.REGISTRATION_TECH_LTE, true);
+        verify(mMockCi, times(1)).updateAllowedImsServices(any(), any(), any());
+
+        // Clear allowed IMS service on SIM unknown.
+        Intent intent = new Intent(TelephonyManager.ACTION_SIM_CARD_STATE_CHANGED);
+        intent.putExtra(SubscriptionManager.EXTRA_SLOT_INDEX, mPhone.getPhoneId());
+        intent.putExtra(TelephonyManager.EXTRA_SIM_STATE, TelephonyManager.SIM_STATE_UNKNOWN);
+        mContext.sendBroadcast(intent);
+        processAllFutureMessages();
+
+        // Set allowed IMS service for VoLTE.
+        mPhoneUT.setAllowedImsServicesForAny(ImsRegistrationImplBase.REGISTRATION_TECH_LTE, true);
+        verify(mMockCi, times(2)).updateAllowedImsServices(any(), any(), any());
     }
 
     private void sendRadioAvailableToPhone(GsmCdmaPhone phone) {

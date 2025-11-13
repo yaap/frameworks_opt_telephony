@@ -798,6 +798,9 @@ public class PersistAtomsStorage {
                     += stats.countOfIncomingDatagramTypeSmsSuccess;
             existingStats.countOfIncomingDatagramTypeSmsFail
                     += stats.countOfIncomingDatagramTypeSmsFail;
+            existingStats.carrierRoamingSatelliteConfigVersion =
+                    stats.carrierRoamingSatelliteConfigVersion;
+            existingStats.maxAllowedDataMode = stats.maxAllowedDataMode;
         } else {
             mAtoms.satelliteController = insertAtRandomPlace(mAtoms.satelliteController, stats,
                     mMaxNumSatelliteStats);

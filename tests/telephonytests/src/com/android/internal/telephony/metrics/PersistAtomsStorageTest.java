@@ -1160,6 +1160,8 @@ public class PersistAtomsStorageTest extends TelephonyTest {
         mSatelliteController1.countOfOutgoingDatagramTypeSmsFail = 4;
         mSatelliteController1.countOfIncomingDatagramTypeSmsSuccess = 5;
         mSatelliteController1.countOfIncomingDatagramTypeSmsFail = 6;
+        mSatelliteController1.carrierRoamingSatelliteConfigVersion = 19;
+        mSatelliteController1.maxAllowedDataMode = 0;
 
         mSatelliteController2 = new SatelliteController();
         mSatelliteController2.countOfSatelliteServiceEnablementsSuccess = 2 + 1;
@@ -1201,6 +1203,8 @@ public class PersistAtomsStorageTest extends TelephonyTest {
         mSatelliteController2.countOfOutgoingDatagramTypeSmsFail = 14;
         mSatelliteController2.countOfIncomingDatagramTypeSmsSuccess = 15;
         mSatelliteController2.countOfIncomingDatagramTypeSmsFail = 16;
+        mSatelliteController2.carrierRoamingSatelliteConfigVersion = 21;
+        mSatelliteController2.maxAllowedDataMode = 1;
 
         // SatelliteController atom has one data point
         mSatelliteControllers =
@@ -4490,6 +4494,9 @@ public class PersistAtomsStorageTest extends TelephonyTest {
                 mSatelliteController1.countOfIncomingDatagramTypeSmsSuccess * 2;
         expected.countOfIncomingDatagramTypeSmsFail =
                 mSatelliteController1.countOfIncomingDatagramTypeSmsFail * 2;
+        expected.carrierRoamingSatelliteConfigVersion =
+                mSatelliteController1.carrierRoamingSatelliteConfigVersion;
+        expected.maxAllowedDataMode = mSatelliteController1.maxAllowedDataMode;
 
         // Service state and service switch should be added successfully
         verifyCurrentStateSavedToFileOnce();
@@ -4662,6 +4669,9 @@ public class PersistAtomsStorageTest extends TelephonyTest {
         expected.countOfIncomingDatagramTypeSmsFail =
                 mSatelliteController1.countOfIncomingDatagramTypeSmsFail
                         + mSatelliteController2.countOfIncomingDatagramTypeSmsFail;
+        expected.carrierRoamingSatelliteConfigVersion =
+                mSatelliteController2.carrierRoamingSatelliteConfigVersion;
+        expected.maxAllowedDataMode = mSatelliteController2.maxAllowedDataMode;
 
         // Service state and service switch should be added successfully
         verifyCurrentStateSavedToFileOnce();
@@ -6124,6 +6134,9 @@ public class PersistAtomsStorageTest extends TelephonyTest {
                         stats.countOfIncomingDatagramTypeSmsSuccess);
                 assertEquals(expectedStats.countOfIncomingDatagramTypeSmsFail,
                         stats.countOfIncomingDatagramTypeSmsFail);
+                assertEquals(expectedStats.carrierRoamingSatelliteConfigVersion,
+                        stats.carrierRoamingSatelliteConfigVersion);
+                assertEquals(expectedStats.maxAllowedDataMode, stats.maxAllowedDataMode);
                 actualCount++;
             }
         }

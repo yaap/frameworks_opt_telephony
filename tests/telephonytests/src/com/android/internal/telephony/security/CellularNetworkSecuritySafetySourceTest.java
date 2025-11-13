@@ -32,8 +32,10 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.safetycenter.SafetySourceData;
 import android.safetycenter.SafetySourceIssue;
 
@@ -110,9 +112,62 @@ public final class CellularNetworkSecuritySafetySourceTest extends TelephonyTest
 
     @Test
     public void disableNullCipherIssue_nullData() {
+        ArgumentCaptor<SafetySourceData> data = ArgumentCaptor.forClass(SafetySourceData.class);
+
+        mSafetySource.setNullCipherIssueEnabled(mContext, true);
         mSafetySource.setNullCipherIssueEnabled(mContext, false);
 
-        verify(mSafetyCenterManagerWrapper, times(1)).setSafetySourceData(isNull());
+        verify(mSafetyCenterManagerWrapper, times(2)).setSafetySourceData(data.capture());
+        assertThat(data.getAllValues().get(1)).isNull();
+    }
+
+    @Test
+    public void setNullCipherIssueEnabled_unregisterReceiver() {
+        mSafetySource.setNullCipherIssueEnabled(mContext, true);
+        mSafetySource.setNullCipherIssueEnabled(mContext, false);
+
+        verify(mContext, times(1)).unregisterReceiver(any());
+    }
+
+    @Test
+    public void setNullCipherIssueEnabled_registerReceiver() {
+        ArgumentCaptor<IntentFilter> intentFilter = ArgumentCaptor.forClass(IntentFilter.class);
+
+        mSafetySource.setNullCipherIssueEnabled(mContext, true);
+
+        verify(mContext, times(1)).registerReceiver(any(), intentFilter.capture());
+        assertThat(intentFilter.getAllValues().get(0).getAction(0)).isEqualTo(
+                Intent.ACTION_AIRPLANE_MODE_CHANGED);
+    }
+
+    @Test
+    public void cellularNetworkSecurityBroadcastReceiver_onReceive_enableAirplaneMode() {
+        ArgumentCaptor<BroadcastReceiver> broadcastReceiver =
+                ArgumentCaptor.forClass(BroadcastReceiver.class);
+        Intent intent = new Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED);
+        intent.putExtra("state", true);
+        mSafetySource.setNullCipherIssueEnabled(mContext, true);
+
+        verify(mContext, times(1)).registerReceiver(broadcastReceiver.capture(), any());
+
+        broadcastReceiver.getAllValues().get(0).onReceive(mContext, intent);
+
+        verify(mSafetyCenterManagerWrapper, times(2)).setSafetySourceData(any());
+    }
+
+    @Test
+    public void cellularNetworkSecurityBroadcastReceiver_onReceive_disableAirplaneMode() {
+        ArgumentCaptor<BroadcastReceiver> broadcastReceiver =
+                ArgumentCaptor.forClass(BroadcastReceiver.class);
+        Intent intent = new Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED);
+        intent.putExtra("state", false);
+        mSafetySource.setNullCipherIssueEnabled(mContext, true);
+
+        verify(mContext, times(1)).registerReceiver(broadcastReceiver.capture(), any());
+
+        broadcastReceiver.getAllValues().get(0).onReceive(mContext, intent);
+
+        verify(mSafetyCenterManagerWrapper, times(1)).setSafetySourceData(any());
     }
 
     @Test

@@ -236,7 +236,15 @@ public class TelephonyCountryDetector extends Handler {
         }
 
         List<String> result = new ArrayList<>();
-        for (Phone phone : PhoneFactory.getPhones()) {
+        Phone[] phones;
+        try {
+            phones = PhoneFactory.getPhones();
+        } catch (IllegalStateException e) {
+            logd("getCurrentNetworkCountryIso: PhoneFactory.getPhones() failed, e=" + e);
+            return result;
+        }
+
+        for (Phone phone : phones) {
             String countryIso = getNetworkCountryIsoForPhone(phone);
             if (isValid(countryIso)) {
                 String countryIsoInUpperCase = countryIso.toUpperCase(Locale.US);

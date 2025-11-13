@@ -33,7 +33,6 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.util.Pair;
 
-import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.metrics.TelephonyMetrics;
 
 import java.security.PublicKey;
@@ -302,12 +301,8 @@ public class CarrierInfoManager {
         final TelephonyManager telephonyManager = context.getSystemService(TelephonyManager.class)
                 .createForSubscriptionId(subId);
         int carrierId = telephonyManager.getSimCarrierId();
-        if (Flags.imsiKeyRetryDownloadOnPhoneUnlock()) {
-            String simOperator = telephonyManager.getSimOperator();
-            deleteCarrierInfoForImsiEncryption(context, subId, carrierId, simOperator);
-        } else {
-            deleteCarrierInfoForImsiEncryption(context, subId, carrierId);
-        }
+        String simOperator = telephonyManager.getSimOperator();
+        deleteCarrierInfoForImsiEncryption(context, subId, carrierId, simOperator);
         Intent resetIntent = new Intent(TelephonyIntents.ACTION_CARRIER_CERTIFICATE_DOWNLOAD);
         SubscriptionManager.putPhoneIdAndSubIdExtra(resetIntent, mPhoneId);
         context.sendBroadcastAsUser(resetIntent, UserHandle.ALL);

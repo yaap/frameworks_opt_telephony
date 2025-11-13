@@ -58,6 +58,9 @@ import android.provider.Settings;
 import android.sysprop.TelephonyProperties;
 import android.telephony.AccessNetworkConstants;
 import android.telephony.AccessNetworkConstants.AccessNetworkType;
+import android.telephony.AccessNetworkConstants.RadioAccessNetworkType;
+import android.telephony.AccessNetworkConstants.TransportType;
+import android.telephony.Annotation.DataState;
 import android.telephony.BarringInfo;
 import android.telephony.CarrierRestrictionRules;
 import android.telephony.ClientRequestStats;
@@ -2164,7 +2167,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
                 riljLog(rr.serialString() + "> iccIO: " + RILUtils.requestToString(rr.mRequest)
                         + " command = 0x" + Integer.toHexString(command) + " fileId = 0x"
                         + Integer.toHexString(fileId) + " path = " + path + " p1 = " + p1
-                        + " p2 = " + p2 + " p3 = " + " data = " + data + " aid = " + aid);
+                        + " p2 = " + p2 + " p3 = " + p3 + " data = " + data + " aid = " + aid);
             } else {
                 riljLog(rr.serialString() + "> iccIO: "
                         + RILUtils.requestToString(rr.mRequest));
@@ -4779,6 +4782,87 @@ public class RIL extends BaseCommands implements CommandsInterface {
      * {@inheritDoc}
      */
     @Override
+    public void setUserDataEnabled(Message result, boolean enabled) {
+        RadioDataProxy dataProxy = getRadioServiceProxy(RadioDataProxy.class);
+        if (!canMakeRequest("setUserDataEnabled", dataProxy, result, RADIO_HAL_VERSION_2_4)) {
+            return;
+        }
+
+        RILRequest rr = obtainRequest(RIL_REQUEST_SET_USER_DATA_ENABLED, result,
+                mRILDefaultWorkSource);
+        if (RILJ_LOGD) {
+            riljLog(rr.serialString() + "> " + RILUtils.requestToString(rr.mRequest) + " enabled="
+                    + enabled);
+        }
+
+        radioServiceInvokeHelper(HAL_SERVICE_DATA, rr, "setUserDataEnabled", () -> {
+            dataProxy.setUserDataEnabled(rr.mSerial, enabled);
+        });
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setUserDataRoamingEnabled(Message result, boolean enabled) {
+        RadioDataProxy dataProxy = getRadioServiceProxy(RadioDataProxy.class);
+        if (!canMakeRequest("setUserDataRoamingEnabled", dataProxy, result,
+                RADIO_HAL_VERSION_2_4)) {
+            return;
+        }
+
+        RILRequest rr = obtainRequest(RIL_REQUEST_SET_USER_DATA_ROAMING_ENABLED, result,
+                mRILDefaultWorkSource);
+        if (RILJ_LOGD) {
+            riljLog(rr.serialString() + "> " + RILUtils.requestToString(rr.mRequest) + " enabled="
+                    + enabled);
+        }
+
+        radioServiceInvokeHelper(HAL_SERVICE_DATA, rr, "setUserDataRoamingEnabled", () -> {
+            dataProxy.setUserDataRoamingEnabled(rr.mSerial, enabled);
+        });
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void notifyImsDataNetwork(@RadioAccessNetworkType int accessNetwork,
+            @DataState int dataNetworkState, @TransportType int physicalTransportType,
+            int physicalNetworkSlotIndex, @Nullable Message result) {
+        RadioDataProxy dataProxy = getRadioServiceProxy(RadioDataProxy.class);
+        if (!canMakeRequest("notifyImsDataNetwork", dataProxy, result, RADIO_HAL_VERSION_2_4)) {
+            return;
+        }
+
+        RILRequest rr = obtainRequest(RIL_REQUEST_NOTIFY_IMS_DATA_NETWORK, result,
+                mRILDefaultWorkSource);
+        if (RILJ_LOGD) {
+            riljLog(
+                    rr.serialString()
+                            + "> "
+                            + RILUtils.requestToString(rr.mRequest)
+                            + " accessNetwork="
+                            + AccessNetworkConstants.AccessNetworkType.toString(accessNetwork)
+                            + " dataNetworkState="
+                            + TelephonyUtils.dataStateToString(dataNetworkState)
+                            + " physicalTransportType="
+                            + AccessNetworkConstants.transportTypeToString(physicalTransportType)
+                            + " physicalNetworkSlotIndex="
+                            + physicalNetworkSlotIndex);
+        }
+
+        radioServiceInvokeHelper(HAL_SERVICE_DATA, rr, "notifyImsDataNetwork", () -> {
+            dataProxy.notifyImsDataNetwork(rr.mSerial, accessNetwork,
+                    RILUtils.convertToHalDataNetworkState(dataNetworkState),
+                    physicalTransportType, physicalNetworkSlotIndex);
+        });
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
     public void getSlicingConfig(Message result) {
         RadioDataProxy dataProxy = getRadioServiceProxy(RadioDataProxy.class);
         if (!canMakeRequest("getSlicingConfig", dataProxy, result, RADIO_HAL_VERSION_1_6)) {
@@ -5457,6 +5541,39 @@ public class RIL extends BaseCommands implements CommandsInterface {
                 });
     }
 
+    /** {@inheritDoc} */
+    @Override
+    public void updateAllowedImsServices(@NonNull Set<Integer> allowedImsServicesAny,
+            @NonNull Set<Integer> allowedImsServicesHomeOnly,
+            @Nullable Message result) {
+        RadioImsProxy imsProxy = getRadioServiceProxy(RadioImsProxy.class);
+        if (!canMakeRequest("updateAllowedImsServices", imsProxy, result, RADIO_HAL_VERSION_2_4)) {
+            return;
+        }
+
+        RILRequest rr = obtainRequest(RIL_REQUEST_UPDATE_ALLOWED_IMS_SERVICES, result,
+                mRILDefaultWorkSource);
+
+        if (RILJ_LOGD) {
+            riljLog(
+                    rr.serialString()
+                            + "> "
+                            + RILUtils.requestToString(rr.mRequest)
+                            + " allowedImsServicesAny="
+                            + allowedImsServicesAny
+                            + " allowedImsServicesHomeOnly="
+                            + allowedImsServicesHomeOnly);
+        }
+        radioServiceInvokeHelper(
+                HAL_SERVICE_IMS,
+                rr,
+                "updateAllowedImsServices",
+                () -> {
+                    imsProxy.updateAllowedServices(rr.mSerial,
+                            RILUtils.convertImsServices(allowedImsServicesAny,
+                                    allowedImsServicesHomeOnly));
+                });
+    }
 
     //***** Private Methods
     /**

@@ -32,6 +32,7 @@ import android.telephony.Annotation.DataActivityType;
 import android.telephony.Annotation.NetCapability;
 import android.telephony.Annotation.NetworkType;
 import android.telephony.Annotation.ValidationStatus;
+import android.telephony.CarrierConfigManager;
 import android.telephony.TelephonyManager;
 import android.telephony.data.ApnSetting;
 import android.telephony.data.ApnSetting.ApnType;
@@ -501,5 +502,26 @@ public class DataUtils {
 
     private static void loge(String msg) {
         Rlog.e(TAG, msg);
+    }
+
+    /**
+     * Checks if a given dataMode is valid or not.
+     *
+     * @param dataMode the data mode that needs to be validated.
+     * @return {@code true} if data mode is valid, {@code false} otherwise.
+     */
+    public static boolean isValidDataMode(int dataMode) {
+        if (dataMode < CarrierConfigManager.SATELLITE_DATA_SUPPORT_ONLY_RESTRICTED
+                || CarrierConfigManager.SATELLITE_DATA_SUPPORT_ALL < dataMode) {
+            loge(
+                    "Invalid data mode: "
+                            + dataMode
+                            + ". It's not within the allowed range of data mode: "
+                            + CarrierConfigManager.SATELLITE_DATA_SUPPORT_ONLY_RESTRICTED
+                            + " - "
+                            + CarrierConfigManager.SATELLITE_DATA_SUPPORT_ALL);
+            return false;
+        }
+        return true;
     }
 }

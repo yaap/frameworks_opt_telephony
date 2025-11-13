@@ -28,6 +28,7 @@ import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructStatVfs;
 import android.text.TextUtils;
+import android.util.SparseArray;
 
 import com.android.ims.ImsManager;
 import com.android.internal.telephony.cdma.CdmaSubscriptionSourceManager;
@@ -583,6 +584,7 @@ public class TelephonyComponentFactory {
      *
      * @param phone The phone instance.
      * @param dataNetworkController Data network controller instance.
+     * @param dataServiceManagers Data service manager instances.
      * @param looper The looper to be used by the handler. Currently the handler thread is the phone
      * process's main thread.
      * @param callback Callback for passing events back to data network controller.
@@ -590,9 +592,11 @@ public class TelephonyComponentFactory {
      */
     public @NonNull DataSettingsManager makeDataSettingsManager(@NonNull Phone phone,
             @NonNull DataNetworkController dataNetworkController,
+            @NonNull SparseArray<DataServiceManager> dataServiceManagers,
             @NonNull FeatureFlags featureFlags, @NonNull Looper looper,
             @NonNull DataSettingsManager.DataSettingsManagerCallback callback) {
-        return new DataSettingsManager(phone, dataNetworkController, featureFlags, looper,
+        return new DataSettingsManager(phone, dataNetworkController, dataServiceManagers,
+                featureFlags, looper,
                 callback);
     }
 

@@ -100,11 +100,7 @@ public class UiccStateChangedLauncher extends Handler {
         Intent intent = new Intent(TelephonyIntents.ACTION_SIM_STATE_CHANGED);
         intent.setPackage(sDeviceProvisioningPackage);
         try {
-            if (mFeatureFlags.hsumBroadcast()) {
-                mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
-            } else {
-                mContext.sendBroadcast(intent);
-            }
+            mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
         } catch (Exception e) {
             Log.e(TAG, e.toString());
         }

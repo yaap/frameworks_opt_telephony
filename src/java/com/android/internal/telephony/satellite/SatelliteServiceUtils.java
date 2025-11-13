@@ -36,6 +36,7 @@ import android.telephony.PersistentLogger;
 import android.telephony.ServiceState;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyManager;
 import android.telephony.satellite.AntennaPosition;
 import android.telephony.satellite.EarfcnRange;
 import android.telephony.satellite.NtnSignalStrength;
@@ -736,6 +737,13 @@ public class SatelliteServiceUtils {
         }
 
         return satelliteController.isInCarrierRoamingNbIotNtn(phone);
+    }
+
+    /** Returns the carrier ID of the given subscription id. */
+    public static int getCarrierIdFromSubscription(int subId) {
+        int phoneId = SubscriptionManager.getPhoneId(subId);
+        Phone phone = PhoneFactory.getPhone(phoneId);
+        return phone != null ? phone.getCarrierId() : TelephonyManager.UNKNOWN_CARRIER_ID;
     }
 
     private static void logd(@NonNull String log) {

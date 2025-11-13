@@ -125,6 +125,7 @@ public class TelephonyRegistryTest extends TelephonyTest {
     private int mSrvccState = -1;
     private ServiceState mServiceState = null;
     private int mRadioPowerState = RADIO_POWER_UNAVAILABLE;
+    private boolean mCarrierNetworkChange = false;
     private int mDataConnectionState = TelephonyManager.DATA_UNKNOWN;
     private int mNetworkType = TelephonyManager.NETWORK_TYPE_UNKNOWN;
     private int mDataActivity = TelephonyManager.DATA_ACTIVITY_NONE;
@@ -206,28 +207,29 @@ public class TelephonyRegistryTest extends TelephonyTest {
                 TelephonyCallback.EVENT_OUTGOING_EMERGENCY_SMS);
     }
 
-    public class TelephonyCallbackWrapper extends TelephonyCallback implements
-            TelephonyCallback.SrvccStateListener,
-            TelephonyCallback.PhoneCapabilityListener,
-            TelephonyCallback.ActiveDataSubscriptionIdListener,
-            TelephonyCallback.RadioPowerStateListener,
-            TelephonyCallback.PreciseDataConnectionStateListener,
-            TelephonyCallback.DataConnectionStateListener,
-            TelephonyCallback.DisplayInfoListener,
-            TelephonyCallback.LinkCapacityEstimateChangedListener,
-            TelephonyCallback.PhysicalChannelConfigListener,
-            TelephonyCallback.CellLocationListener,
-            TelephonyCallback.ServiceStateListener,
-            TelephonyCallback.CellInfoListener,
-            TelephonyCallback.BarringInfoListener,
-            TelephonyCallback.RegistrationFailedListener,
-            TelephonyCallback.DataActivityListener,
-            TelephonyCallback.SimultaneousCellularCallingSupportListener,
-            TelephonyCallback.EmergencyCallbackModeListener,
-            TelephonyCallback.CarrierRoamingNtnListener,
-            TelephonyCallback.SecurityAlgorithmsListener,
-            TelephonyCallback.CellularIdentifierDisclosedListener,
-            TelephonyCallback.CallAttributesListener {
+    public class TelephonyCallbackWrapper extends TelephonyCallback
+            implements TelephonyCallback.SrvccStateListener,
+                    TelephonyCallback.PhoneCapabilityListener,
+                    TelephonyCallback.ActiveDataSubscriptionIdListener,
+                    TelephonyCallback.RadioPowerStateListener,
+                    TelephonyCallback.CarrierNetworkListener,
+                    TelephonyCallback.PreciseDataConnectionStateListener,
+                    TelephonyCallback.DataConnectionStateListener,
+                    TelephonyCallback.DisplayInfoListener,
+                    TelephonyCallback.LinkCapacityEstimateChangedListener,
+                    TelephonyCallback.PhysicalChannelConfigListener,
+                    TelephonyCallback.CellLocationListener,
+                    TelephonyCallback.ServiceStateListener,
+                    TelephonyCallback.CellInfoListener,
+                    TelephonyCallback.BarringInfoListener,
+                    TelephonyCallback.RegistrationFailedListener,
+                    TelephonyCallback.DataActivityListener,
+                    TelephonyCallback.SimultaneousCellularCallingSupportListener,
+                    TelephonyCallback.EmergencyCallbackModeListener,
+                    TelephonyCallback.CarrierRoamingNtnListener,
+                    TelephonyCallback.SecurityAlgorithmsListener,
+                    TelephonyCallback.CellularIdentifierDisclosedListener,
+                    TelephonyCallback.CallAttributesListener {
         // This class isn't mockable to get invocation counts because the IBinder is null and
         // crashes the TelephonyRegistry. Make a cheesy verify(times()) alternative.
         public AtomicInteger invocationCount = new AtomicInteger(0);
@@ -259,6 +261,13 @@ public class TelephonyRegistryTest extends TelephonyTest {
             invocationCount.incrementAndGet();
             mRadioPowerState = state;
         }
+
+        @Override
+        public void onCarrierNetworkChange(boolean active) {
+            invocationCount.incrementAndGet();
+            mCarrierNetworkChange = active;
+        }
+
         @Override
         public void onPreciseDataConnectionStateChanged(PreciseDataConnectionState preciseState) {
             invocationCount.incrementAndGet();
@@ -500,6 +509,143 @@ public class TelephonyRegistryTest extends TelephonyTest {
         mTelephonyRegistry.notifyActiveDataSubIdChanged(activeSubId);
         processAllMessages();
         assertEquals(activeSubId, mActiveSubId);
+    }
+
+    @Test
+    @SmallTest
+    public void testCarrierNetworkChangeWithSubId_initialStateIsFalse() {
+        int subId = 1;
+        doReturn(mMockSubInfo).when(mSubscriptionManager).getActiveSubscriptionInfo(anyInt());
+        doReturn(0 /*slotIndex*/).when(mMockSubInfo).getSimSlotIndex();
+        int[] events = {TelephonyCallback.EVENT_CARRIER_NETWORK_CHANGED};
+
+        mTelephonyRegistry.listenWithEventList(
+                false /*renounceFineLocationAccess*/,
+                false /*renounceCoarseLocationAccess*/,
+                subId,
+                mContext.getOpPackageName(),
+                mContext.getAttributionTag(),
+                mTelephonyCallback.callback,
+                events,
+                true /*notifyNow*/);
+
+        processAllMessages();
+        assertFalse(mCarrierNetworkChange);
+    }
+
+    @Test
+    @SmallTest
+    public void testCarrierNetworkChangeWithSubId_notifyFalse() {
+        int subId = 1;
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS)
+                .when(mTelephonyManager)
+                .getCarrierPrivilegeStatus(anyInt());
+        doReturn(mMockSubInfo).when(mSubscriptionManager).getActiveSubscriptionInfo(anyInt());
+        int phoneId = 0;
+        doReturn(phoneId).when(mMockSubInfo).getSimSlotIndex();
+        int[] events = {TelephonyCallback.EVENT_CARRIER_NETWORK_CHANGED};
+
+        mTelephonyRegistry.listenWithEventList(
+                false /*renounceFineLocationAccess*/,
+                false /*renounceCoarseLocationAccess*/,
+                subId,
+                mContext.getOpPackageName(),
+                mContext.getAttributionTag(),
+                mTelephonyCallback.callback,
+                events,
+                true /*notifyNow*/);
+
+        mTelephonyRegistry.notifyCarrierNetworkChangeForPhoneAndSubId(phoneId, subId, false);
+        processAllMessages();
+        assertFalse(mCarrierNetworkChange);
+    }
+
+    @Test
+    @SmallTest
+    public void testCarrierNetworkChangeWithSubId_notifyTrue() {
+        int subId = 1;
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS)
+                .when(mTelephonyManager)
+                .getCarrierPrivilegeStatus(anyInt());
+        doReturn(mMockSubInfo).when(mSubscriptionManager).getActiveSubscriptionInfo(anyInt());
+        int phoneId = 0;
+        doReturn(phoneId).when(mMockSubInfo).getSimSlotIndex();
+        int[] events = {TelephonyCallback.EVENT_CARRIER_NETWORK_CHANGED};
+
+        mTelephonyRegistry.listenWithEventList(
+                false /*renounceFineLocationAccess*/,
+                false /*renounceCoarseLocationAccess*/,
+                subId,
+                mContext.getOpPackageName(),
+                mContext.getAttributionTag(),
+                mTelephonyCallback.callback,
+                events,
+                true /*notifyNow*/);
+
+        mTelephonyRegistry.notifyCarrierNetworkChangeForPhoneAndSubId(phoneId, subId, true);
+        processAllMessages();
+        assertTrue(mCarrierNetworkChange);
+    }
+
+    @Test
+    @SmallTest
+    public void testCarrierNetworkChangeForPhone_updatesOnRegistration() {
+        int subId = 1;
+        int phoneId = 0;
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS)
+                .when(mTelephonyManager)
+                .getCarrierPrivilegeStatus(anyInt());
+        doReturn(mMockSubInfo).when(mSubscriptionManager).getActiveSubscriptionInfo(anyInt());
+        doReturn(phoneId).when(mMockSubInfo).getSimSlotIndex();
+        int[] events = {TelephonyCallback.EVENT_CARRIER_NETWORK_CHANGED};
+
+        assertFalse(mCarrierNetworkChange);
+        mTelephonyRegistry.notifyCarrierNetworkChangeForPhoneAndSubId(
+                phoneId, INVALID_SUBSCRIPTION_ID, true);
+        mTelephonyRegistry.listenWithEventList(
+                false /*renounceFineLocationAccess*/,
+                false /*renounceCoarseLocationAccess*/,
+                subId,
+                mContext.getOpPackageName(),
+                mContext.getAttributionTag(),
+                mTelephonyCallback.callback,
+                events,
+                true /*notifyNow*/);
+
+        processAllMessages();
+        assertTrue(mCarrierNetworkChange);
+    }
+
+    @Test
+    @SmallTest
+    public void testCarrierNetworkChangeForPhone_notifiesSubListener() {
+        int subId = 1;
+        int phoneId = 0;
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS)
+                .when(mTelephonyManager)
+                .getCarrierPrivilegeStatus(anyInt());
+        doReturn(mMockSubInfo).when(mSubscriptionManager).getActiveSubscriptionInfo(anyInt());
+        doReturn(phoneId).when(mMockSubInfo).getSimSlotIndex();
+        int[] events = {TelephonyCallback.EVENT_CARRIER_NETWORK_CHANGED};
+
+        mTelephonyRegistry.listenWithEventList(
+                false /*renounceFineLocationAccess*/,
+                false /*renounceCoarseLocationAccess*/,
+                subId,
+                mContext.getOpPackageName(),
+                mContext.getAttributionTag(),
+                mTelephonyCallback.callback,
+                events,
+                true /*notifyNow*/);
+
+        mTelephonyRegistry.notifyCarrierNetworkChangeForPhoneAndSubId(phoneId, subId, true);
+        processAllMessages();
+        assertTrue(mCarrierNetworkChange);
+
+        mTelephonyRegistry.notifyCarrierNetworkChangeForPhoneAndSubId(
+                phoneId, INVALID_SUBSCRIPTION_ID, false);
+        processAllMessages();
+        assertFalse(mCarrierNetworkChange);
     }
 
     /**
@@ -1815,7 +1961,7 @@ public class TelephonyRegistryTest extends TelephonyTest {
     @Test
     @EnableFlags(Flags.FLAG_CARRIER_ROAMING_NB_IOT_NTN)
     public void testNotifyCarrierRoamingNtnSignalStrengthChanged() {
-        int subId = INVALID_SUBSCRIPTION_ID;
+        int subId = 2;
         doReturn(mMockSubInfo).when(mSubscriptionManager).getActiveSubscriptionInfo(anyInt());
         doReturn(0/*slotIndex*/).when(mMockSubInfo).getSimSlotIndex();
         int[] events = {TelephonyCallback.EVENT_CARRIER_ROAMING_NTN_SIGNAL_STRENGTH_CHANGED};

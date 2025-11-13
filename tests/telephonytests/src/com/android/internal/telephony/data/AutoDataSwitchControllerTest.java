@@ -138,6 +138,7 @@ public class AutoDataSwitchControllerTest extends TelephonyTest {
             doReturn(mSignalStrength).when(phone).getSignalStrength();
             doReturn(mDataNetworkController).when(phone).getDataNetworkController();
             doReturn(mDataConfigManager).when(mDataNetworkController).getDataConfigManager();
+            doReturn(mDataSettingsManager).when(phone).getDataSettingsManager();
             doAnswer(invocation -> phone.getSubId() == mDefaultDataSub)
                     .when(phone).isUserDataEnabled();
         }
@@ -196,7 +197,9 @@ public class AutoDataSwitchControllerTest extends TelephonyTest {
         mScheduledEventsToExtras = getPrivateField(mAutoDataSwitchControllerUT,
                 "mScheduledEventsToExtras", Map.class);
 
-        doReturn(true).when(mFeatureFlags).autoDataSwitchEnhanced();
+        clearInvocations(mDisplayInfoController, mSignalStrengthController, mSST);
+
+        doReturn(true).when(mFeatureFlags).autoDataPruneListener();
     }
 
     @After
@@ -417,6 +420,7 @@ public class AutoDataSwitchControllerTest extends TelephonyTest {
 
         // 4.1.2 Display info and signal strength on secondary phone became bad,
         // but primary become service, then don't switch.
+        logd("4.1.2 Display info and signal strength on secondary became bad, don't switch.");
         prepareIdealUsesNonDdsCondition();
         processAllFutureMessages();
         clearInvocations(mMockedPhoneSwitcherCallback, mMockedAlarmManager);
@@ -430,6 +434,7 @@ public class AutoDataSwitchControllerTest extends TelephonyTest {
                 EVENT_STABILITY_CHECK_PASSED));
 
         // 4.2 Display info on default phone became good just as the secondary
+        logd("4.2 Display info on default phone became good just as the secondary.");
         prepareIdealUsesNonDdsCondition();
         processAllFutureMessages();
         clearInvocations(mMockedPhoneSwitcherCallback, mMockedAlarmManager);
@@ -442,6 +447,7 @@ public class AutoDataSwitchControllerTest extends TelephonyTest {
                 EVENT_STABILITY_CHECK_PASSED));
 
         // 4.3 Signal strength on default phone became just as good as the secondary
+        logd("4.3 Signal strength on default phone became just as good as the secondary.");
         prepareIdealUsesNonDdsCondition();
         processAllFutureMessages();
         clearInvocations(mMockedPhoneSwitcherCallback, mMockedAlarmManager);
@@ -724,14 +730,216 @@ public class AutoDataSwitchControllerTest extends TelephonyTest {
     }
 
     @Test
+    public void testDataSettingsChangedUpdateListener() {
+        setDefaultDataSubId(SUB_1); // Phone 1 is default
+        int modemCount = mPhones.length; // Should be 2
+
+        // Pre-condition: Assume listeners are registered initially (cleared invocations in setUp)
+
+        // --- Scenario 1: Disable Default Phone User Data ---
+        logd("Scenario 1: Disable Default Phone User Data");
+        doReturn(false).when(mPhone).isUserDataEnabled();
+
+        mAutoDataSwitchControllerUT.evaluateAutoDataSwitch(EVALUATION_REASON_DATA_SETTINGS_CHANGED);
+        processAllMessages();
+
+        // Verify unregister calls for *both* phones
+        verify(mDisplayInfoController, times(modemCount))
+                .unregisterForTelephonyDisplayInfoChanged(any());
+        verify(mSignalStrengthController, times(modemCount)).unregisterForSignalStrengthChanged(
+                any());
+        verify(mSST, times(modemCount)).unregisterForServiceStateChanged(any());
+        // Verify register calls were NOT made
+        verify(mDisplayInfoController, never()).registerForTelephonyDisplayInfoChanged(
+                any(), anyInt(), any());
+        verify(mSignalStrengthController, never()).registerForSignalStrengthChanged(
+                any(), anyInt(), any());
+        verify(mSST, never()).registerForServiceStateChanged(any(), anyInt(), any());
+        clearInvocations(mDisplayInfoController, mSignalStrengthController, mSST);
+
+        // --- Scenario 2: Re-enable Default Phone User Data ---
+        logd("Scenario 2: Re-enable Default Phone User Data");
+        doReturn(true).when(mPhone).isUserDataEnabled();
+
+        mAutoDataSwitchControllerUT.evaluateAutoDataSwitch(EVALUATION_REASON_DATA_SETTINGS_CHANGED);
+        processAllMessages();
+
+        // Verify register calls for *both* phones
+        verify(mDisplayInfoController, times(modemCount)).registerForTelephonyDisplayInfoChanged(
+                any(), eq(EVENT_DISPLAY_INFO_CHANGED), any());
+        verify(mSignalStrengthController, times(modemCount)).registerForSignalStrengthChanged(
+                any(), eq(EVENT_SIGNAL_STRENGTH_CHANGED), any());
+        verify(mSST, times(modemCount)).registerForServiceStateChanged(
+                any(), eq(EVENT_SERVICE_STATE_CHANGED), any());
+        // Verify unregister calls were NOT made
+        verify(mDisplayInfoController, never()).unregisterForTelephonyDisplayInfoChanged(any());
+        verify(mSignalStrengthController, never()).unregisterForSignalStrengthChanged(any());
+        verify(mSST, never()).unregisterForServiceStateChanged(any());
+        clearInvocations(mDisplayInfoController, mSignalStrengthController, mSST); // Reset
+
+        // --- Scenario 3: Disable *Only* Candidate Phone Data Setting ---
+        logd("Scenario 3: Disable *Only* Candidate Phone Data Setting");
+        doReturn(true).when(mPhone).isUserDataEnabled(); // Ensure default is enabled
+        doReturn(false).when(mDataSettingsManager).isDataEnabled(); // Disable candidate
+
+        mAutoDataSwitchControllerUT.evaluateAutoDataSwitch(EVALUATION_REASON_DATA_SETTINGS_CHANGED);
+        processAllMessages();
+
+        // Verify unregister calls for *both* phones (as no candidates left)
+        verify(mDisplayInfoController, times(modemCount))
+                .unregisterForTelephonyDisplayInfoChanged(any());
+        verify(mSignalStrengthController, times(modemCount))
+                .unregisterForSignalStrengthChanged(any());
+        verify(mSST, times(modemCount)).unregisterForServiceStateChanged(any());
+        // Verify register calls were NOT made
+        verify(mDisplayInfoController, never())
+                .registerForTelephonyDisplayInfoChanged(any(), anyInt(), any());
+        verify(mSignalStrengthController, never())
+                .registerForSignalStrengthChanged(any(), anyInt(), any());
+        verify(mSST, never()).registerForServiceStateChanged(any(), anyInt(), any());
+        clearInvocations(mDisplayInfoController, mSignalStrengthController, mSST); // Reset
+
+        // --- Scenario 4: Re-enable Candidate Phone Data Setting ---
+        logd("Scenario 4: Re-enable Candidate Phone Data Setting");
+        doReturn(true).when(mDataSettingsManager).isDataEnabled();
+
+        mAutoDataSwitchControllerUT.evaluateAutoDataSwitch(EVALUATION_REASON_DATA_SETTINGS_CHANGED);
+        processAllMessages();
+
+        // Verify register calls for *both* phones
+        verify(mDisplayInfoController, times(modemCount)).registerForTelephonyDisplayInfoChanged(
+                any(), eq(EVENT_DISPLAY_INFO_CHANGED), any());
+        verify(mSignalStrengthController, times(modemCount)).registerForSignalStrengthChanged(
+                any(), eq(EVENT_SIGNAL_STRENGTH_CHANGED), any());
+        verify(mSST, times(modemCount)).registerForServiceStateChanged(
+                any(), eq(EVENT_SERVICE_STATE_CHANGED), any());
+        // Verify unregister calls were NOT made
+        verify(mDisplayInfoController, never()).unregisterForTelephonyDisplayInfoChanged(any());
+        verify(mSignalStrengthController, never()).unregisterForSignalStrengthChanged(any());
+        verify(mSST, never()).unregisterForServiceStateChanged(any());
+    }
+
+    @Test
+    public void testDefaultNetworkChangedUpdateListener() {
+        setDefaultDataSubId(SUB_1); // Phone 1 is default
+        int modemCount = mPhones.length; // Should be 2
+
+        // Pre-condition: Assume listeners are registered initially (cleared invocations in setUp)
+
+        // --- Scenario 1: Default network becomes non-cellular (WIFI) ---
+        logd("Scenario 1: Default network becomes WIFI");
+        NetworkCapabilities wifiCapabilities = new NetworkCapabilities();
+        wifiCapabilities.addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
+        mAutoDataSwitchControllerUT.updateDefaultNetworkCapabilities(wifiCapabilities);
+        mAutoDataSwitchControllerUT.evaluateAutoDataSwitch(AutoDataSwitchController
+                .EVALUATION_REASON_DEFAULT_NETWORK_CHANGED);
+        processAllMessages();
+
+        // Verify unregister calls for *both* phones
+        verify(mDisplayInfoController, times(modemCount))
+                .unregisterForTelephonyDisplayInfoChanged(any());
+        verify(mSignalStrengthController, times(modemCount))
+                .unregisterForSignalStrengthChanged(any());
+        verify(mSST, times(modemCount)).unregisterForServiceStateChanged(any());
+        // Verify register calls were NOT made
+        verify(mDisplayInfoController, never()).registerForTelephonyDisplayInfoChanged(
+                any(), anyInt(), any());
+        verify(mSignalStrengthController, never()).registerForSignalStrengthChanged(
+                any(), anyInt(), any());
+        verify(mSST, never()).registerForServiceStateChanged(any(), anyInt(), any());
+        clearInvocations(mDisplayInfoController, mSignalStrengthController, mSST); // Reset
+
+        // --- Scenario 2: Default network becomes cellular ---
+        logd("Scenario 2: Default network becomes CELLULAR");
+        NetworkCapabilities cellularCapabilities = new NetworkCapabilities();
+        cellularCapabilities.addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR);
+        mAutoDataSwitchControllerUT.updateDefaultNetworkCapabilities(cellularCapabilities);
+        mAutoDataSwitchControllerUT.evaluateAutoDataSwitch(AutoDataSwitchController
+                .EVALUATION_REASON_DEFAULT_NETWORK_CHANGED);
+        processAllMessages();
+
+        // Verify register calls for *both* phones
+        verify(mDisplayInfoController, times(modemCount)).registerForTelephonyDisplayInfoChanged(
+                any(), eq(EVENT_DISPLAY_INFO_CHANGED), any());
+        verify(mSignalStrengthController, times(modemCount)).registerForSignalStrengthChanged(any(),
+                eq(EVENT_SIGNAL_STRENGTH_CHANGED), any());
+        verify(mSST, times(modemCount)).registerForServiceStateChanged(any(),
+                eq(EVENT_SERVICE_STATE_CHANGED), any());
+        // Verify unregister calls were NOT made
+        verify(mDisplayInfoController, never()).unregisterForTelephonyDisplayInfoChanged(any());
+        verify(mSignalStrengthController, never()).unregisterForSignalStrengthChanged(any());
+        verify(mSST, never()).unregisterForServiceStateChanged(any());
+        clearInvocations(mDisplayInfoController, mSignalStrengthController, mSST); // Reset
+
+        // --- Scenario 3: Default network lost (null) ---
+        logd("Scenario 3: Default network lost (null)");
+        // First switch to non-cellular to ensure listeners are off
+        mAutoDataSwitchControllerUT.updateDefaultNetworkCapabilities(wifiCapabilities);
+        mAutoDataSwitchControllerUT.evaluateAutoDataSwitch(AutoDataSwitchController
+                .EVALUATION_REASON_DEFAULT_NETWORK_CHANGED);
+        processAllMessages();
+
+        verify(mDisplayInfoController, times(modemCount))
+                .unregisterForTelephonyDisplayInfoChanged(any());
+        verify(mSignalStrengthController, times(modemCount))
+                .unregisterForSignalStrengthChanged(any());
+        verify(mSST, times(modemCount))
+                .unregisterForServiceStateChanged(any());
+        clearInvocations(mDisplayInfoController, mSignalStrengthController, mSST);
+
+        // Now lose the network
+        mAutoDataSwitchControllerUT.updateDefaultNetworkCapabilities(null);
+        mAutoDataSwitchControllerUT.evaluateAutoDataSwitch(AutoDataSwitchController
+                .EVALUATION_REASON_DEFAULT_NETWORK_CHANGED);
+        processAllMessages();
+
+        // Verify register calls for *both* phones (null network means cellular is possible)
+        verify(mDisplayInfoController, times(modemCount)).registerForTelephonyDisplayInfoChanged(
+                any(), eq(EVENT_DISPLAY_INFO_CHANGED), any());
+        verify(mSignalStrengthController, times(modemCount)).registerForSignalStrengthChanged(any(),
+                eq(EVENT_SIGNAL_STRENGTH_CHANGED), any());
+        verify(mSST, times(modemCount)).registerForServiceStateChanged(any(),
+                eq(EVENT_SERVICE_STATE_CHANGED), any());
+
+        verify(mDisplayInfoController, never())
+                .unregisterForTelephonyDisplayInfoChanged(any());
+        verify(mSignalStrengthController, never()).unregisterForSignalStrengthChanged(any());
+        verify(mSST, never()).unregisterForServiceStateChanged(any());
+    }
+
+    @Test
     public void testRatSignalStrengthSkipEvaluation() {
-        // Verify the secondary phone is OOS and its score(0) is too low to justify the evaluation
+        // Score NOT significantly better to justify the evaluation
         clearInvocations(mMockedPhoneSwitcherCallback);
         displayInfoChanged(PHONE_2, mBadTelephonyDisplayInfo);
         processAllFutureMessages();
         verify(mMockedPhoneSwitcherCallback, never())
                 .onRequireCancelAnyPendingAutoSwitchValidation();
         verify(mMockedPhoneSwitcherCallback, never()).onRequireValidation(anyInt(), anyBoolean());
+    }
+
+    /**
+     * Scenario 2: On Default, Candidate score IS better, BUT Candidate is NOT HOME.
+     */
+    @Test
+    public void testBetterCandidate_onDefault_nonHome_scoreHigh_noEval() {
+        doReturn(PHONE_1).when(mPhoneSwitcher).getPreferredDataPhoneId();
+
+        // Setup state: Low score for default, high score for backup
+        displayInfoChanged(PHONE_1, mBadTelephonyDisplayInfo);
+        signalStrengthChanged(PHONE_1, SignalStrength.SIGNAL_STRENGTH_POOR);
+        displayInfoChanged(PHONE_2, mGoodTelephonyDisplayInfo); // High score inputs
+        signalStrengthChanged(PHONE_2, SignalStrength.SIGNAL_STRENGTH_GREAT);
+        serviceStateChanged(PHONE_2, NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
+        processAllMessages();
+
+        // Trigger internal call via another display info change
+        displayInfoChanged(PHONE_2, mGoodTelephonyDisplayInfo);
+        processAllMessages();
+
+        // Verify no evaluation scheduled (skipped because not HOME)
+        assertThat(mAutoDataSwitchControllerUT.hasMessages(EVENT_EVALUATE_AUTO_SWITCH)).isFalse();
+        mAutoDataSwitchControllerUT.removeMessages(EVENT_EVALUATE_AUTO_SWITCH);
     }
 
     /**
@@ -766,6 +974,7 @@ public class AutoDataSwitchControllerTest extends TelephonyTest {
 
         // 4.2 Auto switch feature is enabled
         doReturn(true).when(mPhone2).getDataRoamingEnabled();
+        doReturn(true).when(mDataSettingsManager).isDataEnabled();
         mDataEvaluation.addDataAllowedReason(DataEvaluation.DataAllowedReason.NORMAL);
 
         // 5. No default network

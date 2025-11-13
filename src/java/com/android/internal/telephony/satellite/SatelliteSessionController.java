@@ -79,6 +79,7 @@ import com.android.internal.telephony.PhoneFactory;
 import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.satellite.metrics.SessionMetricsStats;
 import com.android.internal.telephony.util.ArrayUtils;
+import com.android.internal.util.IState;
 import com.android.internal.util.State;
 import com.android.internal.util.StateMachine;
 import com.android.telephony.Rlog;
@@ -147,14 +148,15 @@ public class SatelliteSessionController extends StateMachine {
     private static final int DEFAULT_ESOS_INACTIVITY_TIMEOUT_SEC = 600;
     private static final long UNDEFINED_TIMESTAMP = 0L;
 
+    /** All the atomic variables are declared here. */
+    private AtomicBoolean mIsBound = new AtomicBoolean(false);
+    private AtomicBoolean mIsBinding = new AtomicBoolean(false);
+
     @NonNull private final ExponentialBackoff mExponentialBackoff;
-    @NonNull private final Object mLock = new Object();
     @Nullable
     private ISatelliteGateway mSatelliteGatewayService;
     private String mSatelliteGatewayServicePackageName = "";
     @Nullable private SatelliteGatewayServiceConnection mSatelliteGatewayServiceConnection;
-    private boolean mIsBound;
-    private boolean mIsBinding;
     private boolean mIsRegisteredScreenStateChanged = false;
 
     @NonNull private static SatelliteSessionController sInstance;
@@ -293,16 +295,13 @@ public class SatelliteSessionController extends StateMachine {
         mIsSatelliteSupported = isSatelliteSupported;
         mExponentialBackoff = new ExponentialBackoff(REBIND_INITIAL_DELAY, REBIND_MAXIMUM_DELAY,
                 REBIND_MULTIPLIER, looper, () -> {
-            synchronized (mLock) {
-                if ((mIsBound && mSatelliteGatewayService != null) || mIsBinding) {
-                    return;
-                }
+            if ((mIsBound.get() && mSatelliteGatewayService != null) || mIsBinding.get()) {
+                return;
             }
+
             if (mSatelliteGatewayServiceConnection != null) {
-                synchronized (mLock) {
-                    mIsBound = false;
-                    mIsBinding = false;
-                }
+                mIsBound.set(false);
+                mIsBinding.set(false);
                 unbindService();
             }
             bindService();
@@ -533,10 +532,8 @@ public class SatelliteSessionController extends StateMachine {
         }
 
         if (mSatelliteGatewayServiceConnection != null) {
-            synchronized (mLock) {
-                mIsBound = false;
-                mIsBinding = false;
-            }
+            mIsBound.set(false);
+            mIsBinding.set(false);
             unbindService();
             bindService();
         }
@@ -623,8 +620,15 @@ public class SatelliteSessionController extends StateMachine {
      * @return {@code true} if state machine is in enabling state and {@code false} otherwise.
      */
     public boolean isInEnablingState() {
-        if (DBG) plogd("isInEnablingState: getCurrentState=" + getCurrentState());
-        return getCurrentState() == mEnablingState;
+        try {
+            IState currentState = getCurrentState();
+            if (DBG) plogd("isInEnablingState: getCurrentState=" + currentState);
+            return currentState == mEnablingState;
+        } catch (Exception e) {
+            plogw("isInEnablingState: Exception: " + e
+                + ", mCurrentState=" + mCurrentState);
+            return mCurrentState == SatelliteManager.SATELLITE_MODEM_STATE_ENABLING_SATELLITE;
+        }
     }
 
     /**
@@ -633,8 +637,15 @@ public class SatelliteSessionController extends StateMachine {
      * @return {@code true} if state machine is in disabling state and {@code false} otherwise.
      */
     public boolean isInDisablingState() {
-        if (DBG) plogd("isInDisablingState: getCurrentState=" + getCurrentState());
-        return getCurrentState() == mDisablingState;
+        try {
+            IState currentState = getCurrentState();
+            if (DBG) plogd("isInDisablingState: getCurrentState=" + currentState);
+            return currentState == mDisablingState;
+        } catch (Exception e) {
+            plogw("isInDisablingState: Exception: " + e
+                + ", mCurrentState=" + mCurrentState);
+            return mCurrentState == SatelliteManager.SATELLITE_MODEM_STATE_DISABLING_SATELLITE;
+        }
     }
 
     /**
@@ -1537,10 +1548,8 @@ public class SatelliteSessionController extends StateMachine {
     }
 
     private void bindService() {
-        synchronized (mLock) {
-            if (mIsBinding || mIsBound) return;
-            mIsBinding = true;
-        }
+        if (mIsBinding.get() || mIsBound.get()) return;
+        mIsBinding.set(true);
         mExponentialBackoff.start();
 
         String packageName = getSatelliteGatewayPackageName();
@@ -1549,9 +1558,7 @@ public class SatelliteSessionController extends StateMachine {
                     + " undefined.");
             // Since the package name comes from static device configs, stop retry because
             // rebind will continue to fail without a valid package name.
-            synchronized (mLock) {
-                mIsBinding = false;
-            }
+            mIsBinding.set(false);
             mExponentialBackoff.stop();
             return;
         }
@@ -1565,17 +1572,13 @@ public class SatelliteSessionController extends StateMachine {
             if (success) {
                 plogd("Successfully bound to the satellite gateway service.");
             } else {
-                synchronized (mLock) {
-                    mIsBinding = false;
-                }
+                mIsBinding.set(false);
                 mExponentialBackoff.notifyFailed();
                 ploge("Error binding to the satellite gateway service. Retrying in "
                         + mExponentialBackoff.getCurrentDelay() + " ms.");
             }
         } catch (Exception e) {
-            synchronized (mLock) {
-                mIsBinding = false;
-            }
+            mIsBinding.set(false);
             mExponentialBackoff.notifyFailed();
             ploge("Exception binding to the satellite gateway service. Retrying in "
                     + mExponentialBackoff.getCurrentDelay() + " ms. Exception: " + e);
@@ -1586,10 +1589,8 @@ public class SatelliteSessionController extends StateMachine {
         plogd("unbindService");
         mExponentialBackoff.stop();
         mSatelliteGatewayService = null;
-        synchronized (mLock) {
-            mIsBinding = false;
-            mIsBound = false;
-        }
+        mIsBinding.set(false);
+        mIsBound.set(false);
         if (mSatelliteGatewayServiceConnection != null) {
             mContext.unbindService(mSatelliteGatewayServiceConnection);
             mSatelliteGatewayServiceConnection = null;
@@ -1600,10 +1601,8 @@ public class SatelliteSessionController extends StateMachine {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
             plogd("onServiceConnected: ComponentName=" + name);
-            synchronized (mLock) {
-                mIsBound = true;
-                mIsBinding = false;
-            }
+            mIsBound.set(true);
+            mIsBinding.set(false);
             mSatelliteGatewayService = ISatelliteGateway.Stub.asInterface(service);
             mExponentialBackoff.stop();
         }
@@ -1611,20 +1610,16 @@ public class SatelliteSessionController extends StateMachine {
         @Override
         public void onServiceDisconnected(ComponentName name) {
             ploge("onServiceDisconnected: Waiting for reconnect.");
-            synchronized (mLock) {
-                mIsBinding = false;
-                mIsBound = false;
-            }
+            mIsBinding.set(false);
+            mIsBound.set(false);
             mSatelliteGatewayService = null;
         }
 
         @Override
         public void onBindingDied(ComponentName name) {
             ploge("onBindingDied: Unbinding and rebinding service.");
-            synchronized (mLock) {
-                mIsBound = false;
-                mIsBinding = false;
-            }
+            mIsBound.set(false);
+            mIsBinding.set(false);
             unbindService();
             mExponentialBackoff.start();
         }

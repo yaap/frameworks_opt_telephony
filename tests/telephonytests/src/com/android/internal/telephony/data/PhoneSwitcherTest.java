@@ -193,7 +193,6 @@ public class PhoneSwitcherTest extends TelephonyTest {
         mServiceManagerMockedServices.put("isub", mIBinder);
 
         doReturn(mTelephonyDisplayInfo).when(mDisplayInfoController).getTelephonyDisplayInfo();
-        doReturn(true).when(mFeatureFlags).ddsCallback();
     }
 
     @After

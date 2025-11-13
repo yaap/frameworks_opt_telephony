@@ -16,10 +16,9 @@
 
 package com.android.internal.telephony.uicc;
 
-import android.annotation.NonNull;
-
 import static com.android.internal.telephony.util.TelephonyUtils.FORCE_VERBOSE_STATE_LOGGING;
 
+import android.annotation.NonNull;
 import android.compat.annotation.UnsupportedAppUsage;
 import android.content.Context;
 import android.content.Intent;
@@ -396,11 +395,7 @@ public class IsimUiccRecords extends IccRecords implements IsimRecords {
         Intent intent = new Intent(INTENT_ISIM_REFRESH);
         log("send ISim REFRESH: " + INTENT_ISIM_REFRESH);
         SubscriptionManager.putPhoneIdAndSubIdExtra(intent, mParentApp.getPhoneId());
-        if (mFeatureFlags.hsumBroadcast()) {
-            mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
-        } else {
-            mContext.sendBroadcast(intent);
-        }
+        mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
     }
 
     /**

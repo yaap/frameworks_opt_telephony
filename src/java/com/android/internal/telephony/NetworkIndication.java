@@ -330,9 +330,10 @@ public class NetworkIndication extends IRadioNetworkIndication.Stub {
             reportAnomaly(UUID.fromString("f16e5703-6105-4341-9eb3-e68189156eb5"),
                     "Invalid registrationFailed indication");
 
-            mRil.riljLoge("Invalid registrationFailed indication (ci is null)=" + (ci == null)
+            mRil.riljLoge("Invalid registrationFailed indication ci =" + ci
                     + " (chosenPlmn is empty)=" + TextUtils.isEmpty(chosenPlmn)
-                    + " (is CS/PS)=" + ((domain & NetworkRegistrationInfo.DOMAIN_CS_PS) == 0)
+                    + " (domain)=" + domain
+                    + " (neither CS/PS)=" + ((domain & NetworkRegistrationInfo.DOMAIN_CS_PS) == 0)
                     + " (only CS/PS)=" + ((domain & ~NetworkRegistrationInfo.DOMAIN_CS_PS) != 0)
                     + " (causeCode)=" + causeCode
                     + " (additionalCauseCode)=" + additionalCauseCode);

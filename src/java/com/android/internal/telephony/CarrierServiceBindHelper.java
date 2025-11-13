@@ -445,19 +445,26 @@ public class CarrierServiceBindHelper {
         }
 
         private void maybeDisableCarrierNetworkChangeNotification() {
+            TelephonyRegistryManager telephonyRegistryManager =
+                    mContext.getSystemService(TelephonyRegistryManager.class);
+            // TODO(b/333571417): Consolidate to using the ForPhoneAndSubId variant during cleanup.
             int subscriptionId = SubscriptionManager.getSubscriptionId(mPhoneId);
-            // TODO(b/117525047): switch to phoneId-based solution when available in
-            // TelephonyRegistryManager to address SIM remove/disable case.
-            if (subscriptionId == SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+            if (subscriptionId != SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+                telephonyRegistryManager.notifyCarrierNetworkChange(subscriptionId, false);
+                return;
+            }
+
+            if (!Flags.cleanupCarrierNetworkChangeByPhoneid()) {
                 logdWithLocalLog(
                         "No valid subscription found when trying to disable carrierNetworkChange"
                                 + " for phoneId: "
                                 + mPhoneId);
-                return;
+            } else {
+                logdWithLocalLog(
+                        "Disabling carrierNetworkChange for phoneId: " + mPhoneId);
+                telephonyRegistryManager.notifyCarrierNetworkChange(
+                        mPhoneId, subscriptionId, false);
             }
-            TelephonyRegistryManager telephonyRegistryManager =
-                    mContext.getSystemService(TelephonyRegistryManager.class);
-            telephonyRegistryManager.notifyCarrierNetworkChange(subscriptionId, false);
         }
 
         @Override

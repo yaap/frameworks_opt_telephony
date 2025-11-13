@@ -47,6 +47,7 @@ import android.os.SystemClock;
 import android.provider.Telephony;
 import android.telephony.AccessNetworkConstants;
 import android.telephony.AccessNetworkConstants.AccessNetworkType;
+import android.telephony.AccessNetworkConstants.RadioAccessNetworkType;
 import android.telephony.AccessNetworkConstants.TransportType;
 import android.telephony.Annotation.DataFailureCause;
 import android.telephony.Annotation.DataState;
@@ -313,6 +314,7 @@ public class DataNetwork extends StateMachine {
                     TEAR_DOWN_REASON_PREFERRED_DATA_SWITCHED,
                     TEAR_DOWN_REASON_DATA_LIMIT_REACHED,
                     TEAR_DOWN_REASON_DATA_NETWORK_TRANSPORT_NOT_ALLOWED,
+                    TEAR_DOWN_REASON_DEVICE_SHUT_DOWN,
             })
     public @interface TearDownReason {}
 
@@ -414,6 +416,9 @@ public class DataNetwork extends StateMachine {
 
     /** Data network tear down due to current data network transport mismatch. */
     public static final int TEAR_DOWN_REASON_DATA_NETWORK_TRANSPORT_NOT_ALLOWED = 32;
+
+    /** Data network tear down due to device shut down. */
+    public static final int TEAR_DOWN_REASON_DEVICE_SHUT_DOWN = 33;
 
     //********************************************************************************************//
     // WHENEVER ADD A NEW TEAR DOWN REASON, PLEASE UPDATE DataDeactivateReasonEnum in enums.proto //
@@ -579,6 +584,17 @@ public class DataNetwork extends StateMachine {
 
     /** PDU session id. */
     private int mPduSessionId = DataCallResponse.PDU_SESSION_ID_NOT_SET;
+
+    /** Physical network transport type. */
+    @TransportType
+    private int mPhysicalNetworkTransportType = AccessNetworkConstants.TRANSPORT_TYPE_INVALID;
+
+    /** Physical network slot index. */
+    private int mPhysicalNetworkSlotIndex = SubscriptionManager.INVALID_SIM_SLOT_INDEX;
+
+    /** Last notified access network. */
+    @RadioAccessNetworkType
+    private int mLastNotifiedAccessNetwork = AccessNetworkType.UNKNOWN;
 
     /**
      * Data service managers for accessing {@link AccessNetworkConstants#TRANSPORT_TYPE_WWAN} and
@@ -1070,6 +1086,10 @@ public class DataNetwork extends StateMachine {
             mTrafficDescriptors.add(dataProfile.getTrafficDescriptor());
         }
         mTransport = transport;
+        mPhysicalNetworkTransportType = transport;
+        if (mPhysicalNetworkTransportType == AccessNetworkConstants.TRANSPORT_TYPE_WWAN) {
+            mPhysicalNetworkSlotIndex = mPhone.getPhoneId();
+        }
         mLastKnownDataNetworkType = getDataNetworkType();
         mLastKnownRoamingState = mPhone.getServiceState().getDataRoamingFromRegistration();
         mIsSatellite = mPhone.getServiceState().isUsingNonTerrestrialNetwork()
@@ -1382,6 +1402,11 @@ public class DataNetwork extends StateMachine {
                     }
                     updateSuspendState();
                     updateNetworkCapabilities();
+                    int accessNetwork = DataUtils.networkTypeToAccessNetworkType(networkType);
+                    if (accessNetwork != AccessNetworkType.UNKNOWN
+                            && (mLastNotifiedAccessNetwork != accessNetwork)) {
+                        notifyImsDataNetwork();
+                    }
                     break;
                 }
                 case EVENT_ATTACH_NETWORK_REQUEST: {
@@ -1512,6 +1537,7 @@ public class DataNetwork extends StateMachine {
                     .getCarrierServicePackageUid();
 
             notifyPreciseDataConnectionState();
+            notifyImsDataNetwork();
             if (mTransport == AccessNetworkConstants.TRANSPORT_TYPE_WLAN) {
                 // Defer setupData until we get the PDU session ID response
                 allocatePduSessionId();
@@ -1751,6 +1777,7 @@ public class DataNetwork extends StateMachine {
             mDataNetworkCallback.invokeFromExecutor(
                     () -> mDataNetworkCallback.onLinkStatusChanged(DataNetwork.this, mLinkStatus));
             notifyPreciseDataConnectionState();
+            notifyImsDataNetwork();
             updateSuspendState();
         }
 
@@ -1948,6 +1975,7 @@ public class DataNetwork extends StateMachine {
             sendMessageDelayed(EVENT_STUCK_IN_TRANSIENT_STATE,
                     mDataConfigManager.getAnomalyNetworkDisconnectingTimeoutMs());
             notifyPreciseDataConnectionState();
+            notifyImsDataNetwork();
         }
 
         @Override
@@ -2047,6 +2075,7 @@ public class DataNetwork extends StateMachine {
                                 requestList, mFailCause, mRetryDelayMillis));
             }
             notifyPreciseDataConnectionState();
+            notifyImsDataNetwork();
             mNetworkAgent.unregister();
             mDataNetworkController.unregisterDataNetworkControllerCallback(
                     mDataNetworkControllerCallback);
@@ -2339,6 +2368,11 @@ public class DataNetwork extends StateMachine {
         // will always be registered with NOT_SUSPENDED capability.
         mNetworkAgent = createNetworkAgent();
         mNetworkAgent.markConnected();
+        // Update NetworkAgent in QosCallbackTracker so that QoS callbacks on the new network agent
+        // properly reach to the callback tracker.
+        if (mFlags.qosUpdateNetworkAgent() && mQosCallbackTracker != null) {
+            mQosCallbackTracker.updateNetworkAgent(mNetworkAgent);
+        }
         notifyPreciseDataConnectionState();
         // Because network agent is always created with NOT_SUSPENDED, we need to update
         // the suspended if it's was in suspended state.
@@ -2364,6 +2398,7 @@ public class DataNetwork extends StateMachine {
 
         if (mIsSatellite && mDataConfigManager.getForcedCellularTransportCapabilities().stream()
                 .noneMatch(this::hasNetworkCapabilityInNetworkRequests)) {
+            logd("transport satellite is set");
             builder.addTransportType(NetworkCapabilities.TRANSPORT_SATELLITE);
         } else {
             builder.addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR);
@@ -2550,8 +2585,9 @@ public class DataNetwork extends StateMachine {
                 // the MMS capability from this cellular network. This will allow IWLAN to be
                 // brought up for MMS later.
                 if (dataProfile != null && !dataProfile.getApn().equals(mDataProfile.getApn())) {
-                    log("Found a different apn name " + mDataProfile.getApn()
-                            + " that can serve MMS on IWLAN.");
+                    log("Found a different apn name " + dataProfile.getApn()
+                            + " that can serve MMS on IWLAN. Current data profile "
+                            + mDataProfile.getApn());
                     builder.removeCapability(NetworkCapabilities.NET_CAPABILITY_MMS);
                 }
             }
@@ -2880,6 +2916,31 @@ public class DataNetwork extends StateMachine {
         mQosBearerSessions.addAll(response.getQosBearerSessions());
         if (mQosCallbackTracker != null) {
             mQosCallbackTracker.updateSessions(mQosBearerSessions);
+        }
+
+        if (mFlags.dataServiceNotifyImsDataNetwork()) {
+            // If physical network transport type is
+            // {@link AccessNetworkConstants#TRANSPORT_TYPE_INVALID} use the transport type of
+            // this data network by default.
+            int newPhysicalNetworkTransportType = response.getPhysicalNetworkTransportType()
+                    == AccessNetworkConstants.TRANSPORT_TYPE_INVALID
+                    ? mTransport : response.getPhysicalNetworkTransportType();
+
+            int newPhysicalNetworkSlotIndex = response.getPhysicalNetworkSlotIndex();
+            if (newPhysicalNetworkTransportType == AccessNetworkConstants.TRANSPORT_TYPE_WWAN
+                    && newPhysicalNetworkSlotIndex == SubscriptionManager.INVALID_SIM_SLOT_INDEX) {
+                // If physical network transport type is
+                // {@link AccessNetworkConstants#TRANSPORT_TYPE_WWAN} and physical network slot id
+                // is {@link SubscriptionManager#INVALID_SIM_SLOT_INDEX}, use the phone id of
+                // this data network by default.
+                newPhysicalNetworkSlotIndex = mPhone.getPhoneId();
+            }
+            if (mPhysicalNetworkTransportType != newPhysicalNetworkTransportType
+                    || (mPhysicalNetworkSlotIndex != newPhysicalNetworkSlotIndex)) {
+                mPhysicalNetworkTransportType = newPhysicalNetworkTransportType;
+                mPhysicalNetworkSlotIndex = newPhysicalNetworkSlotIndex;
+                notifyImsDataNetwork();
+            }
         }
 
         if (!linkProperties.equals(mLinkProperties)) {
@@ -3593,6 +3654,40 @@ public class DataNetwork extends StateMachine {
     }
 
     /**
+     * Send the IMS data network to the data service.
+     *
+     * <p>
+     * Note that notify only when {@link DataState} or {@link RadioAccessNetworkType} or
+     * mPhysicalNetworkTransportType or mPhysicalNetworkSlotIndex changes. Also, no notification
+     * when data state is {@link TelephonyManager#DATA_HANDOVER_IN_PROGRESS} or
+     * {@link TelephonyManager#DATA_SUSPENDED} or {@link TelephonyManager#DATA_UNKNOWN} since
+     * {@link android.hardware.radio.data.DataNetworkState} does not support these states.
+     */
+    private void notifyImsDataNetwork() {
+        if (!mFlags.dataServiceNotifyImsDataNetwork() || !mNetworkCapabilities.hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_IMS)) {
+            return;
+        }
+        int dataState = getState();
+        if (dataState == TelephonyManager.DATA_HANDOVER_IN_PROGRESS
+                || (dataState == TelephonyManager.DATA_SUSPENDED)
+                || (dataState == TelephonyManager.DATA_UNKNOWN)) {
+            return;
+        }
+        int dataNetwork = getDataNetworkType();
+        if (dataNetwork == TelephonyManager.NETWORK_TYPE_UNKNOWN) {
+            dataNetwork = getLastKnownDataNetworkType();
+        }
+        int accessNetwork = DataUtils.networkTypeToAccessNetworkType(dataNetwork);
+        for (int transport : mAccessNetworksManager.getAvailableTransports()) {
+            mDataServiceManagers.get(transport).notifyImsDataNetwork(
+                    accessNetwork, dataState, mPhysicalNetworkTransportType,
+                    mPhysicalNetworkSlotIndex, null);
+        }
+        mLastNotifiedAccessNetwork = accessNetwork;
+    }
+
+    /**
      * Request the data network to handover to the target transport.
      * <p>
      * This is the starting point of initiating IWLAN/cellular handover. It will first call
@@ -3944,44 +4039,43 @@ public class DataNetwork extends StateMachine {
             case TEAR_DOWN_REASON_SIM_REMOVAL -> "SIM_REMOVAL";
             case TEAR_DOWN_REASON_AIRPLANE_MODE_ON -> "AIRPLANE_MODE_ON";
             case TEAR_DOWN_REASON_DATA_DISABLED -> "DATA_DISABLED";
-            case TEAR_DOWN_REASON_NO_LIVE_REQUEST -> "TEAR_DOWN_REASON_NO_LIVE_REQUEST";
-            case TEAR_DOWN_REASON_RAT_NOT_ALLOWED -> "TEAR_DOWN_REASON_RAT_NOT_ALLOWED";
-            case TEAR_DOWN_REASON_ROAMING_DISABLED -> "TEAR_DOWN_REASON_ROAMING_DISABLED";
+            case TEAR_DOWN_REASON_NO_LIVE_REQUEST -> "NO_LIVE_REQUEST";
+            case TEAR_DOWN_REASON_RAT_NOT_ALLOWED -> "RAT_NOT_ALLOWED";
+            case TEAR_DOWN_REASON_ROAMING_DISABLED -> "ROAMING_DISABLED";
             case TEAR_DOWN_REASON_CONCURRENT_VOICE_DATA_NOT_ALLOWED ->
-                    "TEAR_DOWN_REASON_CONCURRENT_VOICE_DATA_NOT_ALLOWED";
+                    "CONCURRENT_VOICE_DATA_NOT_ALLOWED";
             case TEAR_DOWN_REASON_SERVICE_OPTION_NOT_SUPPORTED ->
-                    "TEAR_DOWN_REASON_SERVICE_OPTION_NOT_SUPPORTED";
+                    "SERVICE_OPTION_NOT_SUPPORTED";
             case TEAR_DOWN_REASON_DATA_SERVICE_NOT_READY ->
-                    "TEAR_DOWN_REASON_DATA_SERVICE_NOT_READY";
-            case TEAR_DOWN_REASON_POWER_OFF_BY_CARRIER -> "TEAR_DOWN_REASON_POWER_OFF_BY_CARRIER";
-            case TEAR_DOWN_REASON_DATA_STALL -> "TEAR_DOWN_REASON_DATA_STALL";
-            case TEAR_DOWN_REASON_HANDOVER_FAILED -> "TEAR_DOWN_REASON_HANDOVER_FAILED";
-            case TEAR_DOWN_REASON_HANDOVER_NOT_ALLOWED -> "TEAR_DOWN_REASON_HANDOVER_NOT_ALLOWED";
-            case TEAR_DOWN_REASON_VCN_REQUESTED -> "TEAR_DOWN_REASON_VCN_REQUESTED";
-            case TEAR_DOWN_REASON_VOPS_NOT_SUPPORTED -> "TEAR_DOWN_REASON_VOPS_NOT_SUPPORTED";
-            case TEAR_DOWN_REASON_DEFAULT_DATA_UNSELECTED ->
-                    "TEAR_DOWN_REASON_DEFAULT_DATA_UNSELECTED";
-            case TEAR_DOWN_REASON_NOT_IN_SERVICE -> "TEAR_DOWN_REASON_NOT_IN_SERVICE";
-            case TEAR_DOWN_REASON_DATA_CONFIG_NOT_READY -> "TEAR_DOWN_REASON_DATA_CONFIG_NOT_READY";
-            case TEAR_DOWN_REASON_PENDING_TEAR_DOWN_ALL -> "TEAR_DOWN_REASON_PENDING_TEAR_DOWN_ALL";
-            case TEAR_DOWN_REASON_NO_SUITABLE_DATA_PROFILE ->
-                    "TEAR_DOWN_REASON_NO_SUITABLE_DATA_PROFILE";
-            case TEAR_DOWN_REASON_CDMA_EMERGENCY_CALLBACK_MODE ->
-                    "TEAR_DOWN_REASON_CDMA_EMERGENCY_CALLBACK_MODE";
-            case TEAR_DOWN_REASON_RETRY_SCHEDULED -> "TEAR_DOWN_REASON_RETRY_SCHEDULED";
-            case TEAR_DOWN_REASON_DATA_THROTTLED -> "TEAR_DOWN_REASON_DATA_THROTTLED";
-            case TEAR_DOWN_REASON_DATA_PROFILE_INVALID -> "TEAR_DOWN_REASON_DATA_PROFILE_INVALID";
+                    "DATA_SERVICE_NOT_READY";
+            case TEAR_DOWN_REASON_POWER_OFF_BY_CARRIER -> "POWER_OFF_BY_CARRIER";
+            case TEAR_DOWN_REASON_DATA_STALL -> "DATA_STALL";
+            case TEAR_DOWN_REASON_HANDOVER_FAILED -> "HANDOVER_FAILED";
+            case TEAR_DOWN_REASON_HANDOVER_NOT_ALLOWED -> "HANDOVER_NOT_ALLOWED";
+            case TEAR_DOWN_REASON_VCN_REQUESTED -> "VCN_REQUESTED";
+            case TEAR_DOWN_REASON_VOPS_NOT_SUPPORTED -> "VOPS_NOT_SUPPORTED";
+            case TEAR_DOWN_REASON_DEFAULT_DATA_UNSELECTED -> "DEFAULT_DATA_UNSELECTED";
+            case TEAR_DOWN_REASON_NOT_IN_SERVICE -> "NOT_IN_SERVICE";
+            case TEAR_DOWN_REASON_DATA_CONFIG_NOT_READY -> "DATA_CONFIG_NOT_READY";
+            case TEAR_DOWN_REASON_PENDING_TEAR_DOWN_ALL -> "PENDING_TEAR_DOWN_ALL";
+            case TEAR_DOWN_REASON_NO_SUITABLE_DATA_PROFILE -> "NO_SUITABLE_DATA_PROFILE";
+            case TEAR_DOWN_REASON_CDMA_EMERGENCY_CALLBACK_MODE -> "CDMA_EMERGENCY_CALLBACK_MODE";
+            case TEAR_DOWN_REASON_RETRY_SCHEDULED -> "RETRY_SCHEDULED";
+            case TEAR_DOWN_REASON_DATA_THROTTLED -> "DATA_THROTTLED";
+            case TEAR_DOWN_REASON_DATA_PROFILE_INVALID -> "DATA_PROFILE_INVALID";
             case TEAR_DOWN_REASON_DATA_PROFILE_NOT_PREFERRED ->
-                    "TEAR_DOWN_REASON_DATA_PROFILE_NOT_PREFERRED";
-            case TEAR_DOWN_REASON_NOT_ALLOWED_BY_POLICY -> "TEAR_DOWN_REASON_NOT_ALLOWED_BY_POLICY";
-            case TEAR_DOWN_REASON_ILLEGAL_STATE -> "TEAR_DOWN_REASON_ILLEGAL_STATE";
+                    "DATA_PROFILE_NOT_PREFERRED";
+            case TEAR_DOWN_REASON_NOT_ALLOWED_BY_POLICY -> "NOT_ALLOWED_BY_POLICY";
+            case TEAR_DOWN_REASON_ILLEGAL_STATE -> "ILLEGAL_STATE";
             case TEAR_DOWN_REASON_ONLY_ALLOWED_SINGLE_NETWORK ->
-                    "TEAR_DOWN_REASON_ONLY_ALLOWED_SINGLE_NETWORK";
+                    "ONLY_ALLOWED_SINGLE_NETWORK";
             case TEAR_DOWN_REASON_PREFERRED_DATA_SWITCHED ->
-                    "TEAR_DOWN_REASON_PREFERRED_DATA_SWITCHED";
-            case TEAR_DOWN_REASON_DATA_LIMIT_REACHED -> "TEAR_DOWN_REASON_DATA_LIMIT_REACHED";
+                    "PREFERRED_DATA_SWITCHED";
+            case TEAR_DOWN_REASON_DATA_LIMIT_REACHED -> "DATA_LIMIT_REACHED";
             case TEAR_DOWN_REASON_DATA_NETWORK_TRANSPORT_NOT_ALLOWED ->
-                    "TEAR_DOWN_REASON_DATA_NETWORK_TRANSPORT_NOT_ALLOWED";
+                    "TRANSPORT_NOT_ALLOWED";
+            case TEAR_DOWN_REASON_DEVICE_SHUT_DOWN ->
+                    "DEVICE_SHUT_DOWN";
             default -> "UNKNOWN(" + reason + ")";
         };
     }
