@@ -153,7 +153,7 @@ public class ImsResolver implements ImsServiceController.ImsServiceControllerCal
             String defaultRcsPackageName, int numSlots, ImsFeatureBinderRepository repo,
             FeatureFlags featureFlags) {
         if (sInstance == null) {
-            if (featureFlags.threadShred() && USE_WORKER_THREAD) {
+            if (USE_WORKER_THREAD) {
                 sInstance = new ImsResolver(context, defaultMmTelPackageName, defaultRcsPackageName,
                         numSlots, repo, WorkerThread.get().getLooper(), featureFlags);
             } else {

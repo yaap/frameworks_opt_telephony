@@ -22,6 +22,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.hardware.radio.network.DisplayNetworkType;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -124,6 +125,7 @@ public class NetworkTypeController extends StateMachine {
     private static final int EVENT_DEVICE_IDLE_MODE_CHANGED = 12;
     /** Event for qos sessions changed. */
     private static final int EVENT_QOS_SESSION_CHANGED = 13;
+    private static final int EVENT_MODEM_DISPLAY_NETWORK_TYPE_OVERRIDE = 14;
 
     private static final String[] sEvents = new String[EVENT_QOS_SESSION_CHANGED + 1];
     static {
@@ -197,6 +199,9 @@ public class NetworkTypeController extends StateMachine {
     @NonNull private Map<String, OverrideTimerRule> mOverrideTimerRules = new HashMap<>();
     @NonNull private String mLteEnhancedPattern = "";
     @Annotation.OverrideNetworkType private int mOverrideNetworkType;
+    private static final ModemDisplayNetworkType DEFAULT_MODEM_NETWORK_TYPE =
+            new ModemDisplayNetworkType(TelephonyManager.NETWORK_TYPE_UNKNOWN,
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NONE);
     private boolean mIsPhysicalChannelConfigOn;
     private boolean mIsPrimaryTimerActive;
     private boolean mIsSecondaryTimerActive;
@@ -211,6 +216,7 @@ public class NetworkTypeController extends StateMachine {
     private boolean mIncludeLteForNrAdvancedThresholdBandwidth;
     private boolean mNrAdvancedRequiresSingleCcAboveBandwidthThreshold;
     private boolean mRatchetPccFieldsForSameAnchorNrCell;
+    private boolean mUseModemDisplayNetworkType;
     @NonNull private final Set<Integer> mAdditionalNrAdvancedBands = new HashSet<>();
     @NonNull private String mPrimaryTimerState;
     @NonNull private String mSecondaryTimerState;
@@ -226,6 +232,7 @@ public class NetworkTypeController extends StateMachine {
     private boolean mIsDeviceIdleMode = false;
     private boolean mPrimaryCellChangedWhileIdle = false;
     private boolean mPciChangedDuringPrimaryTimer = false;
+    private ModemDisplayNetworkType mModemOverrideNetworkType = DEFAULT_MODEM_NETWORK_TYPE;
 
     // Cached copies below to prevent race conditions
     @NonNull private ServiceState mServiceState;
@@ -280,12 +287,23 @@ public class NetworkTypeController extends StateMachine {
         try {
             return capabilities.hasTransport(
                     NetworkCapabilities.TRANSPORT_SATELLITE) &&
-                    !capabilities.hasCapability(DataUtils.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED);
+                    !capabilities.hasCapability(
+                            NetworkCapabilities.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED);
         } catch (Exception ignored) {
             log("NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED not supported ");
             return false;
         }
     }
+
+    private record ModemDisplayNetworkType(
+            @Annotation.NetworkType int dataNetworkType,
+            @Annotation.OverrideNetworkType int overrideNetworkType) {
+        public boolean isOverridden() {
+            return dataNetworkType != TelephonyManager.NETWORK_TYPE_UNKNOWN
+                    || overrideNetworkType != TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NONE;
+        }
+    }
+
 
     private void updateBandwidthConstrainedStatus(boolean isConstrained) {
         if (isConstrained != mIsSatelliteConstrainedData) {
@@ -345,7 +363,8 @@ public class NetworkTypeController extends StateMachine {
             //  NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED & replace datautils with
             //  NetworkCapabilities on api availability at mainline module)
             try {
-                builder.removeCapability(DataUtils.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED);
+                builder.removeCapability(
+                        NetworkCapabilities.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED);
             } catch (Exception ignored) {
                 log("NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED not supported ");
             }
@@ -366,6 +385,9 @@ public class NetworkTypeController extends StateMachine {
      * DisplayInfoController.
      */
     public @Annotation.OverrideNetworkType int getOverrideNetworkType() {
+        if (mModemOverrideNetworkType.isOverridden()) {
+            return mModemOverrideNetworkType.overrideNetworkType();
+        }
         return mOverrideNetworkType;
     }
 
@@ -374,6 +396,9 @@ public class NetworkTypeController extends StateMachine {
      * DisplayInfoController.
      */
     public @Annotation.NetworkType int getDataNetworkType() {
+        if (mModemOverrideNetworkType.isOverridden()) {
+            return mModemOverrideNetworkType.dataNetworkType();
+        }
         NetworkRegistrationInfo nri = mServiceState.getNetworkRegistrationInfo(
                 NetworkRegistrationInfo.DOMAIN_PS, AccessNetworkConstants.TRANSPORT_TYPE_WWAN);
         return nri == null ? TelephonyManager.NETWORK_TYPE_UNKNOWN
@@ -404,6 +429,8 @@ public class NetworkTypeController extends StateMachine {
                 EVENT_PREFERRED_NETWORK_MODE_CHANGED, null);
         mPhone.registerForPhysicalChannelConfig(getHandler(),
                 EVENT_PHYSICAL_CHANNEL_CONFIGS_CHANGED, null);
+        mPhone.mCi.registerForDisplayNetworkTypeChanged(getHandler(),
+                EVENT_MODEM_DISPLAY_NETWORK_TYPE_OVERRIDE, null);
         mPhone.getServiceStateTracker().registerForServiceStateChanged(getHandler(),
                 EVENT_SERVICE_STATE_CHANGED, null);
         mIsPhysicalChannelConfig16Supported = mPhone.getContext().getSystemService(
@@ -427,6 +454,7 @@ public class NetworkTypeController extends StateMachine {
         mPhone.unregisterForPreferredNetworkTypeChanged(getHandler());
         mPhone.getServiceStateTracker().unregisterForServiceStateChanged(getHandler());
         mPhone.getDeviceStateMonitor().unregisterForPhysicalChannelConfigNotifChanged(getHandler());
+        mPhone.mCi.unregisterForDisplayNetworkTypeChanged(getHandler());
         mPhone.getDataNetworkController().unregisterDataNetworkControllerCallback(
                 mDataNetworkControllerCallback);
         mPhone.getContext().unregisterReceiver(mIntentReceiver);
@@ -464,6 +492,8 @@ public class NetworkTypeController extends StateMachine {
                 CarrierConfigManager.KEY_INCLUDE_LTE_FOR_NR_ADVANCED_THRESHOLD_BANDWIDTH_BOOL);
         mRatchetPccFieldsForSameAnchorNrCell = config.getBoolean(
                 CarrierConfigManager.KEY_RATCHET_NR_ADVANCED_BANDWIDTH_IF_RRC_IDLE_BOOL);
+        mUseModemDisplayNetworkType = config.getBoolean(
+                CarrierConfigManager.KEY_USE_MODEM_DISPLAY_NETWORK_TYPE_BOOL);
         mEnableNrAdvancedWhileRoaming = config.getBoolean(
                 CarrierConfigManager.KEY_ENABLE_NR_ADVANCED_WHILE_ROAMING_BOOL);
         mAdditionalNrAdvancedBands.clear();
@@ -491,6 +521,11 @@ public class NetworkTypeController extends StateMachine {
                 mPhone.getServiceStateTracker().getPhysicalChannelConfigList());
         if (isUsingPhysicalChannelConfigForRrcDetection()) {
             mPhysicalLinkStatus = getPhysicalLinkStatusFromPhysicalChannelConfig();
+        }
+        // Revert to default if modem override disabled and last update was for modem override.
+        if (mModemOverrideNetworkType.isOverridden() && !mUseModemDisplayNetworkType) {
+            mModemOverrideNetworkType = DEFAULT_MODEM_NETWORK_TYPE;
+            mDisplayInfoController.updateTelephonyDisplayInfo();
         }
     }
 
@@ -788,6 +823,17 @@ public class NetworkTypeController extends StateMachine {
                         mPhysicalLinkStatus = getPhysicalLinkStatusFromPhysicalChannelConfig();
                     }
                     transitionToCurrentState();
+                    break;
+                case EVENT_MODEM_DISPLAY_NETWORK_TYPE_OVERRIDE:
+                    if (!mUseModemDisplayNetworkType) break;
+                    ar = (AsyncResult) msg.obj;
+                    // Override radio's opinion, which is considered as higher priority.
+                    mModemOverrideNetworkType =
+                            (((int) ar.result) == DisplayNetworkType.NR_ADVANCED)
+                            ? new ModemDisplayNetworkType(TelephonyManager.NETWORK_TYPE_NR,
+                                    TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED) :
+                                    DEFAULT_MODEM_NETWORK_TYPE;
+                    mDisplayInfoController.updateTelephonyDisplayInfo();
                     break;
                 case EVENT_DEVICE_IDLE_MODE_CHANGED:
                     PowerManager pm = mPhone.getContext().getSystemService(PowerManager.class);
@@ -1857,6 +1903,7 @@ public class NetworkTypeController extends StateMachine {
         pw.println("mIncludeLteForNrAdvancedThresholdBandwidth="
                 + mIncludeLteForNrAdvancedThresholdBandwidth);
         pw.println("mRatchetPccFieldsForSameAnchorNrCell=" + mRatchetPccFieldsForSameAnchorNrCell);
+        pw.println("mUseModemDisplayNetworkType=" + mUseModemDisplayNetworkType);
         pw.println("mRatchetedNrBandwidths=" + mRatchetedNrBandwidths);
         pw.println("mAdditionalNrAdvancedBandsList=" + mAdditionalNrAdvancedBands);
         pw.println("mRatchetedNrBands=" + mRatchetedNrBands);

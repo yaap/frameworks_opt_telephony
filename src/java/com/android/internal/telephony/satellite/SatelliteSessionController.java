@@ -82,7 +82,6 @@ import com.android.internal.telephony.util.ArrayUtils;
 import com.android.internal.util.IState;
 import com.android.internal.util.State;
 import com.android.internal.util.StateMachine;
-import com.android.telephony.Rlog;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -365,6 +364,7 @@ public class SatelliteSessionController extends StateMachine {
      */
     @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
     public void onSatelliteEnabledStateChanged(boolean enabled) {
+        plogd("onSatelliteEnabledStateChanged: enabled= " + enabled);
         sendMessage(EVENT_SATELLITE_ENABLED_STATE_CHANGED, enabled);
     }
 
@@ -408,11 +408,6 @@ public class SatelliteSessionController extends StateMachine {
      * @param isEmergencyMode The satellite emergency mode.
      */
     public void onEmergencyModeChanged(boolean isEmergencyMode) {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            plogd("onEmergencyModeChanged: carrierRoamingNbIotNtn is disabled");
-            return;
-        }
-
         plogd("onEmergencyModeChanged " + isEmergencyMode);
 
         List<ISatelliteModemStateCallback> toBeRemoved = new ArrayList<>();
@@ -439,9 +434,7 @@ public class SatelliteSessionController extends StateMachine {
             @NonNull ISatelliteModemStateCallback callback) {
         try {
             callback.onSatelliteModemStateChanged(mCurrentState);
-            if (mFeatureFlags.carrierRoamingNbIotNtn()) {
-                callback.onEmergencyModeChanged(mSatelliteController.getRequestIsEmergency());
-            }
+            callback.onEmergencyModeChanged(mSatelliteController.getRequestIsEmergency());
             mListeners.put(callback.asBinder(), callback);
         } catch (RemoteException ex) {
             ploge("registerForSatelliteModemStateChanged: Got RemoteException ex=" + ex);
@@ -500,10 +493,6 @@ public class SatelliteSessionController extends StateMachine {
     public boolean setSatelliteIgnoreCellularServiceState(boolean enabled) {
         plogd("setSatelliteIgnoreCellularServiceState : "
                 + "old = " + mIgnoreCellularServiceState + " new : " + enabled);
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            return false;
-        }
-
         mIgnoreCellularServiceState = enabled;
         return true;
     }
@@ -591,11 +580,6 @@ public class SatelliteSessionController extends StateMachine {
      *                  {@code false} otherwise.
      */
     public void setDeviceAlignedWithSatellite(boolean isAligned) {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            plogd("setDeviceAlignedWithSatellite: carrierRoamingNbIotNtn is disabled");
-            return;
-        }
-
         mIsDeviceAlignedWithSatellite = isAligned;
         plogd("setDeviceAlignedWithSatellite: isAligned " +  isAligned);
 
@@ -661,16 +645,14 @@ public class SatelliteSessionController extends StateMachine {
             mAlarmManager.cancel(mAlarmListener);
         }
 
-        if (mFeatureFlags.carrierRoamingNbIotNtn()) {
-            // Register to received Cellular service state
-            for (Phone phone : PhoneFactory.getPhones()) {
-                if (phone == null) continue;
+        // Unregister to received Cellular service state
+        for (Phone phone : PhoneFactory.getPhones()) {
+            if (phone == null) continue;
 
-                phone.unregisterForServiceStateChanged(getHandler());
-                if (DBG) {
-                    plogd("cleanUpResource: unregisterForServiceStateChanged phoneId "
-                            + phone.getPhoneId());
-                }
+            phone.unregisterForServiceStateChanged(getHandler());
+            if (DBG) {
+                plogd("cleanUpResource: unregisterForServiceStateChanged phoneId "
+                        + phone.getPhoneId());
             }
         }
 
@@ -1632,11 +1614,6 @@ public class SatelliteSessionController extends StateMachine {
     }
 
     private void registerForScreenStateChanged() {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            Rlog.d(TAG, "registerForScreenStateChanged: carrierRoamingNbIotNtn is disabled");
-            return;
-        }
-
         if (!mIsRegisteredScreenStateChanged && mDeviceStateMonitor != null) {
             mDeviceStateMonitor.registerForScreenStateChanged(
                     getHandler(), EVENT_SCREEN_STATE_CHANGED, null);
@@ -1651,11 +1628,6 @@ public class SatelliteSessionController extends StateMachine {
     }
 
     private void unregisterForScreenStateChanged() {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            Rlog.d(TAG, "unregisterForScreenStateChanged: carrierRoamingNbIotNtn is disabled");
-            return;
-        }
-
         if (mIsRegisteredScreenStateChanged && mDeviceStateMonitor != null) {
             mDeviceStateMonitor.unregisterForScreenStateChanged(getHandler());
             removeMessages(EVENT_SCREEN_STATE_CHANGED);
@@ -1771,12 +1743,6 @@ public class SatelliteSessionController extends StateMachine {
     }
 
     private void evaluateStartingEsosInactivityTimer() {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            plogd("evaluateStartingEsosInactivityTimer: "
-                    + "carrierRoamingNbIotNtn is disabled");
-            return;
-        }
-
         if (isEsosInActivityTimerStarted()) {
             plogd("isEsosInActivityTimerStarted: "
                     + "ESOS inactivity timer already started");
@@ -1833,12 +1799,6 @@ public class SatelliteSessionController extends StateMachine {
     }
 
     private void evaluateStartingP2pSmsInactivityTimer() {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            plogd("evaluateStartingP2pSmsInactivityTimer: "
-                    + "carrierRoamingNbIotNtn is disabled");
-            return;
-        }
-
         if (isP2pSmsInActivityTimerStarted()) {
             plogd("isP2pSmsInActivityTimerStarted: "
                     + "P2P_SMS inactivity timer already started");
@@ -1889,10 +1849,6 @@ public class SatelliteSessionController extends StateMachine {
      * device is unaligned with the satellite.
      */
     private void checkForInactivity() {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            return;
-        }
-
         // If the inactivity start timestamp is not undefined, it means the inactivity has already
         // started.
         if (mInactivityStartTimestamp != UNDEFINED_TIMESTAMP) {
@@ -1912,11 +1868,6 @@ public class SatelliteSessionController extends StateMachine {
      * device is aligned with the satellite, or 3) modem state moves to PowerOffState.
      */
     private void endUserInactivity() {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            plogd("endUserInactivity: carrierRoamingNbIotNtn is disabled");
-            return;
-        }
-
         if (mInactivityStartTimestamp != UNDEFINED_TIMESTAMP) {
             long inactivityDurationMs = SystemClock.elapsedRealtime() - mInactivityStartTimestamp;
             int inactivityDurationSec = (int) (inactivityDurationMs / 1000);

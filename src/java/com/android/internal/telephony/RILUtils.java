@@ -102,6 +102,7 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SIMULT
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SIM_PHONEBOOK_CAPACITY;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SIM_PHONEBOOK_RECORDS;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SIM_STATUS;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SIM_TYPE_INFO;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SLICING_CONFIG;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SLOT_STATUS;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SMSC_ADDRESS;
@@ -187,6 +188,7 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SATELL
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SECURITY_ALGORITHMS_UPDATED_ENABLED;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SIGNAL_STRENGTH_REPORTING_CRITERIA;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SIM_CARD_POWER;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SIM_TYPE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SMSC_ADDRESS;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SRVCC_CALL_INFO;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SUPP_SVC_NOTIFICATION;
@@ -393,7 +395,6 @@ import com.android.internal.telephony.cdma.sms.CdmaSmsSubaddress;
 import com.android.internal.telephony.cdma.sms.SmsEnvelope;
 import com.android.internal.telephony.data.KeepaliveStatus;
 import com.android.internal.telephony.data.KeepaliveStatus.KeepaliveStatusCode;
-import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.imsphone.ImsCallInfo;
 import com.android.internal.telephony.uicc.AdnCapacity;
 import com.android.internal.telephony.uicc.IccCardApplicationStatus;
@@ -1174,21 +1175,9 @@ public class RILUtils {
      * @return The converted reset type in integer or -1 if param is invalid
      */
     public static int convertToHalResetNvType(int resetType) {
-        /**
-         * resetType values
-         * 1 - reload all NV items
-         * 2 - erase NV reset (SCRTN)
-         * 3 - factory reset (RTN)
-         */
-        if (Flags.cleanupCdma()) {
-            if (resetType == 1) return android.hardware.radio.V1_0.ResetNvType.RELOAD;
-            return -1;
-        }
-        switch (resetType) {
-            case 1: return android.hardware.radio.V1_0.ResetNvType.RELOAD;
-            case 2: return android.hardware.radio.V1_0.ResetNvType.ERASE;
-            case 3: return android.hardware.radio.V1_0.ResetNvType.FACTORY_RESET;
-        }
+        // resetType values
+        // 1 - reload all NV items
+        if (resetType == 1) return android.hardware.radio.V1_0.ResetNvType.RELOAD;
         return -1;
     }
 
@@ -1198,21 +1187,9 @@ public class RILUtils {
      * @return The converted reset type in integer or -1 if param is invalid
      */
     public static int convertToHalResetNvTypeAidl(int resetType) {
-        /**
-         * resetType values
-         * 1 - reload all NV items
-         * 2 - erase NV reset (SCRTN)
-         * 3 - factory reset (RTN)
-         */
-        if (Flags.cleanupCdma()) {
-            if (resetType == 1) return android.hardware.radio.modem.ResetNvType.RELOAD;
-            return -1;
-        }
-        switch (resetType) {
-            case 1: return android.hardware.radio.modem.ResetNvType.RELOAD;
-            case 2: return android.hardware.radio.modem.ResetNvType.ERASE;
-            case 3: return android.hardware.radio.modem.ResetNvType.FACTORY_RESET;
-        }
+        // resetType values
+        // 1 - reload all NV items
+        if (resetType == 1) return android.hardware.radio.modem.ResetNvType.RELOAD;
         return -1;
     }
 
@@ -4200,8 +4177,7 @@ public class RILUtils {
             iccCardStatus.setCardState(cardStatus10.cardState);
             iccCardStatus.setUniversalPinState(cardStatus10.universalPinState);
             iccCardStatus.mGsmUmtsSubscriptionAppIndex = cardStatus10.gsmUmtsSubscriptionAppIndex;
-            iccCardStatus.mCdmaSubscriptionAppIndex =
-                    Flags.cleanupCdma() ? -1 : cardStatus10.cdmaSubscriptionAppIndex;
+            iccCardStatus.mCdmaSubscriptionAppIndex = -1;
             iccCardStatus.mImsSubscriptionAppIndex = cardStatus10.imsSubscriptionAppIndex;
             int numApplications = cardStatus10.applications.size();
 
@@ -4271,8 +4247,7 @@ public class RILUtils {
         iccCardStatus.setMultipleEnabledProfilesMode(cardStatus.supportedMepMode);
         iccCardStatus.setUniversalPinState(cardStatus.universalPinState);
         iccCardStatus.mGsmUmtsSubscriptionAppIndex = cardStatus.gsmUmtsSubscriptionAppIndex;
-        iccCardStatus.mCdmaSubscriptionAppIndex =
-                Flags.cleanupCdma() ? -1 : cardStatus.cdmaSubscriptionAppIndex;
+        iccCardStatus.mCdmaSubscriptionAppIndex = -1;
         iccCardStatus.mImsSubscriptionAppIndex = cardStatus.imsSubscriptionAppIndex;
         iccCardStatus.atr = cardStatus.atr;
         iccCardStatus.iccid = cardStatus.iccid;
@@ -4892,6 +4867,19 @@ public class RILUtils {
     }
 
     /**
+     * Convert pin to redacted String for logging purpose
+     * @param pin The pin to convert in redacted String
+     * @return The converted redacted String
+     */
+    public static String getRedactedPin(String pin) {
+        if (TextUtils.isEmpty(pin)) {
+            return "[]";
+        }
+
+        return '[' + "*".repeat(pin.length()) + ']';
+    }
+
+    /**
      * Convert setup data reason to string.
      *
      * @param reason The reason for setup data call.
@@ -5359,6 +5347,10 @@ public class RILUtils {
                 return "UPDATE_ALLOWED_IMS_SERVICES";
             case RIL_REQUEST_NOTIFY_IMS_DATA_NETWORK:
                 return "NOTIFY_IMS_DATA_NETWORK";
+            case RIL_REQUEST_SET_SIM_TYPE:
+                return "SET_SIM_TYPE";
+            case RIL_REQUEST_GET_SIM_TYPE_INFO:
+                return "GET_SIM_TYPE_INFO";
             default:
                 return "<unknown request " + request + ">";
         }
@@ -5946,17 +5938,44 @@ public class RILUtils {
     public static ArrayList<SimTypeInfo> convertAidlSimTypeInfo(
             android.hardware.radio.config.SimTypeInfo[] simTypeInfos) {
         ArrayList<SimTypeInfo> response = new ArrayList<>();
-        if (simTypeInfos == null) {
-            loge("convertAidlSimTypeInfo received NULL simTypeInfos");
+        if (simTypeInfos == null || simTypeInfos.length == 0) {
+            loge("convertAidlSimTypeInfo received NULL or empty simTypeInfos");
             return response;
         }
-        for (android.hardware.radio.config.SimTypeInfo simTypeInfo : simTypeInfos) {
+        logd("convertAidlSimTypeInfo: " + Arrays.toString(simTypeInfos));
+        for (int i = 0; i < simTypeInfos.length; i++) {
+            if (simTypeInfos[i] == null) {
+                loge("convertAidlSimTypeInfo received NULL SimTypeInfo");
+                continue;
+            }
             SimTypeInfo info = new SimTypeInfo();
-            info.mSupportedSimTypes = simTypeInfo.supportedSimTypes;
-            info.setCurrentSimType(simTypeInfo.currentSimType);
+            info.mPhysicalSlotIndex = i;
+            info.mSupportedSimTypes = simTypeInfos[i].supportedSimTypes;
+            info.setCurrentSimType(simTypeInfos[i].currentSimType);
             response.add(info);
         }
         return response;
+    }
+
+    /** Convert a TelephonyManager.SimType to an AIDL-based SimType. */
+    public static @SimTypeInfo.SimType int[] convertToAidlSimTypes(
+            @TelephonyManager.SimType int[] simTypes) {
+        @SimTypeInfo.SimType int[] types = new int[simTypes.length];
+        for (int i = 0; i < simTypes.length; i++) {
+            types[i] = getAidlMappedSimType(simTypes[i]);
+        }
+        return types;
+    }
+
+    /** Map TelephonyManager.SimType to SimTypeInfo.SimType which is an AIDL-based SimType. */
+    private static @SimTypeInfo.SimType int getAidlMappedSimType(
+            @TelephonyManager.SimType int simType) {
+        return switch (simType) {
+            case TelephonyManager.SIM_TYPE_PHYSICAL -> SimTypeInfo.SimType.SIM_TYPE_PHYSICAL;
+            case TelephonyManager.SIM_TYPE_EMBEDDED -> SimTypeInfo.SimType.SIM_TYPE_ESIM;
+            case TelephonyManager.SIM_TYPE_UNKNOWN -> SimTypeInfo.SimType.SIM_TYPE_UNKNOWN;
+            default -> SimTypeInfo.SimType.SIM_TYPE_UNKNOWN;
+        };
     }
 
     private static void logd(String log) {

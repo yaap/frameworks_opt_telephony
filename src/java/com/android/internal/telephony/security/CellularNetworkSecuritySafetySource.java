@@ -20,6 +20,9 @@ import static android.safetycenter.SafetyEvent.SAFETY_EVENT_TYPE_REFRESH_REQUEST
 import static android.safetycenter.SafetyEvent.SAFETY_EVENT_TYPE_SOURCE_STATE_CHANGED;
 import static android.safetycenter.SafetySourceData.SEVERITY_LEVEL_INFORMATION;
 import static android.safetycenter.SafetySourceData.SEVERITY_LEVEL_RECOMMENDATION;
+import static android.telephony.CellularIdentifierDisclosure.CELLULAR_IDENTIFIER_IMEI;
+import static android.telephony.CellularIdentifierDisclosure.CELLULAR_IDENTIFIER_IMSI;
+import static android.telephony.CellularIdentifierDisclosure.CELLULAR_IDENTIFIER_SUCI;
 
 import android.annotation.IntDef;
 import android.app.PendingIntent;
@@ -34,6 +37,9 @@ import android.safetycenter.SafetyEvent;
 import android.safetycenter.SafetySourceData;
 import android.safetycenter.SafetySourceIssue;
 import android.safetycenter.SafetySourceStatus;
+import android.telephony.CellularIdentifierDisclosure;
+import android.telephony.CellularIdentifierDisclosure.CellularIdentifier;
+import android.text.TextUtils;
 import android.text.format.DateFormat;
 
 import com.android.internal.R;
@@ -163,9 +169,11 @@ public class CellularNetworkSecuritySafetySource {
 
     /** Sets the identifier disclosure issue state for the identifier subscription. */
     public synchronized void setIdentifierDisclosure(
-            Context context, int subId, int count, Instant start, Instant end) {
-        IdentifierDisclosure disclosure = new IdentifierDisclosure(count, start, end);
-        mIdentifierDisclosures.put(subId, disclosure);
+            Context context, int subId, CellularIdentifierDisclosure disclosure, int count,
+            Instant start, Instant end) {
+        IdentifierDisclosure identifierDisclosure =
+                new IdentifierDisclosure(count, start, end, disclosure);
+        mIdentifierDisclosures.put(subId, identifierDisclosure);
         updateSafetyCenter(context);
     }
 
@@ -317,23 +325,33 @@ public class CellularNetworkSecuritySafetySource {
 
         SubscriptionInfoInternal subInfo =
                 mSubscriptionManagerService.getSubscriptionInfoInternal(subId);
-
+        String cellularIdentifier =
+                getCellularIdentifier(context, disclosure.mDisclosure.getCellularIdentifier());
+        String issueSummaryNotification;
+        String issueSummary;
+        if (TextUtils.isEmpty(cellularIdentifier)) {
+            issueSummaryNotification =
+                    context.getString(R.string.scIdentifierDisclosureIssueSummaryNotification,
+                            getCurrentTime(context), subInfo.getDisplayName());
+            issueSummary = context.getString(R.string.scIdentifierDisclosureIssueSummary,
+                    getCurrentTime(context), subInfo.getDisplayName());
+        } else {
+            issueSummaryNotification =
+                    context.getString(R.string.scIDIssueSummaryNotificationWithCellularID,
+                            getCurrentTime(context), cellularIdentifier, subInfo.getDisplayName());
+            issueSummary = context.getString(R.string.scIDIssueSummaryWithCellularID,
+                    getCurrentTime(context), cellularIdentifier, subInfo.getDisplayName());
+        }
         // Notifications have no buttons
         final SafetySourceIssue.Notification customNotification =
                 new SafetySourceIssue.Notification.Builder(
                         context.getString(R.string.scIdentifierDisclosureIssueTitle),
-                        context.getString(
-                                R.string.scIdentifierDisclosureIssueSummaryNotification,
-                                getCurrentTime(context),
-                                subInfo.getDisplayName())).build();
+                        issueSummaryNotification).build();
         SafetySourceIssue.Builder builder =
                 new SafetySourceIssue.Builder(
                         IDENTIFIER_DISCLOSURE_ISSUE_ID + "_" + subId,
                         context.getString(R.string.scIdentifierDisclosureIssueTitle),
-                        context.getString(
-                                R.string.scIdentifierDisclosureIssueSummary,
-                                getCurrentTime(context),
-                                subInfo.getDisplayName()),
+                        issueSummary,
                         SEVERITY_LEVEL_RECOMMENDATION,
                         IDENTIFIER_DISCLOSURE_ISSUE_ID)
                         .setNotificationBehavior(
@@ -367,6 +385,16 @@ public class CellularNetworkSecuritySafetySource {
     private String getCurrentTime(Context context) {
         Date today = Calendar.getInstance().getTime();
         return DateFormat.getTimeFormat(context).format(today);
+    }
+
+    private String getCellularIdentifier(Context context,
+                                         @CellularIdentifier int cellularIdentifier) {
+        return switch (cellularIdentifier) {
+            case CELLULAR_IDENTIFIER_IMSI -> context.getString(R.string.cellular_identifier_imsi);
+            case CELLULAR_IDENTIFIER_IMEI -> context.getString(R.string.cellular_identifier_imei);
+            case CELLULAR_IDENTIFIER_SUCI -> context.getString(R.string.cellular_identifier_suci);
+            default -> "";
+        };
     }
 
     /**
@@ -427,11 +455,14 @@ public class CellularNetworkSecuritySafetySource {
         private final int mDisclosureCount;
         private final Instant mWindowStart;
         private final Instant mWindowEnd;
+        private final CellularIdentifierDisclosure mDisclosure;
 
-        private IdentifierDisclosure(int count, Instant start, Instant end) {
+        private IdentifierDisclosure(int count, Instant start, Instant end,
+                                     CellularIdentifierDisclosure disclosure) {
             mDisclosureCount = count;
             mWindowStart = start;
             mWindowEnd = end;
+            mDisclosure = disclosure;
         }
 
         private int getDisclosureCount() {
@@ -454,12 +485,13 @@ public class CellularNetworkSecuritySafetySource {
             IdentifierDisclosure other = (IdentifierDisclosure) o;
             return mDisclosureCount == other.mDisclosureCount
                     && Objects.equals(mWindowStart, other.mWindowStart)
-                    && Objects.equals(mWindowEnd, other.mWindowEnd);
+                    && Objects.equals(mWindowEnd, other.mWindowEnd)
+                    && Objects.equals(mDisclosure, other.mDisclosure);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(mDisclosureCount, mWindowStart, mWindowEnd);
+            return Objects.hash(mDisclosureCount, mWindowStart, mWindowEnd, mDisclosure);
         }
     }
 

@@ -1236,14 +1236,6 @@ public class SmsDispatchersControllerTest extends TelephonyTest {
     public void testSendCarrierRoamingNbIotNtnText() {
         PendingRequest pendingRequest = createPendingRequest();
         switchImsSmsFormat(PhoneConstants.PHONE_TYPE_GSM);
-
-        when(mFeatureFlags.carrierRoamingNbIotNtn()).thenReturn(false);
-        mSmsDispatchersController.sendCarrierRoamingNbIotNtnText(pendingRequest);
-        processAllMessages();
-        verify(mSimulatedCommandsVerifier, times(0)).sendImsGsmSms(anyString(), anyString(),
-                anyInt(), anyInt(), any(Message.class));
-
-        when(mFeatureFlags.carrierRoamingNbIotNtn()).thenReturn(true);
         mSmsDispatchersController.sendCarrierRoamingNbIotNtnText(pendingRequest);
         processAllMessages();
         verify(mSimulatedCommandsVerifier, times(1)).sendImsGsmSms(anyString(), anyString(),

@@ -441,8 +441,6 @@ public class CdmaInboundSmsHandler extends InboundSmsHandler {
      * Add voicemail indication SMS 0 to metrics.
      */
     private void addVoicemailSmsToMetrics(@SmsSource int smsSource, int pduLength) {
-        mMetrics.writeIncomingVoiceMailSms(mPhone.getPhoneId(),
-                android.telephony.SmsMessage.FORMAT_3GPP2);
         mPhone.getSmsStats().onIncomingSmsVoicemail(true /* is3gpp2 */, smsSource, pduLength);
     }
 

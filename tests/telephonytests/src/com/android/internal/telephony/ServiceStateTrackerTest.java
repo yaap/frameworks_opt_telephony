@@ -103,10 +103,10 @@ import com.android.internal.telephony.emergency.EmergencyStateTracker;
 import com.android.internal.telephony.metrics.ServiceStateStats;
 import com.android.internal.telephony.satellite.SatelliteController;
 import com.android.internal.telephony.subscription.SubscriptionInfoInternal;
-import com.android.internal.telephony.test.SimulatedCommands;
 import com.android.internal.telephony.uicc.IccCardApplicationStatus;
 import com.android.internal.telephony.uicc.IccRecords;
 
+import java.util.Set;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Ignore;
@@ -1009,7 +1009,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
         sst.registerForVoiceRoamingOn(mTestHandler, EVENT_DATA_ROAMING_ON, null);
 
         // Enable roaming and trigger events to notify handler registered
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mSimulatedCommands.setVoiceRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
         mSimulatedCommands.setDataRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
         mSimulatedCommands.notifyNetworkStateChanged();
@@ -1044,7 +1043,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
     @Test
     public void testRegAndUnregForVoiceRoamingOff() throws Exception {
         // Enable roaming
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mSimulatedCommands.setVoiceRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
         mSimulatedCommands.setDataRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
         mSimulatedCommands.notifyNetworkStateChanged();
@@ -1054,7 +1052,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
         sst.registerForVoiceRoamingOff(mTestHandler, EVENT_DATA_ROAMING_OFF, null);
 
         // Disable roaming
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mSimulatedCommands.setVoiceRegState(NetworkRegistrationInfo.REGISTRATION_STATE_HOME);
         mSimulatedCommands.setDataRegState(NetworkRegistrationInfo.REGISTRATION_STATE_HOME);
         mSimulatedCommands.notifyNetworkStateChanged();
@@ -1092,7 +1089,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
         sst.registerForDataRoamingOn(mTestHandler, EVENT_DATA_ROAMING_ON, null);
 
         // Enable roaming and trigger events to notify handler registered
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mSimulatedCommands.setVoiceRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
         mSimulatedCommands.setDataRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
         mSimulatedCommands.notifyNetworkStateChanged();
@@ -1128,7 +1124,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
     @Test
     public void testRegAndUnregForDataRoamingOff() throws Exception {
         // Enable roaming
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mSimulatedCommands.setVoiceRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
         mSimulatedCommands.setDataRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
         mSimulatedCommands.notifyNetworkStateChanged();
@@ -1138,7 +1133,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
         sst.registerForDataRoamingOff(mTestHandler, EVENT_DATA_ROAMING_OFF, null, true);
 
         // Disable roaming
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mSimulatedCommands.setVoiceRegState(NetworkRegistrationInfo.REGISTRATION_STATE_HOME);
         mSimulatedCommands.setDataRegState(NetworkRegistrationInfo.REGISTRATION_STATE_HOME);
         mSimulatedCommands.notifyNetworkStateChanged();
@@ -1174,7 +1168,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
     @Test
     public void testRegAndInvalidregForDataConnAttach() throws Exception {
         // Initially set service state out of service
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mSimulatedCommands.setVoiceRegState(23);
         mSimulatedCommands.setDataRegState(23);
         mSimulatedCommands.notifyNetworkStateChanged();
@@ -1220,7 +1213,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
     @Test
     public void testRegAndUnregForDataConnAttach() throws Exception {
         // Initially set service state out of service
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mSimulatedCommands.setVoiceRegState(NetworkRegistrationInfo.REGISTRATION_STATE_UNKNOWN);
         mSimulatedCommands.setDataRegState(NetworkRegistrationInfo.REGISTRATION_STATE_UNKNOWN);
         mSimulatedCommands.notifyNetworkStateChanged();
@@ -1267,7 +1259,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
     @Test
     public void testRegAndUnregForDataConnDetach() throws Exception {
         // Initially set service state in service
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mSimulatedCommands.setVoiceRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
         mSimulatedCommands.setDataRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
         mSimulatedCommands.notifyNetworkStateChanged();
@@ -1360,7 +1351,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
     @Test
     public void testRegAndUnregForNetworkAttached() throws Exception {
         // Initially set service state out of service
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mSimulatedCommands.setVoiceRegState(NetworkRegistrationInfo.REGISTRATION_STATE_UNKNOWN);
         mSimulatedCommands.setDataRegState(NetworkRegistrationInfo.REGISTRATION_STATE_UNKNOWN);
         mSimulatedCommands.notifyNetworkStateChanged();
@@ -1405,7 +1395,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
     @Test
     public void testRegAndInvalidRegForNetworkAttached() throws Exception {
         // Initially set service state out of service
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mSimulatedCommands.setVoiceRegState(23);
         mSimulatedCommands.setDataRegState(23);
         mSimulatedCommands.notifyNetworkStateChanged();
@@ -1489,7 +1478,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
     @Test
     public void testOnRestrictedStateChanged() throws Exception {
         ServiceStateTracker spySst = spy(sst);
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         doReturn(IccCardApplicationStatus.AppState.APPSTATE_READY).when(
                 mUiccCardApplication3gpp).getState();
 
@@ -1786,7 +1774,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
 
     @Test
     public void testSetImsRegisteredStateRunsShutdownImmediately() throws Exception {
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         sst.setImsRegistrationState(true);
         mSimulatedCommands.setRadioPowerFailResponse(false);
         sst.setRadioPower(true);
@@ -1804,7 +1791,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
 
     @Test
     public void testImsRegisteredNoDelayShutDown() throws Exception {
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         // The radio power off delay time is 0, so there should should be no delay.
         sst.setImsRegistrationState(true);
         mSimulatedCommands.setRadioPowerFailResponse(false);
@@ -1820,7 +1806,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
 
     @Test
     public void testImsRegisteredAPMOnOffToggle() throws Exception {
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mContextFixture.putIntResource(
                 com.android.internal.R.integer.config_delay_for_ims_dereg_millis, 1000 /*ms*/);
         sst.setImsRegistrationState(true);
@@ -2743,9 +2728,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
 
     @Test
     public void testUpdateSpnDisplay_noService_displayEmergencyCallOnly() {
-        // GSM phone
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         // Emergency call only
         ServiceState ss = new ServiceState();
         ss.setVoiceRegState(ServiceState.STATE_EMERGENCY_ONLY);
@@ -2770,9 +2752,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
 
     @Test
     public void testUpdateSpnDisplay_noServiceAndEmergencyCallNotAvailable_displayOOS() {
-        // GSM phone
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         // Completely out of service
         ServiceState ss = new ServiceState();
         ss.setVoiceRegState(ServiceState.STATE_OUT_OF_SERVICE);
@@ -2792,9 +2771,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
 
     @Test
     public void testUpdateSpnDisplay_flightMode_displayNull() {
-        // GSM phone
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         // Flight mode
         ServiceState ss = new ServiceState();
         ss.setVoiceRegState(ServiceState.STATE_POWER_OFF);
@@ -2812,9 +2788,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
 
     @Test
     public void testUpdateSpnDisplay_flightModeNoWifiCalling_showSpnAndPlmn() {
-        // GSM phone
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         // Flight mode and connected to WiFI
         doReturn(ServiceState.STATE_POWER_OFF).when(mServiceState).getVoiceRegState();
         doReturn(ServiceState.STATE_POWER_OFF).when(mServiceState).getDataRegState();
@@ -2840,8 +2813,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
 
     @Test
     public void testUpdateSpnDisplay_spnNotEmptyAndCrossSimCallingEnabled_showSpnOnly() {
-        // GSM phone
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         final CellIdentityLte cellIdentityLte =
                 new CellIdentityLte(1, 1, 5, 1, new int[] {1, 2}, 5000, "001", "01", "test",
                         "tst", Collections.emptyList(), null);
@@ -2882,8 +2853,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
 
     @Test
     public void testUpdateSpnDisplay_spnNotEmptyAndWifiCallingEnabled_showSpnOnly() {
-        // GSM phone
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         final CellIdentityLte cellIdentityLte =
                 new CellIdentityLte(1, 1, 5, 1, new int[] {1, 2}, 5000, "001", "01", "test",
                         "tst", Collections.emptyList(), null);
@@ -2923,9 +2892,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
         mBundle.putString(CarrierConfigManager.KEY_CARRIER_NAME_STRING, "");
         sendCarrierConfigUpdate(PHONE_ID);
 
-        // GSM phone
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         // In Service
         ServiceState ss = new ServiceState();
         ss.setVoiceRegState(ServiceState.STATE_IN_SERVICE);
@@ -2951,9 +2917,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
 
     @Test
     public void testUpdateSpnDisplay_inServiceNoWifiCalling_showSpnAndPlmn() {
-        // GSM phone
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         ServiceState ss = new ServiceState();
         ss.setVoiceRegState(ServiceState.STATE_IN_SERVICE);
         ss.setDataRegState(ServiceState.STATE_IN_SERVICE);
@@ -3003,9 +2966,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
                 CarrierConfigManager.KEY_ENABLE_CARRIER_DISPLAY_NAME_RESOLVER_BOOL, false);
         sendCarrierConfigUpdate(PHONE_ID);
 
-        // GSM phone
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         // voice out of service but data in service (connected to IWLAN)
         doReturn(ServiceState.STATE_OUT_OF_SERVICE).when(mServiceState).getState();
         doReturn(ServiceState.STATE_IN_SERVICE).when(mServiceState).getDataRegistrationState();
@@ -3030,9 +2990,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
         mBundle.putBoolean(
                 CarrierConfigManager.KEY_ENABLE_CARRIER_DISPLAY_NAME_RESOLVER_BOOL, false);
         sendCarrierConfigUpdate(PHONE_ID);
-
-        // GSM phone
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
 
         // Reg tech is Cross Sim but both data and voice are OOS
         doReturn(ServiceState.STATE_OUT_OF_SERVICE).when(mServiceState).getState();
@@ -3061,9 +3018,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
         mBundle.putBoolean(
                 CarrierConfigManager.KEY_ENABLE_CARRIER_DISPLAY_NAME_RESOLVER_BOOL, false);
         sendCarrierConfigUpdate(PHONE_ID);
-
-        // GSM phone
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
 
         // voice out of service but data in service (connected to Cross Sim IWLAN)
         doReturn(ServiceState.STATE_OUT_OF_SERVICE).when(mServiceState).getState();
@@ -3196,7 +3150,6 @@ public class ServiceStateTrackerTest extends TelephonyTest {
     @Test
     public void testGetCombinedRegState() {
         doReturn(mImsPhone).when(mPhone).getImsPhone();
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
 
         // If voice/data out of service, return out of service.
         doReturn(ServiceState.STATE_OUT_OF_SERVICE).when(mServiceState).getState();
@@ -3276,8 +3229,7 @@ public class ServiceStateTrackerTest extends TelephonyTest {
         CellIdentityGsm cellIdentity =
                 new CellIdentityGsm(0, 1, 900, 5, "101", "23", "test", "tst",
                         Collections.emptyList());
-        doReturn(Arrays.asList("10123")).when(mSatelliteController).getSatellitePlmnsForCarrier(
-                anyInt());
+        doReturn(Set.of("10123")).when(mSatelliteController).getAllPlmnSet();
         doReturn(satelliteSupportedServiceList).when(mSatelliteController)
                 .getSupportedSatelliteServicesForPlmn(sst.mSubId, "10123");
 

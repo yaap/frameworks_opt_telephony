@@ -148,6 +148,10 @@ public class DatagramReceiverTest extends TelephonyTest {
         when(mMockDatagramController.needsWaitingForSatelliteConnected(
                 eq(SatelliteManager.DATAGRAM_TYPE_UNKNOWN))).thenReturn(false);
         when(mMockSatelliteController.getSatelliteCarrierId()).thenReturn(UNKNOWN_CARRIER_ID);
+        when(mMockSatelliteController.getSupportedConnectTypeMetrics())
+                .thenReturn(SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN);
+        when(mMockSatelliteController.getSessionConnectTypeMetrics()).thenReturn(SatelliteConstants
+                .SESSION_NTN_CONNECT_TYPE_UNKNOWN);
         processAllMessages();
     }
 

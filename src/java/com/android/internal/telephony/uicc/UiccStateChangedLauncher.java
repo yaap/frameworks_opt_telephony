@@ -38,7 +38,7 @@ import com.android.internal.telephony.uicc.IccCardStatus.CardState;
  *
  * @see #CARDSTATE_RESTRICTED
  *
- * {@hide}
+ * @hide
  */
 public class UiccStateChangedLauncher extends Handler {
     private static final String TAG = UiccStateChangedLauncher.class.getName();

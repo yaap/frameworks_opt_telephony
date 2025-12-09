@@ -114,6 +114,7 @@ public class SatelliteStats {
         private final int mCountOfIncomingDatagramTypeSmsFail;
         private static int sCarrierRoamingSatelliteConfigVersion;
         private static int sMaxAllowedDataMode;
+        private static @SatelliteConstants.SatelliteGlobalConnectType int sSupportedConnectionMode;
 
         private SatelliteControllerParams(Builder builder) {
             this.mCountOfSatelliteServiceEnablementsSuccess =
@@ -170,6 +171,11 @@ public class SatelliteStats {
                 this.sCarrierId = builder.mCarrierId.get();
             }
 
+            // Global Connect Type value should be updated only when it is meaningful.
+            if (builder.mSupportedConnectionMode.isPresent()) {
+                this.sSupportedConnectionMode = builder.mSupportedConnectionMode.get();
+            }
+
             this.mCountOfSatelliteAllowedStateChangedEvents =
                     builder.mCountOfSatelliteAllowedStateChangedEvents;
             this.mCountOfSuccessfulLocationQueries =
@@ -180,6 +186,7 @@ public class SatelliteStats {
                     builder.mCountOfP2PSmsAvailableNotificationShown;
             this.mCountOfP2PSmsAvailableNotificationRemoved =
                     builder.mCountOfP2PSmsAvailableNotificationRemoved;
+
 
             // Ntn only carrier value should be updated only when it is meaningful.
             if (builder.mIsNtnOnlyCarrier.isPresent()) {
@@ -393,6 +400,10 @@ public class SatelliteStats {
             return sMaxAllowedDataMode;
         }
 
+        public static int getSupportedConnectionMode() {
+            return sSupportedConnectionMode;
+        }
+
         /**
          * A builder class to create {@link SatelliteControllerParams} data structure class
          */
@@ -427,6 +438,7 @@ public class SatelliteStats {
             private int mCountOfSatelliteAccessCheckFail = 0;
             private Optional<Boolean> mIsProvisioned = Optional.empty();
             private Optional<Integer> mCarrierId = Optional.empty();
+            private Optional<Integer> mSupportedConnectionMode = Optional.empty();
             private int mCountOfSatelliteAllowedStateChangedEvents = 0;
             private int mCountOfSuccessfulLocationQueries = 0;
             private int mCountOfFailedLocationQueries = 0;
@@ -442,7 +454,6 @@ public class SatelliteStats {
             private int mCountOfIncomingDatagramTypeSmsFail;
             private Optional<Integer> mCarrierRoamingSatelliteConfigVersion = Optional.empty();
             private Optional<Integer> mMaxAllowedDataMode = Optional.empty();
-
 
             /**
              * Sets countOfSatelliteServiceEnablementsSuccess value of {@link SatelliteController}
@@ -892,6 +903,15 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets supported connection mode value of {@link SatelliteController} atom
+             * then returns Builder class
+             */
+            public Builder setSupportedConnectionMode(int supportedConnectionMode) {
+                this.mSupportedConnectionMode = Optional.of(supportedConnectionMode);
+                return this;
+            }
+
+            /**
              * Returns ControllerParams, which contains whole component of
              * {@link SatelliteController} atom
              */
@@ -950,6 +970,7 @@ public class SatelliteStats {
                     + mCountOfP2PSmsAvailableNotificationShown
                     + ", countOfP2PSmsAvailableNotificationRemoved="
                     + mCountOfP2PSmsAvailableNotificationRemoved
+                    + ", isNtnOnlyCarrier=" + sIsNtnOnlyCarrier
                     + ", versionOfSatelliteAccessConfig=" + sVersionOfSatelliteAccessConfig
                     + ", countOfIncomingDatagramTypeSosSmsSuccess="
                     + mCountOfIncomingDatagramTypeSosSmsSuccess
@@ -964,6 +985,7 @@ public class SatelliteStats {
                     + ", carrierRoamingSatelliteConfigVersion="
                     + sCarrierRoamingSatelliteConfigVersion
                     + ", maxAllowedDataMode=" + sMaxAllowedDataMode
+                    + ", supportedConnectionMode=" + sSupportedConnectionMode
                     + ")";
         }
     }
@@ -992,6 +1014,8 @@ public class SatelliteStats {
         private final boolean mIsEmergency;
         private final int mMaxInactivityDurationSec;
         private final boolean mIsNtnOnlyCarrier;
+        private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
+        private final @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
 
         private SatelliteSessionParams(Builder builder) {
             this.mSatelliteServiceInitializationResult =
@@ -1016,6 +1040,8 @@ public class SatelliteStats {
             this.mIsEmergency = builder.mIsEmergency;
             this.mIsNtnOnlyCarrier = builder.mIsNtnOnlyCarrier;
             this.mMaxInactivityDurationSec = builder.mMaxInactivityDurationSec;
+            this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
+            this.mSessionConnectionMode = builder.mSessionConnectionMode;
         }
 
         public int getSatelliteServiceInitializationResult() {
@@ -1094,6 +1120,14 @@ public class SatelliteStats {
             return mMaxInactivityDurationSec;
         }
 
+        public int getSupportedConnectionMode() {
+            return mSupportedConnectionMode;
+        }
+
+        public int getSessionConnectionMode() {
+            return mSessionConnectionMode;
+        }
+
         /**
          * A builder class to create {@link SatelliteSessionParams} data structure class
          */
@@ -1118,6 +1152,10 @@ public class SatelliteStats {
             private boolean mIsEmergency = false;
             private boolean mIsNtnOnlyCarrier = false;
             private int mMaxInactivityDurationSec = -1;
+            private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode =
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
+            private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode =
+                    SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
 
             /**
              * Sets satelliteServiceInitializationResult value of {@link SatelliteSession}
@@ -1258,6 +1296,24 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets supportedConnectionMode value of {@link SatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setSupportedConnectionMode(int supportedConnectionMode) {
+                this.mSupportedConnectionMode = supportedConnectionMode;
+                return this;
+            }
+
+            /**
+             * Sets sessionConnectionMode value of {@link SatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setSessionConnectionMode(int sessionConnectionMode) {
+                this.mSessionConnectionMode = sessionConnectionMode;
+                return this;
+            }
+
+            /**
              * Returns SessionParams, which contains whole component of
              * {@link SatelliteSession} atom
              */
@@ -1290,6 +1346,8 @@ public class SatelliteStats {
                     + ", IsEmergency=" + mIsEmergency
                     + ", IsNtnOnlyCarrier=" + mIsNtnOnlyCarrier
                     + ", MaxInactivityDurationSec=" + mMaxInactivityDurationSec
+                    + ", SupportedConnectionMode=" + mSupportedConnectionMode
+                    + ", SessionConnectionMode=" + mSessionConnectionMode
                     + ")";
         }
     }
@@ -1305,6 +1363,8 @@ public class SatelliteStats {
         private final boolean mIsDemoMode;
         private final int mCarrierId;
         private final boolean mIsNtnOnlyCarrier;
+        private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
+        private final @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
 
         private SatelliteIncomingDatagramParams(Builder builder) {
             this.mResultCode = builder.mResultCode;
@@ -1313,6 +1373,8 @@ public class SatelliteStats {
             this.mIsDemoMode = builder.mIsDemoMode;
             this.mCarrierId = builder.mCarrierId;
             this.mIsNtnOnlyCarrier = builder.mIsNtnOnlyCarrier;
+            this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
+            this.mSessionConnectionMode = builder.mSessionConnectionMode;
         }
 
         public int getResultCode() {
@@ -1339,6 +1401,14 @@ public class SatelliteStats {
             return mIsNtnOnlyCarrier;
         }
 
+        public int getSupportedConnectionMode() {
+            return mSupportedConnectionMode;
+        }
+
+        public int getSessionConnectionMode() {
+            return mSessionConnectionMode;
+        }
+
         /**
          * A builder class to create {@link SatelliteIncomingDatagramParams} data structure class
          */
@@ -1349,6 +1419,10 @@ public class SatelliteStats {
             private boolean mIsDemoMode = false;
             private int mCarrierId = UNKNOWN_CARRIER_ID;
             private boolean mIsNtnOnlyCarrier = false;
+            private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode =
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
+            private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode =
+                    SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
 
             /**
              * Sets resultCode value of {@link SatelliteIncomingDatagram} atom
@@ -1402,6 +1476,24 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets supportedConnectionMode value of {@link SatelliteIncomingDatagram} atom
+             * then returns Builder class
+             */
+            public Builder setSupportedConnectionMode(int supportedConnectionMode) {
+                this.mSupportedConnectionMode = supportedConnectionMode;
+                return this;
+            }
+
+            /**
+             * Sets sesisonConnectionMode value of {@link SatelliteIncomingDatagram} atom
+             * then returns Builder class
+             */
+            public Builder setSessionConnectionMode(int sessionConnectionMode) {
+                this.mSessionConnectionMode = sessionConnectionMode;
+                return this;
+            }
+
+            /**
              * Returns IncomingDatagramParams, which contains whole component of
              * {@link SatelliteIncomingDatagram} atom
              */
@@ -1420,6 +1512,8 @@ public class SatelliteStats {
                     + ", isDemoMode=" + mIsDemoMode
                     + ", CarrierId=" + mCarrierId
                     + ", isNtnOnlyCarrier=" + mIsNtnOnlyCarrier
+                    + ", supportedConnectionMode=" + mSupportedConnectionMode
+                    + ", sessionConnectionMode=" + mSessionConnectionMode
                     + ")";
         }
     }
@@ -1436,6 +1530,8 @@ public class SatelliteStats {
         private final boolean mIsDemoMode;
         private final int mCarrierId;
         private final boolean mIsNtnOnlyCarrier;
+        private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
+        private final @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
 
         private SatelliteOutgoingDatagramParams(Builder builder) {
             this.mDatagramType = builder.mDatagramType;
@@ -1445,6 +1541,8 @@ public class SatelliteStats {
             this.mIsDemoMode = builder.mIsDemoMode;
             this.mCarrierId = builder.mCarrierId;
             this.mIsNtnOnlyCarrier = builder.mIsNtnOnlyCarrier;
+            this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
+            this.mSessionConnectionMode = builder.mSessionConnectionMode;
         }
 
         public int getDatagramType() {
@@ -1475,6 +1573,14 @@ public class SatelliteStats {
             return mIsNtnOnlyCarrier;
         }
 
+        public int getSupportedConnectionMode() {
+            return mSupportedConnectionMode;
+        }
+
+        public int getSessionConnectionMode() {
+            return mSessionConnectionMode;
+        }
+
         /**
          * A builder class to create {@link SatelliteOutgoingDatagramParams} data structure class
          */
@@ -1486,6 +1592,11 @@ public class SatelliteStats {
             private boolean mIsDemoMode = false;
             private int mCarrierId = UNKNOWN_CARRIER_ID;
             private boolean mIsNtnOnlyCarrier = false;
+            private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode =
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
+            private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode =
+                    SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
+
 
             /**
              * Sets datagramType value of {@link SatelliteOutgoingDatagram} atom
@@ -1548,6 +1659,24 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets supportedConnectionMode value of {@link SatelliteOutgoingDatagram} atom
+             * then returns Builder class
+             */
+            public Builder setSupportedConnectionMode(int supportedConnectionMode) {
+                this.mSupportedConnectionMode = supportedConnectionMode;
+                return this;
+            }
+
+            /**
+             * Sets sessionConnectionMode value of {@link SatelliteOutgoingDatagram} atom
+             * then returns Builder class
+             */
+            public Builder setSessionConnectionMode(int sessionConnectionMode) {
+                this.mSessionConnectionMode = sessionConnectionMode;
+                return this;
+            }
+
+            /**
              * Returns OutgoingDatagramParams, which contains whole component of
              * {@link SatelliteOutgoingDatagram} atom
              */
@@ -1567,6 +1696,8 @@ public class SatelliteStats {
                     + ", isDemoMode=" + mIsDemoMode
                     + ", CarrierId=" + mCarrierId
                     + ", isNtnOnlyCarrier=" + mIsNtnOnlyCarrier
+                    + ", supportedConnectionMode=" + mSupportedConnectionMode
+                    + ", sessionConnectionMode=" + mSessionConnectionMode
                     + ")";
         }
     }
@@ -1582,6 +1713,7 @@ public class SatelliteStats {
         private final boolean mIsCanceled;
         private final int mCarrierId;
         private final boolean mIsNtnOnlyCarrier;
+        private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
 
         private SatelliteProvisionParams(Builder builder) {
             this.mResultCode = builder.mResultCode;
@@ -1590,6 +1722,7 @@ public class SatelliteStats {
             this.mIsCanceled = builder.mIsCanceled;
             this.mCarrierId = builder.mCarrierId;
             this.mIsNtnOnlyCarrier = builder.mIsNtnOnlyCarrier;
+            this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
         }
 
         public int getResultCode() {
@@ -1616,6 +1749,10 @@ public class SatelliteStats {
             return mIsNtnOnlyCarrier;
         }
 
+        public int getSupportedConnectionMode() {
+            return mSupportedConnectionMode;
+        }
+
         /**
          * A builder class to create {@link SatelliteProvisionParams} data structure class
          */
@@ -1626,6 +1763,9 @@ public class SatelliteStats {
             private boolean mIsCanceled = false;
             private int mCarrierId = UNKNOWN_CARRIER_ID;
             private boolean mIsNtnOnlyCarrier = false;
+            private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode =
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
+
 
             /**
              * Sets resultCode value of {@link SatelliteProvision} atom
@@ -1679,6 +1819,15 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets supportedConnectionMode value of {@link SatelliteProvision} atom
+             * then returns Builder class
+             */
+            public Builder setSupportedConnectionMode(int supportedConnectionMode) {
+                this.mSupportedConnectionMode = supportedConnectionMode;
+                return this;
+            }
+
+            /**
              * Returns ProvisionParams, which contains whole component of
              * {@link SatelliteProvision} atom
              */
@@ -1697,6 +1846,7 @@ public class SatelliteStats {
                     + ", isCanceled" + mIsCanceled
                     + ", CarrierId=" + mCarrierId
                     + ", isNtnOnlyCarrier=" + mIsNtnOnlyCarrier
+                    + "' supportedConnectionMode=" + mSupportedConnectionMode
                     + ")";
         }
     }
@@ -1716,6 +1866,8 @@ public class SatelliteStats {
         private final boolean mIsWifiConnected;
         private final int mCarrierId;
         private final boolean mIsNtnOnlyCarrier;
+        private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
+        private final @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
 
         private SatelliteSosMessageRecommenderParams(Builder builder) {
             this.mIsDisplaySosMessageSent = builder.mIsDisplaySosMessageSent;
@@ -1729,6 +1881,8 @@ public class SatelliteStats {
             this.mIsWifiConnected = builder.mIsWifiConnected;
             this.mCarrierId = builder.mCarrierId;
             this.mIsNtnOnlyCarrier = builder.mIsNtnOnlyCarrier;
+            this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
+            this.mSessionConnectionMode = builder.mSessionConnectionMode;
         }
 
         public boolean isDisplaySosMessageSent() {
@@ -1771,6 +1925,14 @@ public class SatelliteStats {
             return mIsNtnOnlyCarrier;
         }
 
+        public int getSupportedConnectionMode() {
+            return mSupportedConnectionMode;
+        }
+
+        public int getSessionConnectionMode() {
+            return mSessionConnectionMode;
+        }
+
         /**
          * A builder class to create {@link SatelliteSosMessageRecommender} data structure class
          */
@@ -1785,6 +1947,10 @@ public class SatelliteStats {
             private boolean mIsWifiConnected = false;
             private int mCarrierId = UNKNOWN_CARRIER_ID;
             private boolean mIsNtnOnlyCarrier = false;
+            private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode =
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
+            private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode =
+                    SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
 
             /**
              * Sets resultCode value of {@link SatelliteSosMessageRecommender} atom
@@ -1879,6 +2045,24 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets supportedConnectionMode value of {@link SatelliteSosMessageRecommender} atom
+             * then returns Builder class
+             */
+            public Builder setSupportedConnectionMode(int supportedConnectionMode) {
+                this.mSupportedConnectionMode = supportedConnectionMode;
+                return this;
+            }
+
+            /**
+             * Sets sessionConnectionMode value of {@link SatelliteSosMessageRecommender} atom
+             * then returns Builder class
+             */
+            public Builder setSessionConnectionMode(int sessionConnectionMode) {
+                this.mSessionConnectionMode = sessionConnectionMode;
+                return this;
+            }
+
+            /**
              * Returns SosMessageRecommenderParams, which contains whole component of
              * {@link SatelliteSosMessageRecommenderParams} atom
              */
@@ -1902,6 +2086,8 @@ public class SatelliteStats {
                     + ", isWifiConnected=" + mIsWifiConnected
                     + ", carrierId=" + mCarrierId
                     + ", isNtnOnlyCarrier=" + mIsNtnOnlyCarrier
+                    + ", supportedConnectionMode=" + mSupportedConnectionMode
+                    + ", sessionConnectionMode=" + mSessionConnectionMode
                     + ")";
         }
     }
@@ -1946,6 +2132,8 @@ public class SatelliteStats {
         private final String[] mSatelliteSupportedApps;
         private final int[] mSatelliteSupportedUids;
         private final long[] mPerAppSatelliteDataConsumedBytes;
+        private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
+        private final @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
 
         private CarrierRoamingSatelliteSessionParams(Builder builder) {
             this.mCarrierId = builder.mCarrierId;
@@ -1984,6 +2172,8 @@ public class SatelliteStats {
             this.mSatelliteSupportedApps = builder.mSatelliteSupportedApps;
             this.mSatelliteSupportedUids = builder.mSatelliteSupportedUids;
             this.mPerAppSatelliteDataConsumedBytes = builder.mPerAppSatelliteDataConsumedBytes;
+            this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
+            this.mSessionConnectionMode = builder.mSessionConnectionMode;
         }
 
         public int getCarrierId() {
@@ -2122,6 +2312,14 @@ public class SatelliteStats {
             return mPerAppSatelliteDataConsumedBytes;
         }
 
+        public int getSupportedConnectionMode() {
+            return mSupportedConnectionMode;
+        }
+
+        public int getSessionConnectionMode() {
+            return mSessionConnectionMode;
+        }
+
         /**
          * A builder class to create {@link CarrierRoamingSatelliteSessionParams} data structure
          * class
@@ -2162,6 +2360,10 @@ public class SatelliteStats {
             private String[] mSatelliteSupportedApps = null;
             private int[] mSatelliteSupportedUids = new int[5];
             private long[] mPerAppSatelliteDataConsumedBytes = new long[]{0L};
+            private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode =
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
+            private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode =
+                    SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
 
 
             /**
@@ -2477,6 +2679,24 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets supportedConnectionMode value of {@link CarrierRoamingSatelliteSession} atom,
+             * which indicates the global connect type
+             */
+            public Builder setSupportedConnectionMode(int supportedConnectionMode) {
+                this.mSupportedConnectionMode = supportedConnectionMode;
+                return this;
+            }
+
+            /**
+             * Sets sessionConnectionMode value of {@link CarrierRoamingSatelliteSession} atom,
+             * which indicates the session connect type
+             */
+            public Builder setSessionConnectionMode(int sessionConnectionMode) {
+                this.mSessionConnectionMode = sessionConnectionMode;
+                return this;
+            }
+
+            /**
              * Sets perAppSatelliteDataConsumedBytes value of {@link CarrierRoamingSatelliteSession}
              * atom then returns Builder class
              */
@@ -2526,6 +2746,8 @@ public class SatelliteStats {
                     + ", satelliteSupportedUids=" + Arrays.toString(mSatelliteSupportedUids)
                     + ", perAppSatelliteDataConsumedBytes=" + Arrays.toString(
                     mPerAppSatelliteDataConsumedBytes)
+                    + ", supportedConnectionMode=" + mSupportedConnectionMode
+                    + ", sessionConnectionMode=" + mSessionConnectionMode
                     + ")";
         }
     }
@@ -2548,6 +2770,10 @@ public class SatelliteStats {
         private static boolean sIsMultiSim;
         private final int mCountOfSatelliteSessions;
         private static boolean sIsNbIotNtn;
+        private static @SatelliteConstants.SatelliteGlobalConnectType int sSupportedConnectionMode;
+        private final int mCountOfSessionConnectionModeAutomatic;
+        private final int mCountOfSessionConnectionModeManual;
+        private final int mServiceDataPolicy;
 
         private CarrierRoamingSatelliteControllerStatsParams(Builder builder) {
             this.mConfigDataSource = builder.mConfigDataSource;
@@ -2557,6 +2783,10 @@ public class SatelliteStats {
                     builder.mCountOfSatelliteConfigUpdateRequest;
             this.mCountOfSatelliteNotificationDisplayed =
                     builder.mCountOfSatelliteNotificationDisplayed;
+            this.mCountOfSessionConnectionModeAutomatic =
+                    builder.mCountOfSessionConnectionModeAutomatic;
+            this.mCountOfSessionConnectionModeManual =
+                    builder.mCountOfSessionConnectionModeManual;
 
             // Update session gap params only when they are explicitly provided
             if (builder.mSatelliteSessionGapMinSec.isPresent()) {
@@ -2590,6 +2820,14 @@ public class SatelliteStats {
             if (builder.mIsNbIotNtn.isPresent()) {
                 sIsNbIotNtn = builder.mIsNbIotNtn.get();
             }
+
+            // supportedConnectionMode value should be updated only when it is meaningful.
+            if (builder.mSupportedConnectionMode.isPresent()) {
+                sSupportedConnectionMode = builder.mSupportedConnectionMode.get();
+            }
+
+            this.mServiceDataPolicy = builder.mServiceDataPolicy;
+
         }
 
         public int getConfigDataSource() {
@@ -2640,6 +2878,22 @@ public class SatelliteStats {
             return sIsNbIotNtn;
         }
 
+        public int getSupportedConnectionMode() {
+            return sSupportedConnectionMode;
+        }
+
+        public int getCountOfSessionConnectionModeAutomatic() {
+            return mCountOfSessionConnectionModeAutomatic;
+        }
+
+        public int getCountOfSessionConnectionModeManual() {
+            return mCountOfSessionConnectionModeManual;
+        }
+
+        public int getServiceDataPolicy() {
+            return mServiceDataPolicy;
+        }
+
         /**
          * A builder class to create {@link CarrierRoamingSatelliteControllerStatsParams}
          * data structure class
@@ -2657,6 +2911,11 @@ public class SatelliteStats {
             private Optional<Boolean> mIsMultiSim = Optional.empty();
             private int mCountOfSatelliteSessions = 0;
             private Optional<Boolean> mIsNbIotNtn = Optional.empty();
+            private Optional<Integer> mSupportedConnectionMode = Optional.empty();
+            private int mCountOfSessionConnectionModeAutomatic = 0;
+            private int mCountOfSessionConnectionModeManual = 0;
+            private int mServiceDataPolicy =
+                    SatelliteConstants.SATELLITE_ENTITLEMENT_SERVICE_POLICY_UNKNOWN;
 
             /**
              * Sets configDataSource value of {@link CarrierRoamingSatelliteControllerStats} atom
@@ -2751,9 +3010,48 @@ public class SatelliteStats {
                 return this;
             }
 
+            /**
+             * Increase the count of automatic satellite sessions value of
+             * {@link CarrierRoamingSatelliteControllerStats} atom by one then returns Builder class
+             */
+            public Builder increaseCountOfSessionConnectionModeAutomatic(boolean automatic) {
+                if (!automatic) {
+                    return this;
+                }
+                this.mCountOfSessionConnectionModeAutomatic++;
+                return this;
+            }
+
+            /**
+             * Increase the count of manual satellite sessions value of
+             * {@link CarrierRoamingSatelliteControllerStats} atom by one then returns Builder class
+             */
+            public Builder increaseCountOfSessionConnectionModeManual(boolean manual) {
+                if (!manual) {
+                    return this;
+                }
+                this.mCountOfSessionConnectionModeManual++;
+                return this;
+            }
+
             /** Sets whether the device is in NB-NoT-NTN state or not. */
             public Builder setIsNbIotNtn(boolean isNbIotNtn) {
                 this.mIsNbIotNtn = Optional.of(isNbIotNtn);
+                return this;
+            }
+
+            /** Sets whether the global connect type is hybrid or auto or manual. */
+            public Builder setSupportedConnectionMode(int supportedConnectionMode) {
+                this.mSupportedConnectionMode = Optional.of(supportedConnectionMode);
+                return this;
+            }
+
+            /**
+             * Sets serviceDataPolicy value of {@link CarrierRoamingSatelliteControllerStats} atom
+             * then returns Builder class
+             */
+            public Builder setServiceDataPolicy(int serviceDataPolicy) {
+                this.mServiceDataPolicy = serviceDataPolicy;
                 return this;
             }
 
@@ -2787,7 +3085,13 @@ public class SatelliteStats {
                     && sIsDeviceEntitled == that.isDeviceEntitled()
                     && sIsMultiSim == that.isMultiSim()
                     && mCountOfSatelliteSessions == that.getCountOfSatelliteSessions()
-                    && sIsNbIotNtn == that.isNbIotNtn();
+                    && sIsNbIotNtn == that.isNbIotNtn()
+                    && sSupportedConnectionMode == that.getSupportedConnectionMode()
+                    && mCountOfSessionConnectionModeAutomatic == that
+                    .getCountOfSessionConnectionModeAutomatic()
+                    && mCountOfSessionConnectionModeManual == that
+                    .getCountOfSessionConnectionModeManual()
+                    && mServiceDataPolicy == that.getServiceDataPolicy();
         }
 
         @Override
@@ -2796,7 +3100,8 @@ public class SatelliteStats {
                     mCountOfSatelliteConfigUpdateRequest, mCountOfSatelliteNotificationDisplayed,
                     sSatelliteSessionGapMinSec, sSatelliteSessionGapAvgSec,
                     sSatelliteSessionGapMaxSec, sCarrierId, sIsDeviceEntitled, sIsMultiSim,
-                    mCountOfSatelliteSessions, sIsNbIotNtn);
+                    mCountOfSatelliteSessions, sIsNbIotNtn, sSupportedConnectionMode,
+                    mCountOfSessionConnectionModeAutomatic, mCountOfSessionConnectionModeManual);
         }
 
         @Override
@@ -2817,6 +3122,12 @@ public class SatelliteStats {
                     + ", isMultiSim=" + sIsMultiSim
                     + ", countOfSatelliteSession=" + mCountOfSatelliteSessions
                     + ", isNbIotNtn=" + sIsNbIotNtn
+                    + ", supportedConnectionMode=" + sSupportedConnectionMode
+                    + ", countOfSessionConnectionModeAutomatic="
+                    + mCountOfSessionConnectionModeAutomatic
+                    + ", countOfSessionConnectionModeManual="
+                    + mCountOfSessionConnectionModeManual
+                    + ", serviceDataPolicy=" + mServiceDataPolicy
                     + ")";
         }
     }
@@ -2834,6 +3145,8 @@ public class SatelliteStats {
         private final boolean mIsAllowedServiceEntitlement;
         private final int[] mEntitlementServiceType;
         private final int mEntitlementDataPolicy;
+        private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
+        private final int mHttpStatusCode;
 
         private SatelliteEntitlementParams(Builder builder) {
             this.mCarrierId = builder.mCarrierId;
@@ -2844,6 +3157,8 @@ public class SatelliteStats {
             this.mIsAllowedServiceEntitlement = builder.mIsAllowedServiceEntitlement;
             this.mEntitlementServiceType = builder.mEntitlementServiceType;
             this.mEntitlementDataPolicy = builder.mEntitlementDataPolicy;
+            this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
+            this.mHttpStatusCode = builder.mHttpStatusCode;
         }
 
         public int getCarrierId() {
@@ -2878,6 +3193,14 @@ public class SatelliteStats {
             return mEntitlementDataPolicy;
         }
 
+        public int getSupportedConnectionMode() {
+            return mSupportedConnectionMode;
+        }
+
+        public int getHttpStatusCode() {
+            return mHttpStatusCode;
+        }
+
         /**
          * A builder class to create {@link SatelliteEntitlementParams} data structure class
          */
@@ -2891,6 +3214,9 @@ public class SatelliteStats {
             private int[] mEntitlementServiceType = new int[0];
             private int mEntitlementDataPolicy =
                     SatelliteConstants.SATELLITE_ENTITLEMENT_SERVICE_POLICY_UNKNOWN;
+            private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode =
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
+            private int mHttpStatusCode = 0;
 
             /**
              * Sets carrierId value of {@link SatelliteEntitlement} atom
@@ -2966,6 +3292,24 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets supportedConnectionMode value of {@link SatelliteEntitlement} atom
+             * then returns Builder class
+             */
+            public Builder setSupportedConnectionMode(int supportedConnectionMode) {
+                this.mSupportedConnectionMode = supportedConnectionMode;
+                return this;
+            }
+
+            /**
+             * Sets httpStatusCode value of {@link SatelliteEntitlement} atom
+             * then returns Builder class.
+             */
+            public Builder setHttpStatusCode(int httpStatusCode) {
+                this.mHttpStatusCode = httpStatusCode;
+                return this;
+            }
+
+            /**
              * Returns SatelliteEntitlementParams, which contains whole component of
              * {@link SatelliteEntitlement} atom
              */
@@ -2983,9 +3327,12 @@ public class SatelliteStats {
                     + ", entitlementStatus=" + mEntitlementStatus
                     + ", isRetry=" + mIsRetry
                     + ", count=" + mCount
-                    + ",isAllowedServiceEntitlement=" + mIsAllowedServiceEntitlement
-                    + ",entitlementServiceType=" + Arrays.toString(mEntitlementServiceType)
-                    + ",entitlementServicePolicy=" + mEntitlementDataPolicy + ")";
+                    + ", isAllowedServiceEntitlement=" + mIsAllowedServiceEntitlement
+                    + ", entitlementServiceType=" + Arrays.toString(mEntitlementServiceType)
+                    + ", entitlementServicePolicy=" + mEntitlementDataPolicy
+                    + ", supportedConnectionMode=" + mSupportedConnectionMode
+                    + ", HttpStatusCode=" + mHttpStatusCode
+                    + ")";
         }
     }
 
@@ -3104,6 +3451,8 @@ public class SatelliteStats {
         private final int mCarrierId;
         private final int mTriggeringEvent;
         private final boolean mIsNtnOnlyCarrier;
+        private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
+        private final @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
 
         private SatelliteAccessControllerParams(Builder builder) {
             this.mAccessControlType = builder.mAccessControlType;
@@ -3118,6 +3467,8 @@ public class SatelliteStats {
             this.mCarrierId = builder.mCarrierId;
             this.mTriggeringEvent = builder.mTriggeringEvent;
             this.mIsNtnOnlyCarrier = builder.mIsNtnOnlyCarrier;
+            this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
+            this.mSessionConnectionMode = builder.mSessionConnectionMode;
         }
 
         public @SatelliteConstants.AccessControlType int getAccessControlType() {
@@ -3168,6 +3519,14 @@ public class SatelliteStats {
             return mIsNtnOnlyCarrier;
         }
 
+        public int getSupportedConnectionMode() {
+            return mSupportedConnectionMode;
+        }
+
+        public int getSessionConnectionMode() {
+            return mSessionConnectionMode;
+        }
+
         /**
          * A builder class to create {@link SatelliteAccessControllerParams} data structure class
          */
@@ -3185,9 +3544,13 @@ public class SatelliteStats {
             private @SatelliteConstants.TriggeringEvent int mTriggeringEvent =
                     TRIGGERING_EVENT_UNKNOWN;
             private boolean mIsNtnOnlyCarrier = false;
+            private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode =
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
+            private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode =
+                    SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
 
             /**
-             * Sets AccessControlType value of {@link #SatelliteAccessController}
+             * Sets AccessControlType value of {@link SatelliteAccessController}
              * atom then returns Builder class
              */
             public Builder setAccessControlType(
@@ -3269,8 +3632,26 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets supportedConnectionMode value of {@link SatelliteAccessController} atom
+             * then returns Builder class
+             */
+            public Builder setSupportedConnectionMode(int supportedConnectionMode) {
+                this.mSupportedConnectionMode = supportedConnectionMode;
+                return this;
+            }
+
+            /**
+             * Sets sessionConnectionMode value of {@link SatelliteAccessController} atom
+             * then returns Builder class
+             */
+            public Builder setSessionConnectionMode(int sessionConnectionMode) {
+                this.mSessionConnectionMode = sessionConnectionMode;
+                return this;
+            }
+
+            /**
              * Returns AccessControllerParams, which contains whole component of
-             * {@link #SatelliteAccessController} atom
+             * {@link SatelliteAccessController} atom
              */
             public SatelliteAccessControllerParams build() {
                 return new SatelliteStats()
@@ -3293,6 +3674,8 @@ public class SatelliteStats {
                     + ", CarrierId=" + mCarrierId
                     + ", TriggeringEvent=" + mTriggeringEvent
                     + ", IsNtnOnlyCarrier=" + mIsNtnOnlyCarrier
+                    + ", supportedConnectionMode=" + mSupportedConnectionMode
+                    + ", sessionConnectionMode=" + mSessionConnectionMode
                     + ")";
         }
     }
@@ -3361,6 +3744,7 @@ public class SatelliteStats {
         proto.carrierRoamingSatelliteConfigVersion =
                 param.getCarrierRoamingSatelliteConfigVersion();
         proto.maxAllowedDataMode = param.getMaxAllowedDataMode();
+        proto.supportedConnectionMode = param.getSupportedConnectionMode();
 
         if (DBG) logd("onSatelliteControllerMetrics" + param);
         mAtomsStorage.addSatelliteControllerStats(proto);
@@ -3377,10 +3761,10 @@ public class SatelliteStats {
         proto.initializationProcessingTimeMillis = param.getInitializationProcessingTime();
         proto.terminationProcessingTimeMillis = param.getTerminationProcessingTime();
         proto.sessionDurationSeconds = param.getSessionDuration();
-        proto.countOfOutgoingDatagramSuccess = param.getCountOfIncomingDatagramSuccess();
+        proto.countOfOutgoingDatagramSuccess = param.getCountOfOutgoingDatagramSuccess();
         proto.countOfOutgoingDatagramFailed = param.getCountOfOutgoingDatagramFailed();
         proto.countOfIncomingDatagramSuccess = param.getCountOfIncomingDatagramSuccess();
-        proto.countOfIncomingDatagramFailed = param.getCountOfOutgoingDatagramFailed();
+        proto.countOfIncomingDatagramFailed = param.getCountOfIncomingDatagramFailed();
         proto.isDemoMode = param.getIsDemoMode();
         proto.maxNtnSignalStrengthLevel = param.getMaxNtnSignalStrengthLevel();
         proto.carrierId = param.getCarrierId();
@@ -3391,6 +3775,8 @@ public class SatelliteStats {
         proto.isEmergency = param.getIsEmergency();
         proto.isNtnOnlyCarrier = param.isNtnOnlyCarrier();
         proto.maxInactivityDurationSec = param.getMaxInactivityDurationSec();
+        proto.supportedConnectionMode = param.getSupportedConnectionMode();
+        proto.sessionConnectionMode = param.getSessionConnectionMode();
         if (DBG) logd("onSatelliteSessionMetrics" + param);
         mAtomsStorage.addSatelliteSessionStats(proto);
     }
@@ -3405,6 +3791,8 @@ public class SatelliteStats {
         proto.isDemoMode = param.getIsDemoMode();
         proto.carrierId = param.getCarrierId();
         proto.isNtnOnlyCarrier = param.isNtnOnlyCarrier();
+        proto.supportedConnectionMode = param.getSupportedConnectionMode();
+        proto.sessionConnectionMode = param.getSessionConnectionMode();
         if (DBG) logd("onSatelliteIncomingDatagramMetrics" + param);
         mAtomsStorage.addSatelliteIncomingDatagramStats(proto);
     }
@@ -3420,6 +3808,8 @@ public class SatelliteStats {
         proto.isDemoMode = param.getIsDemoMode();
         proto.carrierId = param.getCarrierId();
         proto.isNtnOnlyCarrier = param.isNtnOnlyCarrier();
+        proto.supportedConnectionMode = param.getSupportedConnectionMode();
+        proto.sessionConnectionMode = param.getSessionConnectionMode();
         if (DBG) logd("onSatelliteOutgoingDatagramMetrics: " + param);
         mAtomsStorage.addSatelliteOutgoingDatagramStats(proto);
     }
@@ -3433,6 +3823,7 @@ public class SatelliteStats {
         proto.isCanceled = param.getIsCanceled();
         proto.carrierId = param.getCarrierId();
         proto.isNtnOnlyCarrier = param.isNtnOnlyCarrier();
+        proto.supportedConnectionMode = param.getSupportedConnectionMode();
         if (DBG) logd("onSatelliteProvisionMetrics: " + param);
         mAtomsStorage.addSatelliteProvisionStats(proto);
     }
@@ -3452,6 +3843,8 @@ public class SatelliteStats {
         proto.carrierId = param.getCarrierId();
         proto.isNtnOnlyCarrier = param.isNtnOnlyCarrier();
         proto.count = 1;
+        proto.supportedConnectionMode = param.getSupportedConnectionMode();
+        proto.sessionConnectionMode = param.getSessionConnectionMode();
         if (DBG) logd("onSatelliteSosMessageRecommender: " + param);
         mAtomsStorage.addSatelliteSosMessageRecommenderStats(proto);
     }
@@ -3494,6 +3887,8 @@ public class SatelliteStats {
         proto.satelliteSupportedApps = param.mSatelliteSupportedApps;
         proto.satelliteSupportedUids = param.mSatelliteSupportedUids;
         proto.perAppSatelliteDataConsumedBytes = param.mPerAppSatelliteDataConsumedBytes;
+        proto.supportedConnectionMode = param.mSupportedConnectionMode;
+        proto.sessionConnectionMode = param.getSessionConnectionMode();
         if (DBG) logd("onCarrierRoamingSatelliteSessionMetrics: " + param);
         mAtomsStorage.addCarrierRoamingSatelliteSessionStats(proto);
     }
@@ -3514,6 +3909,11 @@ public class SatelliteStats {
         proto.isMultiSim = param.isMultiSim();
         proto.countOfSatelliteSessions = param.getCountOfSatelliteSessions();
         proto.isNbIotNtn = param.isNbIotNtn();
+        proto.supportedConnectionMode = param.getSupportedConnectionMode();
+        proto.countOfSessionConnectionModeAutomatic =
+                param.getCountOfSessionConnectionModeAutomatic();
+        proto.countOfSessionConnectionModeManual = param.getCountOfSessionConnectionModeManual();
+        proto.serviceDataPolicy = param.mServiceDataPolicy;
         if (DBG) logd("onCarrierRoamingSatelliteControllerStatsMetrics: " + param);
         mAtomsStorage.addCarrierRoamingSatelliteControllerStats(proto);
     }
@@ -3537,6 +3937,8 @@ public class SatelliteStats {
         proto.isAllowedServiceEntitlement = param.getIsAllowedServiceEntitlement();
         proto.entitlementServiceType = param.getEntitlementServiceType();
         proto.entitlementDataPolicy = param.getEntitlementDataPolicy();
+        proto.supportedConnectionMode = param.getSupportedConnectionMode();
+        proto.httpStatusCode = param.getHttpStatusCode();
         if (DBG) logd("onSatelliteEntitlementMetrics: " + param);
         mAtomsStorage.addSatelliteEntitlementStats(proto);
     }
@@ -3568,6 +3970,8 @@ public class SatelliteStats {
         proto.carrierId = param.getCarrierId();
         proto.triggeringEvent = param.getTriggeringEvent();
         proto.isNtnOnlyCarrier = param.isNtnOnlyCarrier();
+        proto.supportedConnectionMode = param.getSupportedConnectionMode();
+        proto.sessionConnectionMode = param.getSessionConnectionMode();
         if (DBG) logd("onSatelliteAccessControllerMetrics: " + param);
         mAtomsStorage.addSatelliteAccessControllerStats(proto);
     }

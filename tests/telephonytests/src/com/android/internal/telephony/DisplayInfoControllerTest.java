@@ -159,8 +159,6 @@ public class DisplayInfoControllerTest extends TelephonyTest {
 
     @Test
     public void testIsRoamingOverride_NonRoamingOperator() {
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         mBundle.putStringArray(
                 CarrierConfigManager.KEY_NON_ROAMING_OPERATOR_STRING_ARRAY, new String[] {NUMERIC});
         sendCarrierConfigUpdate();
@@ -180,8 +178,6 @@ public class DisplayInfoControllerTest extends TelephonyTest {
 
     @Test
     public void testIsRoamingOverride_ForceHomeNetwork() {
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         mBundle.putBoolean(CarrierConfigManager.KEY_FORCE_HOME_NETWORK_BOOL, true);
         sendCarrierConfigUpdate();
 
@@ -200,8 +196,6 @@ public class DisplayInfoControllerTest extends TelephonyTest {
 
     @Test
     public void testIsRoamingOverride_RoamingOperator() {
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         mBundle.putStringArray(
                 CarrierConfigManager.KEY_ROAMING_OPERATOR_STRING_ARRAY, new String[] {"60101"});
         sendCarrierConfigUpdate();
@@ -221,8 +215,6 @@ public class DisplayInfoControllerTest extends TelephonyTest {
 
     @Test
     public void testIsRoamingOverride_NonRoamingGsmOperator() {
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         mBundle.putStringArray(
                 CarrierConfigManager.KEY_GSM_NONROAMING_NETWORKS_STRING_ARRAY,
                 new String[] {NUMERIC});
@@ -243,8 +235,6 @@ public class DisplayInfoControllerTest extends TelephonyTest {
 
     @Test
     public void testIsRoamingOverride_RoamingGsmOperator() {
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
-
         mBundle.putStringArray(
                 CarrierConfigManager.KEY_GSM_ROAMING_NETWORKS_STRING_ARRAY, new String[] {NUMERIC});
         sendCarrierConfigUpdate();
@@ -264,7 +254,6 @@ public class DisplayInfoControllerTest extends TelephonyTest {
 
     @Test
     public void testIsRoamingOverride_HideRoamingIndicator() {
-        doReturn(true).when(mPhone).isPhoneTypeGsm();
         mBundle.putStringArray(
                 CarrierConfigManager.KEY_GSM_ROAMING_NETWORKS_STRING_ARRAY, new String[] {NUMERIC});
         mBundle.putBoolean(CarrierConfigManager.KEY_SHOW_ROAMING_INDICATOR_BOOL, false);

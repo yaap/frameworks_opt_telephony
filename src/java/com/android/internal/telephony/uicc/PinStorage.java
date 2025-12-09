@@ -83,7 +83,6 @@ import java.security.KeyStore;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
-import java.util.concurrent.Executors;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -216,14 +215,8 @@ public class PinStorage extends Handler {
         String alias = (!mIsDeviceSecure || mIsDeviceLocked)
                 ? KEYSTORE_ALIAS_LONG_TERM_ALWAYS : KEYSTORE_ALIAS_LONG_TERM_USER_AUTH;
         // This is the main thread, so accessing keystore in a separate thread to prevent ANR.
-        if (featureFlags.threadShred()) {
-            WorkerThread.getExecutor().execute(() -> mLongTermSecretKey = initializeSecretKey(
-                    alias, /*createIfAbsent=*/ true));
-        } else {
-            Executors.newSingleThreadExecutor()
-                    .execute(() -> mLongTermSecretKey = initializeSecretKey(
-                            alias, /*createIfAbsent=*/ true));
-        }
+        WorkerThread.getExecutor().execute(() -> mLongTermSecretKey = initializeSecretKey(
+                alias, /*createIfAbsent=*/ true));
 
         // If the device is not secured or is unlocked, we can start logic. Otherwise we need to
         // wait for the device to be unlocked and store any temporary PIN in RAM.

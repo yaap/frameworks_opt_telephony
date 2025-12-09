@@ -12,17 +12,6 @@ flag {
   }
 }
 
-# OWNER=linggm TARGET=25Q3
-flag {
-  name: "auto_data_prune_listener"
-  namespace: "telephony"
-  description: "Unregister listeners when user disable settings or connect to wifi."
-  bug:"389591869"
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-}
-
 # OWNER=sarahchin TARGET=24Q3
 flag {
   name: "slicing_additional_error_codes"
@@ -39,15 +28,6 @@ flag {
   namespace: "telephony"
   description: "Request network validation for data networks and response status."
   bug:"286171724"
-}
-
-# OWNER=jackyu TARGET=25Q2
-flag {
-  name: "oem_paid_private"
-  namespace: "telephony"
-  description: "Support OEM_PAID and OEM_PRIVATE networks"
-  bug: "366194627"
-  is_exported: true
 }
 
 # OWNER=gwenlin TARGET=25Q2
@@ -89,16 +69,18 @@ flag {
     bug:"401006757"
 }
 
-# OWNER=sewookseo TARGET=25Q4
+# OWNER=rambowang TARGET=25Q4
 flag {
-  name: "qos_update_network_agent"
+  name: "monitor_carrier_config_change_for_auto_data_switch"
   namespace: "telephony"
-  description: "Update network agent in QosCallbackTracker when DN recreates network agent"
-  bug:"412542821"
+  description: "This flag lets AutoDataSwitchController monitor carrier config changes and update the policy accordingly."
+  bug:"436856439"
   metadata {
     purpose: PURPOSE_BUGFIX
   }
 }
+
+
 
 # OWNER=gwenlin TARGET=26Q2
 flag {
@@ -106,4 +88,26 @@ flag {
   namespace: "telephony"
   description: "Support notifying IMS data network"
   bug:"389103112"
+}
+
+# OWNER=melhuishj TARGET=25Q4
+flag {
+  name: "inactive_data_network_is_not_stalled"
+  namespace: "telephony"
+  description: "A DataNetwork that is not the active DataNetwork should not broadcast a data stall"
+  bug:"430976119"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+# OWNER=melhuishj TARGET=25Q4
+flag {
+  name: "ignore_initial_data_stall_recovered"
+  namespace: "telephony"
+  description: "Prevent DataStallRecoveryManager from broadcasting a data stall event during initial setup when no data stall has occurred"
+  bug:"432293174"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
 }

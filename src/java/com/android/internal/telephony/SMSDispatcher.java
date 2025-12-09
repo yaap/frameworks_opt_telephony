@@ -833,9 +833,7 @@ public abstract class SMSDispatcher extends Handler {
 
         SmsResponse smsResponse = new SmsResponse(messageRef, null /* ackPdu */, NO_ERROR_CODE,
                 tracker.mMessageId);
-        if (Flags.temporaryFailuresInCarrierMessagingService()) {
-            tracker.mResultCodeFromCarrierMessagingService = result;
-        }
+        tracker.mResultCodeFromCarrierMessagingService = result;
 
         switch (result) {
             case CarrierMessagingService.SEND_STATUS_OK:
@@ -900,10 +898,7 @@ public abstract class SMSDispatcher extends Handler {
     }
 
     private void resetResultCodeFromCarrierMessagingService(SmsTracker tracker) {
-        if (Flags.temporaryFailuresInCarrierMessagingService()) {
-            tracker.mResultCodeFromCarrierMessagingService =
-                    CarrierMessagingService.SEND_STATUS_OK;
-        }
+        tracker.mResultCodeFromCarrierMessagingService = CarrierMessagingService.SEND_STATUS_OK;
     }
 
     private int toSmsManagerResultForSendSms(int carrierMessagingServiceResult) {
@@ -1162,8 +1157,7 @@ public abstract class SMSDispatcher extends Handler {
             }
 
             int error;
-            if (Flags.temporaryFailuresInCarrierMessagingService()
-                    && tracker.mResultCodeFromCarrierMessagingService
+            if (tracker.mResultCodeFromCarrierMessagingService
                             != CarrierMessagingService.SEND_STATUS_OK) {
                 error =
                         toSmsManagerResultForSendSms(
@@ -2940,6 +2934,14 @@ public abstract class SMSDispatcher extends Handler {
                 default:
                     String message = "SMS failed";
                     Rlog.d(TAG, message + " with error " + error + ", errorCode " + errorCode);
+                    SatelliteController satelliteController = SatelliteController.getInstance();
+                    if (satelliteController != null) {
+                        if (satelliteController.isSatelliteBeingDisabled()) {
+                            Rlog.d(TAG, "isSatelliteBeingDisabled() are true, "
+                                    + "skip reporting anomaly");
+                            return;
+                        }
+                    }
                     AnomalyReporter.reportAnomaly(
                             generateUUID(error, errorCode), message, mCarrierId);
             }
@@ -3255,7 +3257,7 @@ public abstract class SMSDispatcher extends Handler {
             if (mFeatureFlags.satellite25q4Apis()
                     && result == SmsManager.RESULT_RIL_SMS_SEND_FAIL_RETRY
                     && tracker.mRetryCount >= getMaxSmsRetryCount()) {
-                resultForMetrics = SmsManager.RESULT_SMS_SEND_FAIL_AFTER_MAX_RETRY;
+                resultForMetrics = SmsManager.RESULT_SMS_SEND_FAILED_AFTER_MAX_RETRY;
             }
 
             mPhone.getSmsStats().onOutgoingSms(

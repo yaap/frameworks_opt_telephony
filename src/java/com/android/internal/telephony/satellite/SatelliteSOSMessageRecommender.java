@@ -440,6 +440,10 @@ public class SatelliteSOSMessageRecommender extends Handler {
                         .setIsSatelliteAllowedInCurrentLocation(isSatelliteAllowed())
                         .setIsWifiConnected(mCountryDetector.isWifiNetworkConnected())
                         .setCarrierId(mSatelliteController.getSatelliteCarrierId())
+                        .setSupportedConnectionMode(mSatelliteController
+                                .getSupportedConnectTypeMetrics())
+                        .setSessionConnectionMode(mSatelliteController
+                                .getSessionConnectTypeMetrics())
                         .setIsNtnOnlyCarrier(mSatelliteController.isNtnOnlyCarrier()).build());
     }
 

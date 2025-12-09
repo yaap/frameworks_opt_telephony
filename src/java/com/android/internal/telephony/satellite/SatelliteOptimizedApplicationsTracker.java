@@ -178,20 +178,29 @@ public class SatelliteOptimizedApplicationsTracker {
     }
 
     private void handleInitializeTracker() {
-        List<UserInfo> users = mUserManager.getUsers();
-        for (UserInfo user : users) {
-            int userId = user.getUserHandle().getIdentifier();
-            mSatelliteApplications.putIfAbsent(userId, new HashSet<>());
-        }
-        // Get a list of installed packages
-        List<PackageInfo> packages =
-                mPackageManager.getInstalledPackages(PackageManager.GET_META_DATA);
-        // Iterate through the packages
-        for (PackageInfo packageInfo : packages) {
-            if (packageInfo.applicationInfo != null
-                    && isOptimizedSatelliteApplication(packageInfo.applicationInfo,
-                    packageInfo.packageName)) {
-                addCacheOptimizedSatelliteApplication(packageInfo.packageName);
+        try {
+            List<UserInfo> users = mUserManager.getUsers();
+            for (UserInfo user : users) {
+                int userId = user.getUserHandle().getIdentifier();
+                mSatelliteApplications.putIfAbsent(userId, new HashSet<>());
+            }
+            // Get a list of installed packages
+            List<PackageInfo> packages =
+                    mPackageManager.getInstalledPackages(PackageManager.GET_META_DATA);
+            // Iterate through the packages
+            for (PackageInfo packageInfo : packages) {
+                if (packageInfo.applicationInfo != null
+                        && isOptimizedSatelliteApplication(packageInfo.applicationInfo,
+                        packageInfo.packageName)) {
+                    addCacheOptimizedSatelliteApplication(packageInfo.packageName);
+                }
+            }
+        } catch (Exception e) {
+            loge("Exception while initializing cache and getting packages");
+            List<UserInfo> users = mUserManager.getUsers();
+            for (UserInfo user : users) {
+                int userId = user.getUserHandle().getIdentifier();
+                mSatelliteApplications.remove(userId);
             }
         }
     }
@@ -203,6 +212,9 @@ public class SatelliteOptimizedApplicationsTracker {
         if (metadata != null) {
             try {
                 final Object value = metadata.get(APP_PROPERTY);
+                loge(String.format("packageName: %s, value: %s",
+                        packageName,
+                        (value == null ? null : value.toString())));
                 if (value == null) return false; // No expected meta-data.
 
                 // Check if the retrieved object is a matched String.
@@ -265,8 +277,9 @@ public class SatelliteOptimizedApplicationsTracker {
         if (applications != null) {
             return new ArrayList<>(applications);
         } else {
-            // 3. If no Set is found, return an empty, unmodifiable list.
+            // 3. If no Set is found, try to create the cache and return an empty list.
             // This is highly efficient and prevents null pointer exceptions for callers.
+            handleInitializeTracker();
             return Collections.emptyList();
         }
     }

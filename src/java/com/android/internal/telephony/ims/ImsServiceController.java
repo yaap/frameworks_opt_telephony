@@ -369,7 +369,7 @@ public class ImsServiceController {
         mComponentName = componentName;
         mCallbacks = callbacks;
         Looper looper;
-        if (featureFlags.threadShred() && USE_WORKER_THREAD) {
+        if (USE_WORKER_THREAD) {
             mHandlerThread = null;
             mHandler = new Handler(WorkerThread.get().getLooper());
             looper = WorkerThread.get().getLooper();
@@ -520,9 +520,7 @@ public class ImsServiceController {
                     Collectors.toCollection(HashSet::new));
 
             // Set the number of slot for IMS enable for each slot
-            if (mFeatureFlags.setNumberOfSimForImsEnable()) {
-                mImsEnablementTracker.setNumOfSlots(slotIDs.size());
-            }
+            mImsEnablementTracker.setNumOfSlots(slotIDs.size());
 
             // detect which subIds have changed on a per-slot basis
             SparseIntArray changedSubIds = new SparseIntArray(slotIDs.size());

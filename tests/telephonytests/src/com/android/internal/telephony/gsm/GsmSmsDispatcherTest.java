@@ -32,9 +32,11 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -58,13 +60,16 @@ import android.os.Message;
 import android.os.Process;
 import android.os.RemoteException;
 import android.os.SystemProperties;
+import android.provider.DeviceConfig;
 import android.provider.Settings;
 import android.service.carrier.CarrierMessagingService;
 import android.service.carrier.ICarrierMessagingCallback;
 import android.service.carrier.ICarrierMessagingService;
+import android.telephony.AnomalyReporter;
 import android.telephony.NetworkRegistrationInfo;
 import android.telephony.ServiceState;
 import android.telephony.SmsManager;
+import android.telephony.TelephonyManager;
 import android.testing.AndroidTestingRunner;
 import android.testing.TestableLooper;
 
@@ -84,7 +89,6 @@ import com.android.internal.telephony.SmsResponse;
 import com.android.internal.telephony.TelephonyTest;
 import com.android.internal.telephony.TelephonyTestUtils;
 import com.android.internal.telephony.TestApplication;
-import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.satellite.SatelliteController;
 import com.android.internal.telephony.uicc.IccUtils;
 import com.android.internal.telephony.uicc.IsimUiccRecords;
@@ -101,11 +105,14 @@ import org.mockito.stubbing.Answer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.UUID;
 
 @RunWith(AndroidTestingRunner.class)
 @TestableLooper.RunWithLooper
 public class GsmSmsDispatcherTest extends TelephonyTest {
     private static final String CARRIER_APP_PACKAGE_NAME = "com.android.carrier";
+    private static final String KEY_IS_TELEPHONY_ANOMALY_REPORT_ENABLED =
+            "is_telephony_anomaly_report_enabled";
 
     // Mocked classes
     private SmsDispatchersController mSmsDispatchersController;
@@ -473,10 +480,6 @@ public class GsmSmsDispatcherTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testSendSmsByCarrierApp_FailureWithReason() throws Exception {
-        if (!Flags.temporaryFailuresInCarrierMessagingService()) {
-            return;
-        }
-        doReturn(true).when(mFeatureFlags).temporaryFailuresInCarrierMessagingService();
         int resultCode =
                 sendSmsWithCarrierAppResponse(
                         CarrierMessagingService.SEND_STATUS_RESULT_ERROR_NO_SERVICE);
@@ -759,6 +762,64 @@ public class GsmSmsDispatcherTest extends TelephonyTest {
     }
 
     @Test
+    public void testNoSmsAnomalyReportDuringSatelliteDisabling() throws Exception {
+        logd("testReportAnomalySmsTrackerOnFailed");
+        HashMap<String, Object> data = new HashMap<String, Object>();
+        byte[] pdu = new byte[1];
+        data.put("pdu", pdu);
+
+        String destAddr = "0123456789";
+        String format = SmsConstants.FORMAT_3GPP;
+        long messageId = 202L;
+        int retryCount = 2;
+        String fullMessageText = "Test SMS for mRetryCount < max (PDU: byte[1])";
+
+        Context mMockAnomalyContext = mock(Context.class);
+        replaceInstance(AnomalyReporter.class, "sContext", null,
+                mMockAnomalyContext);
+        replaceInstance(AnomalyReporter.class,
+                "sDebugPackageName", null, "com.test.cts");
+        replaceInstance(AnomalyReporter.class,
+                "sEvents", null, new HashMap<UUID, Integer>());
+        String originalDeviceConfig = DeviceConfig.getProperty(
+                DeviceConfig.NAMESPACE_TELEPHONY, KEY_IS_TELEPHONY_ANOMALY_REPORT_ENABLED);
+        DeviceConfig.setProperty(DeviceConfig.NAMESPACE_TELEPHONY,
+                KEY_IS_TELEPHONY_ANOMALY_REPORT_ENABLED, "true", false);
+
+        try {
+            SMSDispatcher.SmsTracker smsTracker = new SMSDispatcher.SmsTracker(data, destAddr,
+                    format,
+                    messageId, retryCount, fullMessageText);
+
+            logd("testReportAnomalySmsTrackerOnFailed: isSatelliteBeingDisabled() return true");
+            clearInvocations(mMockAnomalyContext);
+            doReturn(true).when(mMockSatelliteController).isSatelliteBeingDisabled();
+            smsTracker.onFailed(mMockAnomalyContext, SmsManager.RESULT_ERROR_GENERIC_FAILURE, 0);
+            verify(mMockAnomalyContext, never()).sendBroadcast(any(), any());
+
+            logd("testReportAnomalySmsTrackerOnFailed: isSatelliteBeingDisabled() return false");
+            clearInvocations(mMockAnomalyContext);
+            doReturn(false).when(mMockSatelliteController).isSatelliteBeingDisabled();
+            ArgumentCaptor<Intent> intentCaptor = ArgumentCaptor.forClass(Intent.class);
+            ArgumentCaptor<String> permissionCaptor = ArgumentCaptor.forClass(String.class);
+
+            smsTracker.onFailed(mMockAnomalyContext, SmsManager.RESULT_ERROR_GENERIC_FAILURE, 0);
+            verify(mMockAnomalyContext, times(1))
+                    .sendBroadcast(intentCaptor.capture(), permissionCaptor.capture());
+            assertEquals(TelephonyManager.ACTION_ANOMALY_REPORTED,
+                    intentCaptor.getValue().getAction());
+            assertEquals(android.Manifest.permission.READ_PRIVILEGED_PHONE_STATE,
+                    permissionCaptor.getValue());
+        } finally {
+            restoreInstance(AnomalyReporter.class, "sContext", mMockAnomalyContext);
+            restoreInstance(AnomalyReporter.class, "sDebugPackageName", "com.test.cts");
+            restoreInstance(AnomalyReporter.class, "sEvents", new HashMap<UUID, Integer>());
+            DeviceConfig.setProperty(DeviceConfig.NAMESPACE_TELEPHONY,
+                    KEY_IS_TELEPHONY_ANOMALY_REPORT_ENABLED, originalDeviceConfig, false);
+        }
+    }
+
+    @Test
     public void testSendCompleteEvent_ExceedMaxRetryCount() {
         HashMap<String, Object> data = new HashMap<String, Object>();
         byte[] pdu = new byte[1];
@@ -804,7 +865,7 @@ public class GsmSmsDispatcherTest extends TelephonyTest {
                 anyBoolean(),
                 eq(false),
                 anyBoolean(),
-                eq(SmsManager.RESULT_SMS_SEND_FAIL_AFTER_MAX_RETRY),    // resultCode
+                eq(SmsManager.RESULT_SMS_SEND_FAILED_AFTER_MAX_RETRY),    // resultCode
                 eq(SmsResponse.NO_ERROR_CODE),
                 eq(messageId),
                 eq(true),

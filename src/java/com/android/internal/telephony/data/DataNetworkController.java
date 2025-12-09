@@ -470,9 +470,7 @@ public class DataNetworkController extends Handler {
     };
 
     private boolean hasCalling() {
-        if (!TelephonyCapabilities.minimalTelephonyCdmCheck(mFeatureFlags)) return true;
-        return mPhone.getContext().getPackageManager().hasSystemFeature(
-            PackageManager.FEATURE_TELEPHONY_CALLING);
+        return TelephonyCapabilities.supportsTelephonyCalling(mFeatureFlags, mPhone.getContext());
     }
 
     /**
@@ -1456,6 +1454,17 @@ public class DataNetworkController extends Handler {
 
     /**
      * @param ss The service state to be checked
+     *
+     * @return {@code true}  if voice is in service on legacy CS connections (2G/3G) on the non-DDS.
+     */
+    private boolean isPsAttachAllowedForLegacyNetwork(@NonNull ServiceState ss) {
+        return ss.getVoiceRegState() == ServiceState.STATE_IN_SERVICE
+                && mPhone.getPhoneId() != PhoneSwitcher.getInstance().getPreferredDataPhoneId()
+                && isLegacyCs(ss.getVoiceNetworkType());
+    }
+
+    /**
+     * @param ss The service state to be checked
      * @param transport The transport is used to determine the data registration state
      *
      * @return {@code true} if data is in service or if voice is in service on legacy CS
@@ -1472,9 +1481,7 @@ public class DataNetworkController extends Handler {
 
         // If data is OOS as this device slot is not modem preferred(i.e. not active for internet),
         // attempt to attach PS on 2G/3G if CS connection is available.
-        return ss.getVoiceRegState() == ServiceState.STATE_IN_SERVICE
-                && mPhone.getPhoneId() != PhoneSwitcher.getInstance().getPreferredDataPhoneId()
-                && isLegacyCs(ss.getVoiceNetworkType());
+        return isPsAttachAllowedForLegacyNetwork(ss);
     }
 
     /**
@@ -1707,12 +1714,14 @@ public class DataNetworkController extends Handler {
         }
 
         if (mFeatureFlags.dataServiceCheck()) {
-            NetworkRegistrationInfo nri = mServiceState.getNetworkRegistrationInfo(
-                    NetworkRegistrationInfo.DOMAIN_PS, transport);
-            if (nri != null && !nri.getAvailableServices().contains(
-                    NetworkRegistrationInfo.SERVICE_TYPE_DATA)) {
-                evaluation.addDataDisallowedReason(
-                        DataDisallowedReason.SERVICE_OPTION_NOT_SUPPORTED);
+            if (!isPsAttachAllowedForLegacyNetwork(mServiceState)) {
+                NetworkRegistrationInfo nri = mServiceState.getNetworkRegistrationInfo(
+                        NetworkRegistrationInfo.DOMAIN_PS, transport);
+                if (nri != null && !nri.getAvailableServices().contains(
+                        NetworkRegistrationInfo.SERVICE_TYPE_DATA)) {
+                    evaluation.addDataDisallowedReason(
+                            DataDisallowedReason.SERVICE_OPTION_NOT_SUPPORTED);
+                }
             }
         }
 
@@ -2303,7 +2312,7 @@ public class DataNetworkController extends Handler {
                 }
                 case CarrierConfigManager.SATELLITE_DATA_SUPPORT_BANDWIDTH_CONSTRAINED -> {
                     try {
-                        if (networkRequest.hasCapability(DataUtils
+                        if (networkRequest.hasCapability(NetworkCapabilities
                                 .NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED)) {
                             return false;
                         }
@@ -4093,26 +4102,25 @@ public class DataNetworkController extends Handler {
      * are supported.
      */
     private void updateOverallInternetDataState() {
-        boolean anyInternetConnected = mDataNetworkList.stream()
-                .anyMatch(dataNetwork -> dataNetwork.isInternetSupported()
-                        && (dataNetwork.isConnected() || dataNetwork.isHandoverInProgress()));
-        // If any one is not suspended, then the overall is not suspended.
-        Set<DataNetwork> allConnectedInternetDataNetworks = mDataNetworkList.stream()
-                .filter(DataNetwork::isInternetSupported)
-                .filter(dataNetwork -> dataNetwork.isConnected()
-                        || dataNetwork.isHandoverInProgress())
-                .collect(Collectors.toSet());
-        boolean isSuspended = !allConnectedInternetDataNetworks.isEmpty()
-                && allConnectedInternetDataNetworks.stream().allMatch(DataNetwork::isSuspended);
-        logv("isSuspended=" + isSuspended + ", anyInternetConnected=" + anyInternetConnected
-                + ", mDataNetworkList=" + mDataNetworkList);
+        boolean anyUnsuspended = false;
+        Set<DataNetwork> newConnectedInternetNetworks = new ArraySet<DataNetwork>();
+        for (DataNetwork dn : mDataNetworkList) {
+            if (!dn.isInternetSupported()
+                    || (!dn.isConnected() && !dn.isHandoverInProgress())) continue;
+
+            newConnectedInternetNetworks.add(dn);
+            if (!dn.isSuspended()) anyUnsuspended = true;
+        }
 
         int dataNetworkState = TelephonyManager.DATA_DISCONNECTED;
-        if (isSuspended) {
-            dataNetworkState = TelephonyManager.DATA_SUSPENDED;
-        } else if (anyInternetConnected) {
+        if (anyUnsuspended) {
             dataNetworkState = TelephonyManager.DATA_CONNECTED;
+        } else if (!newConnectedInternetNetworks.isEmpty()) {
+            dataNetworkState = TelephonyManager.DATA_SUSPENDED;
         }
+
+        logv("dataNetworkState=" + dataNetworkState
+                + ", newConnectedInternetNetworks=" + newConnectedInternetNetworks);
 
         if (mInternetDataNetworkState != dataNetworkState) {
             logl("Internet data state changed from "
@@ -4121,11 +4129,11 @@ public class DataNetworkController extends Handler {
             mInternetDataNetworkState = dataNetworkState;
         }
         // Check data network reference equality to update current connected internet networks.
-        if (!mConnectedInternetNetworks.equals(allConnectedInternetDataNetworks)) {
-            mConnectedInternetNetworks = allConnectedInternetDataNetworks;
+        if (!mConnectedInternetNetworks.equals(newConnectedInternetNetworks)) {
+            mConnectedInternetNetworks = newConnectedInternetNetworks;
             mDataNetworkControllerCallbacks.forEach(callback -> callback.invokeFromExecutor(
                     () -> callback.onConnectedInternetDataNetworksChanged(
-                            allConnectedInternetDataNetworks)));
+                            newConnectedInternetNetworks)));
         }
     }
 

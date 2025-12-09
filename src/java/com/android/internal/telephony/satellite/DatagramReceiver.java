@@ -816,6 +816,10 @@ public class DatagramReceiver extends Handler {
                         .setIsDemoMode(mIsDemoMode.get())
                         .setCarrierId(SatelliteController.getInstance().getSatelliteCarrierId())
                         .setIsNtnOnlyCarrier(SatelliteController.getInstance().isNtnOnlyCarrier())
+                        .setSupportedConnectionMode(SatelliteController.getInstance()
+                                .getSupportedConnectTypeMetrics())
+                        .setSessionConnectionMode((SatelliteController.getInstance()
+                                .getSessionConnectTypeMetrics()))
                         .build());
 
         mControllerMetricsStats.reportIncomingDatagramCount(resultCode, mIsDemoMode.get());

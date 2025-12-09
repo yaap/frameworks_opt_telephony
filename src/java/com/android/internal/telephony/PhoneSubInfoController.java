@@ -32,13 +32,17 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.ParcelableException;
 import android.os.RemoteException;
+import android.os.ResultReceiver;
 import android.os.SystemProperties;
 import android.os.TelephonyServiceManager.ServiceRegisterer;
 import android.telephony.ImsiEncryptionInfo;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyFrameworkInitializer;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.EventLog;
 
@@ -54,6 +58,7 @@ import com.android.telephony.Rlog;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -671,6 +676,82 @@ public class PhoneSubInfoController extends IPhoneSubInfo.Stub {
                             "getGroupIdLevel2ForSubscriber");
                     return phone.getGroupIdLevel2();
                 });
+    }
+
+    /**
+     * Fetches the IMS Application Reference Identifier(IARI) based on the subscription.
+     *
+     * @param subId subscriptionId
+     * @param appType the uicc app type
+     * @param callingPackage package name of the caller
+     * @param callback result receiver to get the iist of IARI strings. The result code is ignored.
+     */
+    public void getUiccIari(int subId, int appType, String callingPackage,
+            ResultReceiver callback) {
+        if (!mFeatureFlags.supportImsRegistrationEventDownload()) {
+            callbackUiccIari(callback, new ArrayList<>(), null);
+            return;
+        }
+        if (!SubscriptionManager.isValidSubscriptionId(subId)) {
+            callbackUiccIari(callback, null,
+                    new IllegalArgumentException("Invalid subscription: " + subId));
+            return;
+        }
+        try {
+            TelephonyPermissions
+                    .enforceCallingOrSelfReadPrivilegedPhoneStatePermissionOrCarrierPrivilege(
+                            mContext, subId, "getUiccIari");
+            enforceTelephonyFeatureWithException(callingPackage,
+                    PackageManager.FEATURE_TELEPHONY_SUBSCRIPTION, "getUiccIari");
+        } catch (SecurityException | UnsupportedOperationException ex) {
+            callbackUiccIari(callback, null, ex);
+            return;
+        }
+
+        Phone phone = getPhone(subId);
+        if (phone == null) {
+            loge("getUiccIari(): phone is null");
+            callbackUiccIari(callback, Collections.emptyList(), null);
+            return;
+        }
+        UiccPort uiccPort = phone.getUiccPort();
+        if (uiccPort == null || uiccPort.getUiccProfile() == null) {
+            loge("getUiccIari(): uiccPort or uiccProfile is null");
+            callbackUiccIari(callback, Collections.emptyList(), null);
+            return;
+        }
+        UiccCardApplication uiccApp = uiccPort.getUiccProfile().getApplicationByType(appType);
+        if (uiccApp == null) {
+            loge("getUiccIari(): no app with specified apptype=" + appType);
+            callbackUiccIari(callback, Collections.emptyList(), null);
+            return;
+        }
+
+        String[] iaris = uiccApp.getIccRecords().getUiccIari();
+        if (iaris == null) {
+            loge("getUiccIari(): IARI list is null");
+            callbackUiccIari(callback, Collections.emptyList(), null);
+            return;
+        }
+        List<String> iariList = Arrays.stream(iaris)
+                .filter(u -> u != null)
+                .map(u -> u.trim())
+                .filter(u -> u.length() > 0)
+                .collect(Collectors.toList());
+        callbackUiccIari(callback, iariList, null);
+    }
+
+    private void callbackUiccIari(ResultReceiver callback, List<String> iari, Exception ex) {
+        Bundle result = new Bundle();
+        if (ex != null) {
+            result.putParcelable(TelephonyManager.KEY_UICC_IARI_EXCEPTION,
+                    new ParcelableException(ex));
+        } else {
+            result.putStringArrayList(TelephonyManager.KEY_UICC_IARI_LIST,
+                    (iari == null)
+                            ? new ArrayList<>(Collections.emptyList()) : new ArrayList<>(iari));
+        }
+        callback.send(0, result);
     }
 
     /** Below are utility methods that abstracts the flow that many public methods use:

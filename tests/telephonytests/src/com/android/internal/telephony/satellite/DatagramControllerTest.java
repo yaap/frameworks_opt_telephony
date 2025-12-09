@@ -197,7 +197,6 @@ public class DatagramControllerTest extends TelephonyTest {
     public void testNeedsWaitingForSatelliteConnected_checkMessageInNotConnected_returnsFalse()
             throws Exception {
         when(mMockSatelliteController.isSatelliteAttachRequired()).thenReturn(true);
-        when(mFeatureFlags.carrierRoamingNbIotNtn()).thenReturn(true);
         mContextFixture.putBooleanResource(
                 R.bool.config_satellite_allow_check_message_in_not_connected, true);
         mDatagramControllerUT.onSatelliteModemStateChanged(
@@ -214,7 +213,6 @@ public class DatagramControllerTest extends TelephonyTest {
     public void testNeedsWaitingForSatelliteConnected_regularSmsInNotConnected_returnsTrue()
             throws Exception {
         when(mMockSatelliteController.isSatelliteAttachRequired()).thenReturn(true);
-        when(mFeatureFlags.carrierRoamingNbIotNtn()).thenReturn(true);
         mContextFixture.putBooleanResource(
                 R.bool.config_satellite_allow_check_message_in_not_connected, true);
         mDatagramControllerUT.onSatelliteModemStateChanged(
@@ -232,7 +230,6 @@ public class DatagramControllerTest extends TelephonyTest {
             testNeedsWaitingForSatelliteConnected_checkMessageInNotConnected_allowCheckMessageFalse_returnsTrue()
                     throws Exception {
         when(mMockSatelliteController.isSatelliteAttachRequired()).thenReturn(true);
-        when(mFeatureFlags.carrierRoamingNbIotNtn()).thenReturn(true);
         mContextFixture.putBooleanResource(
                 R.bool.config_satellite_allow_check_message_in_not_connected, false);
         mDatagramControllerUT.onSatelliteModemStateChanged(
@@ -247,10 +244,9 @@ public class DatagramControllerTest extends TelephonyTest {
 
     @Test
     public void
-            testNeedsWaitingForSatelliteConnected_checkMessageInNotConnected_carrierRoamingNbIotNtnFalse_returnsTrue()
+            testNeedsWaitingForSatelliteConnected_checkMessageInNotConnected_allowCheckMessageTrue_returnsFalse()
                     throws Exception {
         when(mMockSatelliteController.isSatelliteAttachRequired()).thenReturn(true);
-        when(mFeatureFlags.carrierRoamingNbIotNtn()).thenReturn(false);
         mContextFixture.putBooleanResource(
                 R.bool.config_satellite_allow_check_message_in_not_connected, true);
         mDatagramControllerUT.onSatelliteModemStateChanged(
@@ -260,7 +256,7 @@ public class DatagramControllerTest extends TelephonyTest {
                 mDatagramControllerUT.needsWaitingForSatelliteConnected(
                         DATAGRAM_TYPE_CHECK_PENDING_INCOMING_SMS);
 
-        assertTrue(result);
+        assertFalse(result);
     }
 
     private void testUpdateSendStatus(boolean isDemoMode, int datagramType, int sendState) {

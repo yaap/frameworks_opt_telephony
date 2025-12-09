@@ -594,10 +594,8 @@ public class DatagramDispatcher extends Handler {
             return;
         }
 
-        if (mFeatureFlags.carrierRoamingNbIotNtn()) {
-            if (getPendingSmsCount() > 0) {
-                sendPendingSms();
-            }
+        if (getPendingSmsCount() > 0) {
+            sendPendingSms();
         }
     }
 
@@ -701,11 +699,7 @@ public class DatagramDispatcher extends Handler {
      * @return pending messages count
      */
     public int getPendingMessagesCount() {
-        if (mFeatureFlags.carrierRoamingNbIotNtn()) {
-            return getPendingDatagramCount() + getPendingSmsCount();
-        } else {
-            return getPendingDatagramCount();
-        }
+        return getPendingDatagramCount() + getPendingSmsCount();
     }
 
     /**
@@ -791,6 +785,10 @@ public class DatagramDispatcher extends Handler {
                         .setIsDemoMode(isDemoMode)
                         .setCarrierId(SatelliteController.getInstance().getSatelliteCarrierId())
                         .setIsNtnOnlyCarrier(SatelliteController.getInstance().isNtnOnlyCarrier())
+                        .setSupportedConnectionMode(SatelliteController.getInstance()
+                                .getSupportedConnectTypeMetrics())
+                        .setSessionConnectionMode(SatelliteController.getInstance()
+                                .getSessionConnectTypeMetrics())
                         .build());
         if (resultCode == SatelliteManager.SATELLITE_RESULT_SUCCESS) {
             mControllerMetricsStats.reportOutgoingDatagramSuccessCount(argument.datagramType,
@@ -1352,6 +1350,16 @@ public class DatagramDispatcher extends Handler {
         plogd("sendMtSmsPollingMessage");
         if (!allowCheckMessageInNotConnected()) {
             mShouldPollMtSms.set(false);
+        }
+
+        SatelliteController satelliteController = SatelliteController.getInstance();
+        if (satelliteController != null) {
+            if (satelliteController.isSatelliteDisabled()
+                    || satelliteController.isSatelliteBeingDisabled()) {
+                plogd("sendMtSmsPollingMessage: Not sending polling SMS "
+                        + "as satellite is 'being disabled' or 'disabled'");
+                return;
+            }
         }
 
         synchronized (mLock) {

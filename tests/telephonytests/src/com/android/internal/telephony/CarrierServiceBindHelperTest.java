@@ -38,13 +38,12 @@ import android.os.Bundle;
 import android.os.Message;
 import android.service.carrier.CarrierService;
 import android.service.carrier.ICarrierService;
+import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager.CarrierPrivilegesCallback;
 import android.testing.AndroidTestingRunner;
 import android.testing.TestableLooper;
 
 import androidx.test.filters.SmallTest;
-
-import com.android.internal.telephony.flags.Flags;
 
 import org.junit.After;
 import org.junit.Before;
@@ -182,12 +181,10 @@ public class CarrierServiceBindHelperTest extends TelephonyTest {
 
     @Test
     public void testCarrierAppConnectionLost_resetsCarrierNetworkChange_withSubId() {
-        if (!Flags.disableCarrierNetworkChangeOnCarrierAppLost()) {
-            return;
-        }
         setupCarrierServiceMocks("android.test.package", "carrier");
         ComponentName carrierServiceComponentName =
                 new ComponentName("android.test.package", "carrier");
+        int subId = SubscriptionManager.getSubscriptionId(PHONE_ID_0);
 
         // Set up expectations for construction/initialization.
         ArgumentCaptor<ServiceConnection> serviceConnectionCaptor =
@@ -212,19 +209,15 @@ public class CarrierServiceBindHelperTest extends TelephonyTest {
         // Test CarrierService disconnection
         serviceConnection.onServiceDisconnected(carrierServiceComponentName);
         verify(mTelephonyRegistryManager).notifyCarrierNetworkChange(
-                PHONE_ID_0, false);
-        verify(mTelephonyRegistryManager, never())
-                .notifyCarrierNetworkChange(PHONE_ID_0, INVALID_SUBSCRIPTION_ID, false);
+                PHONE_ID_0, subId, false);
     }
 
     @Test
     public void testCarrierAppBindingLost_resetsCarrierNetworkChange_withSubId() {
-        if (!Flags.disableCarrierNetworkChangeOnCarrierAppLost()) {
-            return;
-        }
         setupCarrierServiceMocks("android.test.package", "carrier");
         ComponentName carrierServiceComponentName =
                 new ComponentName("android.test.package", "carrier");
+        int subId = SubscriptionManager.getSubscriptionId(PHONE_ID_0);
 
         // Set up expectations for construction/initialization.
         ArgumentCaptor<ServiceConnection> serviceConnectionCaptor =
@@ -249,19 +242,11 @@ public class CarrierServiceBindHelperTest extends TelephonyTest {
         // Test CarrierService disconnection
         serviceConnection.onBindingDied(carrierServiceComponentName);
         verify(mTelephonyRegistryManager).notifyCarrierNetworkChange(
-                PHONE_ID_0, false);
-        verify(mTelephonyRegistryManager, never())
-                .notifyCarrierNetworkChange(PHONE_ID_0, INVALID_SUBSCRIPTION_ID, false);
+                PHONE_ID_0, subId, false);
     }
 
     @Test
     public void testCarrierAppBindingLost_resetsCarrierNetworkChange_withPhoneId() {
-        if (!Flags.disableCarrierNetworkChangeOnCarrierAppLost()) {
-            return;
-        }
-        if (!Flags.cleanupCarrierNetworkChangeByPhoneid()) {
-            return;
-        }
         setupCarrierServiceMocks("android.test.package", "carrier");
         ComponentName carrierServiceComponentName =
                 new ComponentName("android.test.package", "carrier");
@@ -296,12 +281,6 @@ public class CarrierServiceBindHelperTest extends TelephonyTest {
 
     @Test
     public void testCarrierAppConnectionLost_resetsCarrierNetworkChange_withPhoneId() {
-        if (!Flags.disableCarrierNetworkChangeOnCarrierAppLost()) {
-            return;
-        }
-        if (!Flags.cleanupCarrierNetworkChangeByPhoneid()) {
-            return;
-        }
         setupCarrierServiceMocks("android.test.package", "carrier");
         ComponentName carrierServiceComponentName =
                 new ComponentName("android.test.package", "carrier");

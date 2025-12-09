@@ -2238,12 +2238,6 @@ public class SmsDispatchersController extends Handler {
      *                send MO SMS.
      */
     public void sendCarrierRoamingNbIotNtnText(@NonNull PendingRequest request) {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            logd("sendCarrierRoamingNbIotNtnText: carrier roaming nb iot ntn "
-                    + "feature flag is disabled");
-            return;
-        }
-
         sendMessage(obtainMessage(CMD_SEND_TEXT, request));
     }
 
@@ -2256,12 +2250,6 @@ public class SmsDispatchersController extends Handler {
      */
     public void onSendCarrierRoamingNbIotNtnTextError(@NonNull PendingRequest pendingRequest,
             @SatelliteManager.SatelliteResult int errorCode) {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            logd("onSendCarrierRoamingNbIotNtnTextError: carrier roaming nb iot ntn "
-                    + "feature flag is disabled");
-            return;
-        }
-
         logd("onSendCarrierRoamingNbIotNtnTextError: messageId=" + pendingRequest.messageId
                 + " errorCode=" + errorCode);
         sendMessage(obtainMessage(EVENT_SEND_TEXT_OVER_NTN_ERROR, pendingRequest));

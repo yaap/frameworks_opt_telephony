@@ -60,11 +60,24 @@ import java.util.stream.Collectors;
  * This class contains all the utility methods used by telephony data stack.
  */
 public class DataUtils {
-    public static final int NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED = 37;
+    private static final String TAG = "DataUtils";
+
     /** The time format for converting time to readable string. */
     private static final SimpleDateFormat TIME_FORMAT =
             new SimpleDateFormat("HH:mm:ss.SSS", Locale.US);
-    private static final String TAG = "DataUtils";
+
+    /**
+     * A capability indicating that this network is for Unified Communications.
+     *
+     * <p>This may be used by the platform to tune network parameters in order to provide an optimal
+     * experience for applications providing unified communications services, such as VoIP, video
+     * conferencing, instant messaging, and presence services.
+     *
+     * <p>This capability is mapped to the 3GPP 5G Unified Communications (UFC) slice/service type,
+     * as defined in GSMA NG.141 section 3.8 and 3GPP TS 124.526 table 5.2.1.
+     */
+     // TODO: Remove after this is defined in NetworkCapabilities.java
+    public static final int NET_CAPABILITY_PRIORITIZE_UNIFIED_COMMUNICATIONS = 38;
 
     /**
      * Get the network capability from the string.
@@ -91,6 +104,8 @@ public class DataUtils {
             case "PRIORITIZE_BANDWIDTH" -> NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH;
             case "PRIORITIZE_LATENCY" -> NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_LATENCY;
             case "RCS" -> NetworkCapabilities.NET_CAPABILITY_RCS;
+            case "PRIORITIZE_UNIFIED_COMMUNICATIONS" ->
+                    NET_CAPABILITY_PRIORITIZE_UNIFIED_COMMUNICATIONS;
             default -> {
                 loge("Illegal network capability: " + capabilityString);
                 yield -1;
@@ -167,7 +182,10 @@ public class DataUtils {
             case NetworkCapabilities.NET_CAPABILITY_MMTEL -> "MMTEL";
             case NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_LATENCY -> "PRIORITIZE_LATENCY";
             case NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH -> "PRIORITIZE_BANDWIDTH";
-            case NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED -> "NOT_BANDWIDTH_CONSTRAINED";
+            case NetworkCapabilities.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED
+                    -> "NOT_BANDWIDTH_CONSTRAINED";
+            case NET_CAPABILITY_PRIORITIZE_UNIFIED_COMMUNICATIONS
+                    -> "PRIORITIZE_UNIFIED_COMMUNICATIONS";
             default -> {
                 loge("Unknown network capability(" + netCap + ")");
                 yield "Unknown(" + netCap + ")";

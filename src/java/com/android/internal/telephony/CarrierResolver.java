@@ -44,7 +44,6 @@ import android.util.Log;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.metrics.CarrierIdMatchStats;
-import com.android.internal.telephony.metrics.TelephonyMetrics;
 import com.android.internal.telephony.subscription.SubscriptionManagerService;
 import com.android.internal.telephony.uicc.IccRecords;
 import com.android.internal.telephony.uicc.UiccController;
@@ -954,10 +953,6 @@ public class CarrierResolver extends Handler {
                 apn,
                 subscriptionRule.privilegeAccessRule,
                 -1, null, -1);
-
-        TelephonyMetrics.getInstance().writeCarrierIdMatchingEvent(
-                mPhone.getPhoneId(), getCarrierListVersion(), mCarrierId,
-                unknownMccmncToLog, unknownGid1ToLog, simInfo);
 
         // Generate statsd metrics only when MCC/MNC is unknown or there is no match for GID1.
         if (unknownMccmncToLog != null || unknownGid1ToLog != null) {

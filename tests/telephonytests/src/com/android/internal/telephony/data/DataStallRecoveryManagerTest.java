@@ -38,6 +38,7 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.telephony.Annotation.ValidationStatus;
 import android.telephony.CarrierConfigManager;
+import android.telephony.TelephonyCallback;
 import android.telephony.TelephonyManager;
 import android.test.mock.MockContentResolver;
 import android.testing.AndroidTestingRunner;
@@ -49,14 +50,14 @@ import com.android.internal.telephony.data.DataNetworkController.DataNetworkCont
 import com.android.internal.telephony.data.DataSettingsManager.DataSettingsManagerCallback;
 import com.android.internal.telephony.data.DataStallRecoveryManager.DataStallRecoveryManagerCallback;
 
-import java.lang.reflect.Field;
-import java.util.Set;
-
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
+
+import java.lang.reflect.Field;
+import java.util.Set;
 
 @RunWith(AndroidTestingRunner.class)
 @TestableLooper.RunWithLooper
@@ -69,6 +70,10 @@ public class DataStallRecoveryManagerTest extends TelephonyTest {
     private DataStallRecoveryManagerCallback mDataStallRecoveryManagerCallback;
 
     private DataStallRecoveryManager mDataStallRecoveryManager;
+
+    private TelephonyCallback.ActiveDataSubscriptionIdListener mActiveSubIdListener;
+
+    private static final int FAKE_SUB_ID = 42;
 
     /**
      * The fake content resolver used to receive change event from global settings
@@ -117,11 +122,17 @@ public class DataStallRecoveryManagerTest extends TelephonyTest {
                 .when(mDataConfigManager)
                 .getDataStallRecoveryShouldSkipArray();
         doReturn(true).when(mDataNetworkController).isInternetDataAllowed(true);
+        doReturn(FAKE_SUB_ID).when(mPhone).getSubId();
 
         doAnswer(invocation -> {
             ((Runnable) invocation.getArguments()[0]).run();
             return null;
         }).when(mDataStallRecoveryManagerCallback).invokeFromExecutor(any(Runnable.class));
+
+        mTelephonyManager = mock(TelephonyManager.class);
+        ArgumentCaptor<TelephonyCallback> telephonyCallbackCaptor =
+                ArgumentCaptor.forClass(TelephonyCallback.class);
+        mContextFixture.setSystemService(Context.TELEPHONY_SERVICE, mTelephonyManager);
 
         mDataStallRecoveryManager =
                 new DataStallRecoveryManager(
@@ -131,11 +142,29 @@ public class DataStallRecoveryManagerTest extends TelephonyTest {
                         mFeatureFlags,
                         mTestableLooper.getLooper(),
                         mDataStallRecoveryManagerCallback);
+        verify(mTelephonyManager).registerTelephonyCallback(
+                any(),
+                telephonyCallbackCaptor.capture());
+        mActiveSubIdListener =
+                (TelephonyCallback.ActiveDataSubscriptionIdListener)
+                telephonyCallbackCaptor.getValue();
+        mActiveSubIdListener.onActiveDataSubscriptionIdChanged(FAKE_SUB_ID);
+        mTestableLooper.processAllMessages();
+
+        verify(mTelephonyManager).registerTelephonyCallback(
+                any(),
+                telephonyCallbackCaptor.capture());
+        TelephonyCallback.ActiveDataSubscriptionIdListener activeSubIdListener =
+                (TelephonyCallback.ActiveDataSubscriptionIdListener)
+                telephonyCallbackCaptor.getValue();
+        activeSubIdListener.onActiveDataSubscriptionIdChanged(FAKE_SUB_ID);
+        mTestableLooper.processAllMessages();
 
         field.set(mDataStallRecoveryManager, 0L);
 
         doReturn(false).when(mTelecomManager).isInEmergencyCall();
         doReturn(false).when(mPhone).isInEcm();
+
 
         logd("DataStallRecoveryManagerTest -Setup!");
     }
@@ -446,7 +475,18 @@ public class DataStallRecoveryManagerTest extends TelephonyTest {
      * Tests the DSRM process to send three intents for three action changes.
      */
     @Test
+    public void testInitialValidStateIsNotDataStall() throws Exception {
+        when(mFeatureFlags.ignoreInitialDataStallRecovered()).thenReturn(true);
+        sendValidationStatusCallback(NetworkAgent.VALIDATION_STATUS_VALID);
+        verify(mPhone.getContext(), never()).sendBroadcast(any());
+    }
+
+    /**
+     * Tests the DSRM process to send three intents for three action changes.
+     */
+    @Test
     public void testSendDSRMData() throws Exception {
+        when(mFeatureFlags.ignoreInitialDataStallRecovered()).thenReturn(false);
         ArgumentCaptor<Intent> captorIntent = ArgumentCaptor.forClass(Intent.class);
 
         sendValidationStatusCallback(NetworkAgent.VALIDATION_STATUS_VALID);
@@ -743,4 +783,64 @@ public class DataStallRecoveryManagerTest extends TelephonyTest {
                 .isEqualTo(DataStallRecoveryManager.RECOVERY_ACTION_CLEANUP);
     }
 
+    /**
+     * Test that doRecovery is skipped if isRecoveryNeeded fails, which can happen if conditions
+     * change between the check and the execution of the recovery action.
+     */
+    @Test
+    public void testDoRecovery_skippedWhenRecoveryNotNeeded() throws Exception {
+        // Set phone to be in a call
+        doReturn(PhoneConstants.State.OFFHOOK).when(mPhone).getState();
+        mDataStallRecoveryManager.setRecoveryAction(
+                DataStallRecoveryManager.RECOVERY_ACTION_RADIO_RESTART);
+        setPrivateBooleanField(mDataStallRecoveryManager, "mRecoveryTriggered", true);
+
+        // Send the DO_RECOVERY event to bypass the initial checks.
+        mDataStallRecoveryManager.sendEmptyMessage(2 /* EVENT_DO_RECOVERY */);
+        processAllMessages();
+
+        // Verify the recovery action was NOT performed because isRecoveryNeeded() fail.
+        verify(mSST, never()).powerOffRadioSafely();
+        // Verify that the check timer was rescheduled (EVENT_SEND_DATA_STALL_BROADCAST)
+        assertThat(mDataStallRecoveryManager.hasMessages(1)).isTrue();
+    }
+
+    /**
+     * Test that if validation fails while a recovery is already in progress (triggered),
+     * a new recovery sequence is not started.
+     */
+    @Test
+    public void testOnInternetValidationStatusChanged_skipWhenRecoveryTriggered() throws Exception {
+        sendValidationStatusCallback(NetworkAgent.VALIDATION_STATUS_VALID);
+        sendOnInternetDataNetworkCallback(true);
+        doReturn(mSignalStrength).when(mPhone).getSignalStrength();
+        doReturn(PhoneConstants.State.IDLE).when(mPhone).getState();
+
+        // Manually set recovery as triggered.
+        setPrivateBooleanField(mDataStallRecoveryManager, "mRecoveryTriggered", true);
+
+        // Sending a validation failure.
+        sendValidationStatusCallback(NetworkAgent.VALIDATION_STATUS_NOT_VALID);
+        processAllMessages();
+
+        // Verify that a new recovery was not triggered (EVENT_SEND_DATA_STALL_BROADCAST)
+        assertThat(mDataStallRecoveryManager.hasMessages(1)).isFalse();
+    }
+
+    @Test
+    public void testInactiveNetworkIsNotADataStall() {
+        when(mFeatureFlags.inactiveDataNetworkIsNotStalled()).thenReturn(true);
+        sendValidationStatusCallback(NetworkAgent.VALIDATION_STATUS_VALID);
+        sendOnInternetDataNetworkCallback(true);
+        processAllMessages();
+        // Verify here and below to ensure that the broadcast is not coming from the later
+        // transition.
+        verify(mPhone.getContext(), times(1)).sendBroadcast(any());
+
+        mActiveSubIdListener.onActiveDataSubscriptionIdChanged(21);
+        sendValidationStatusCallback(NetworkAgent.VALIDATION_STATUS_NOT_VALID);
+        processAllMessages();
+
+        verify(mPhone.getContext(), times(1)).sendBroadcast(any());
+    }
 }

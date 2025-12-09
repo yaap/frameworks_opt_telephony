@@ -148,4 +148,30 @@ public class SatelliteConstants {
     })
     @Retention(RetentionPolicy.SOURCE)
     public @interface SatelliteEntitlementServicePolicy {}
+
+    public static final int GLOBAL_NTN_CONNECT_TYPE_UNKNOWN = 0;
+    public static final int GLOBAL_NTN_CONNECT_TYPE_AUTOMATIC = 1;
+    public static final int GLOBAL_NTN_CONNECT_TYPE_MANUAL = 2;
+    public static final int GLOBAL_NTN_CONNECT_TYPE_HYBRID = 3;
+
+    @IntDef(prefix = {"SATELLITE_GLOBAL_CONNECT_TYPE_"}, value = {
+            GLOBAL_NTN_CONNECT_TYPE_UNKNOWN,
+            GLOBAL_NTN_CONNECT_TYPE_AUTOMATIC,
+            GLOBAL_NTN_CONNECT_TYPE_MANUAL,
+            GLOBAL_NTN_CONNECT_TYPE_HYBRID
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface SatelliteGlobalConnectType {}
+
+    public static final int SESSION_NTN_CONNECT_TYPE_UNKNOWN = 0;
+    public static final int SESSION_NTN_CONNECT_TYPE_AUTOMATIC = 1;
+    public static final int SESSION_NTN_CONNECT_TYPE_MANUAL = 2;
+
+    @IntDef(prefix = {"SATELLITE_GLOBAL_CONNECT_TYPE_"}, value = {
+            SESSION_NTN_CONNECT_TYPE_UNKNOWN,
+            SESSION_NTN_CONNECT_TYPE_AUTOMATIC,
+            SESSION_NTN_CONNECT_TYPE_MANUAL
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface SatelliteSessionConnectType {}
 }

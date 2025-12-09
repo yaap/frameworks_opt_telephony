@@ -513,15 +513,7 @@ public class SubscriptionManagerService extends ISub.Stub {
 
         mUiccController = UiccController.getInstance();
         mHandler = new Handler(looper);
-
-        if (mFeatureFlags.threadShred()) {
-            mBackgroundHandler = new Handler(WorkerThread.get().getLooper());
-        } else {
-            HandlerThread backgroundThread = new HandlerThread(LOG_TAG);
-            backgroundThread.start();
-
-            mBackgroundHandler = new Handler(backgroundThread.getLooper());
-        }
+        mBackgroundHandler = new Handler(WorkerThread.get().getLooper());
 
         mDefaultVoiceSubId = new WatchedInt(Settings.Global.getInt(mContext.getContentResolver(),
                 Settings.Global.MULTI_SIM_VOICE_CALL_SUBSCRIPTION,
@@ -578,7 +570,7 @@ public class SubscriptionManagerService extends ISub.Stub {
 
         Looper dbLooper = null;
 
-        if (mFeatureFlags.threadShred() && SubscriptionManagerService.USE_WORKER_THREAD) {
+        if (SubscriptionManagerService.USE_WORKER_THREAD) {
             dbLooper = WorkerThread.get().getLooper();
         } else {
             // Create a separate thread for subscription database manager.
@@ -2382,7 +2374,8 @@ public class SubscriptionManagerService extends ISub.Stub {
             // Check if the record exists or not.
             if (subInfo == null) {
                 // Record does not exist.
-                if (mSlotIndexToSubId.containsKey(slotIndex)) {
+                if (subscriptionType == SubscriptionManager.SUBSCRIPTION_TYPE_LOCAL_SIM
+                        && mSlotIndexToSubId.containsKey(slotIndex)) {
                     loge("Already a subscription on slot " + slotIndex);
                     return -1;
                 }
@@ -3086,7 +3079,8 @@ public class SubscriptionManagerService extends ISub.Stub {
      *
      * @param slotIndex Logical SIM slot index.
      * @return The subscription id. {@link SubscriptionManager#INVALID_SUBSCRIPTION_ID} if SIM is
-     * absent.
+     * absent. If slotIndex is {@link SubscriptionManager#SLOT_INDEX_FOR_REMOTE_SIM_SUB}, the last
+     * inserted remote SIM subscription id will be returned.
      */
     @Override
     public int getSubId(int slotIndex) {
@@ -3414,7 +3408,7 @@ public class SubscriptionManagerService extends ISub.Stub {
      */
     @Override
     @RequiresPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE)
-    public int[] getActiveSubIdList(boolean visibleOnly) {
+    @NonNull public int[] getActiveSubIdList(boolean visibleOnly) {
         enforcePermissions("getActiveSubIdList", Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
 
         if (!mContext.getResources().getBoolean(
@@ -3433,9 +3427,10 @@ public class SubscriptionManagerService extends ISub.Stub {
      * @param visibleOnly {@code true} if only includes user visible subscription's sub id.
      * @param user If {@code null}, uses the calling user handle to judge which subscriptions are
      *             accessible to the caller.
-     * @return List of the active subscription id.
+     * @return Array of the active subscription id.
      */
-    private int[] getActiveSubIdListAsUser(boolean visibleOnly, @NonNull final UserHandle user) {
+    @NonNull private int[] getActiveSubIdListAsUser(
+            boolean visibleOnly, @NonNull final UserHandle user) {
         return mSlotIndexToSubId.values().stream()
                 .filter(subId -> {
                     SubscriptionInfoInternal subInfo = mSubscriptionDatabaseManager
@@ -4685,9 +4680,6 @@ public class SubscriptionManagerService extends ISub.Stub {
      * @param isSatelliteESOSSupported {@code true} satellite ESOS supported true.
      */
     public void setSatelliteESOSSupported(int subId, @NonNull boolean isSatelliteESOSSupported) {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            return;
-        }
         try {
             mSubscriptionDatabaseManager.setSatelliteESOSSupported(subId,
                     isSatelliteESOSSupported ? 1 : 0);
@@ -4721,9 +4713,6 @@ public class SubscriptionManagerService extends ISub.Stub {
      * @return the satellite ESOS supported true or false.
      */
     public boolean getSatelliteESOSSupported(int subId) {
-        if (!mFeatureFlags.carrierRoamingNbIotNtn()) {
-            return false;
-        }
         SubscriptionInfoInternal subInfo = mSubscriptionDatabaseManager.getSubscriptionInfoInternal(
                 subId);
         if (subInfo == null) {

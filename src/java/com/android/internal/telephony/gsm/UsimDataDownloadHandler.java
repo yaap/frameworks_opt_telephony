@@ -34,7 +34,6 @@ import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.InboundSmsHandler;
 import com.android.internal.telephony.PhoneFactory;
 import com.android.internal.telephony.cat.ComprehensionTlvTag;
-import com.android.internal.telephony.metrics.TelephonyMetrics;
 import com.android.internal.telephony.uicc.IccIoResult;
 import com.android.internal.telephony.uicc.IccUtils;
 import com.android.internal.telephony.uicc.UsimServiceTable;
@@ -331,8 +330,6 @@ public class UsimDataDownloadHandler extends Handler {
      */
     private void addUsimDataDownloadToMetrics(boolean result,
             @InboundSmsHandler.SmsSource int smsSource, int pduLength) {
-        TelephonyMetrics metrics = TelephonyMetrics.getInstance();
-        metrics.writeIncomingSMSPP(mPhoneId, android.telephony.SmsMessage.FORMAT_3GPP, result);
         PhoneFactory.getPhone(mPhoneId).getSmsStats().onIncomingSmsPP(smsSource, result, pduLength);
     }
 

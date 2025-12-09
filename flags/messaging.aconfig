@@ -21,6 +21,34 @@ flag {
     }
 }
 
+# OWNER=ntmyren TARGET=25Q4
+flag {
+  name: "redact_otp_sms"
+  namespace: "telephony"
+  description: "Redact OTP SMS messages from untrusted listeners"
+  bug: "351976749"
+}
+
+# OWNER=ntmyren TARGET=25Q4
+flag {
+  name: "redact_otp_sms_api"
+  is_exported: true
+  namespace: "telephony"
+  description: "API flag for redacting OTP SMS messages from untrusted listeners"
+  bug: "351976749"
+}
+
+# OWNER=ntmyren TARGET=25Q4
+flag {
+  name: "limit_raw_table_visibility"
+  namespace: "telephony"
+  description: "limits the visibility of the raw SMS table"
+  bug: "430572311"
+  metadata {
+      purpose: PURPOSE_BUGFIX
+  }
+}
+
 # OWNER=nykkumar TARGET=25Q2
 flag {
   name: "sms_mms_deliver_broadcasts_redirect_to_main_user"

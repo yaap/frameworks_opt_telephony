@@ -105,7 +105,6 @@ import com.android.internal.telephony.data.TelephonyNetworkAgent.TelephonyNetwor
 import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.metrics.DataCallSessionStats;
 import com.android.internal.telephony.metrics.DataNetworkValidationStats;
-import com.android.internal.telephony.metrics.TelephonyMetrics;
 import com.android.internal.telephony.satellite.SatelliteController;
 import com.android.internal.util.ArrayUtils;
 import com.android.internal.util.FunctionalUtils;
@@ -472,7 +471,10 @@ public class DataNetwork extends StateMachine {
             NetworkCapabilities.NET_CAPABILITY_MMTEL,
             // Dynamically add and remove MMS capability depending on QNS's preference if there is
             // a transport specific APN alternative.
-            NetworkCapabilities.NET_CAPABILITY_MMS
+            NetworkCapabilities.NET_CAPABILITY_MMS,
+            // Dynamically add and remove XCAP capability depending on QNS's preference if there is
+            // a transport specific APN alternative.
+            NetworkCapabilities.NET_CAPABILITY_XCAP
     );
 
     /** The parent state. Any messages not handled by the child state fallback to this. */
@@ -1319,14 +1321,17 @@ public class DataNetwork extends StateMachine {
                         getHandler(), EVENT_VOICE_CALL_ENDED, null);
             }
 
-            if (mDataProfile.canSatisfy(NetworkCapabilities.NET_CAPABILITY_MMS)) {
+            if (mDataProfile.canSatisfy(NetworkCapabilities.NET_CAPABILITY_MMS)
+                    || mDataProfile.canSatisfy(NetworkCapabilities.NET_CAPABILITY_XCAP)) {
                 mAccessNetworksManagerCallback = new AccessNetworksManagerCallback(
                         getHandler()::post) {
                     @Override
                     public void onPreferredTransportChanged(
                             @NetCapability int networkCapability, boolean forceReconnect) {
-                        if (networkCapability == NetworkCapabilities.NET_CAPABILITY_MMS) {
-                            log("MMS preference changed.");
+                        if (networkCapability == NetworkCapabilities.NET_CAPABILITY_MMS
+                                || networkCapability == NetworkCapabilities.NET_CAPABILITY_XCAP) {
+                            log(DataUtils.networkCapabilityToString(networkCapability)
+                                    + " preference changed.");
                             updateNetworkCapabilities();
                         }
                     }
@@ -1653,10 +1658,6 @@ public class DataNetwork extends StateMachine {
                     + ", isModemRoaming=" + isModemRoaming + ", allowRoaming=" + allowRoaming
                     + ", PDU session id=" + mPduSessionId + ", matchAllRuleAllowed="
                     + matchAllRuleAllowed);
-            TelephonyMetrics.getInstance().writeSetupDataCall(mPhone.getPhoneId(),
-                    ServiceState.networkTypeToRilRadioTechnology(dataNetworkType),
-                    mDataProfile.getProfileId(), mDataProfile.getApn(),
-                    mDataProfile.getProtocolType());
         }
 
         /**
@@ -1777,8 +1778,8 @@ public class DataNetwork extends StateMachine {
             mDataNetworkCallback.invokeFromExecutor(
                     () -> mDataNetworkCallback.onLinkStatusChanged(DataNetwork.this, mLinkStatus));
             notifyPreciseDataConnectionState();
-            notifyImsDataNetwork();
             updateSuspendState();
+            notifyImsDataNetwork();
         }
 
         @Override
@@ -2291,6 +2292,35 @@ public class DataNetwork extends StateMachine {
     }
 
     /**
+     * Helper class for calling CompareOrUpdateResult to compare only certain fields of the
+     * LinkAddress: namely the IP address, prefix length, and scope.
+     */
+    private static class LinkAddressKey {
+        @NonNull private final InetAddress mAddress;
+        private final int mPrefixLength;
+        private final int mScope;
+
+        LinkAddressKey(@NonNull LinkAddress linkAddress) {
+            mAddress = linkAddress.getAddress();
+            mPrefixLength = linkAddress.getPrefixLength();
+            mScope = linkAddress.getScope();
+        }
+
+        @Override
+        public boolean equals(@Nullable Object o) {
+            return o instanceof LinkAddressKey other
+                && mAddress.equals(other.mAddress)
+                && mPrefixLength == other.mPrefixLength
+                && mScope == other.mScope;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(mAddress, mPrefixLength, mScope);
+        }
+    }
+
+    /**
      * Check if the new link properties are compatible with the old link properties. For example,
      * if IP changes, that's considered incompatible.
      *
@@ -2305,12 +2335,11 @@ public class DataNetwork extends StateMachine {
 
         if (!LinkPropertiesUtils.isIdenticalAddresses(oldLinkProperties, newLinkProperties)) {
             // If the same address type was removed and added we need to cleanup.
-            LinkPropertiesUtils.CompareOrUpdateResult<Integer, LinkAddress> result =
+            LinkPropertiesUtils.CompareOrUpdateResult<LinkAddressKey, LinkAddress> result =
                     new LinkPropertiesUtils.CompareOrUpdateResult<>(
                             oldLinkProperties.getLinkAddresses(),
                             newLinkProperties.getLinkAddresses(),
-                            linkAddress -> Objects.hash(linkAddress.getAddress(),
-                                    linkAddress.getPrefixLength(), linkAddress.getScope()));
+                            linkAddress -> new LinkAddressKey(linkAddress));
             log("isLinkPropertiesCompatible: old=" + oldLinkProperties
                     + " new=" + newLinkProperties + " result=" + result);
             for (LinkAddress added : result.added) {
@@ -2370,7 +2399,7 @@ public class DataNetwork extends StateMachine {
         mNetworkAgent.markConnected();
         // Update NetworkAgent in QosCallbackTracker so that QoS callbacks on the new network agent
         // properly reach to the callback tracker.
-        if (mFlags.qosUpdateNetworkAgent() && mQosCallbackTracker != null) {
+        if (mQosCallbackTracker != null) {
             mQosCallbackTracker.updateNetworkAgent(mNetworkAgent);
         }
         notifyPreciseDataConnectionState();
@@ -2468,6 +2497,7 @@ public class DataNetwork extends StateMachine {
                     case NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_LATENCY:
                     case NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH:
                     case NetworkCapabilities.NET_CAPABILITY_CBS:
+                    case DataUtils.NET_CAPABILITY_PRIORITIZE_UNIFIED_COMMUNICATIONS:
                         builder.addCapability(networkCapability);
                         break;
                     default:
@@ -2564,31 +2594,36 @@ public class DataNetwork extends StateMachine {
             builder.removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED);
         }
 
-        // Check if the feature force MMS on IWLAN is enabled. When the feature is enabled, MMS
-        // will be attempted on IWLAN if possible, even if existing cellular networks already
-        // supports IWLAN.
-        if (builder.build().hasCapability(NetworkCapabilities.NET_CAPABILITY_MMS)) {
-            // If QNS sets MMS preferred on IWLAN, and it is possible to setup an MMS network on
-            // IWLAN, then we need to remove the MMS capability on the cellular network. This will
-            // allow the new MMS network to be brought up on IWLAN when MMS network request arrives.
-            if (mAccessNetworksManager.getPreferredTransportByNetworkCapability(
-                    NetworkCapabilities.NET_CAPABILITY_MMS)
-                    == AccessNetworkConstants.TRANSPORT_TYPE_WLAN && mTransport
-                    == AccessNetworkConstants.TRANSPORT_TYPE_WWAN) {
+        // MMS or XCAP will be attempted on IWLAN if possible, even if existing cellular networks
+        // already supports IWLAN.
+        int[] iwlanPreferredCaps = new int[]{NetworkCapabilities.NET_CAPABILITY_MMS,
+                NetworkCapabilities.NET_CAPABILITY_XCAP};
+        for (int netCapability : iwlanPreferredCaps) {
+            if (builder.build().hasCapability(netCapability)) {
+                // If QNS sets MMS/XCAP as preferred on IWLAN, and it is possible to setup an
+                // MMS/XCAP network on IWLAN, then we need to remove the MMS capability on the
+                // cellular network. This will allow the new MMS/XCAP network to be brought up on
+                // IWLAN when MMS/XCAP network request arrives.
+                if (mAccessNetworksManager.getPreferredTransportByNetworkCapability(netCapability)
+                        == AccessNetworkConstants.TRANSPORT_TYPE_WLAN && mTransport
+                        == AccessNetworkConstants.TRANSPORT_TYPE_WWAN) {
 
-                DataProfile dataProfile = mDataNetworkController.getDataProfileManager()
-                        .getDataProfileForNetworkRequest(new TelephonyNetworkRequest(
-                                new NetworkRequest.Builder().addCapability(
-                                NetworkCapabilities.NET_CAPABILITY_MMS).build(), mPhone, mFlags),
-                        TelephonyManager.NETWORK_TYPE_IWLAN, false, false, false);
-                // If we find another data data profile that can support MMS on IWLAN, then remove
-                // the MMS capability from this cellular network. This will allow IWLAN to be
-                // brought up for MMS later.
-                if (dataProfile != null && !dataProfile.getApn().equals(mDataProfile.getApn())) {
-                    log("Found a different apn name " + dataProfile.getApn()
-                            + " that can serve MMS on IWLAN. Current data profile "
-                            + mDataProfile.getApn());
-                    builder.removeCapability(NetworkCapabilities.NET_CAPABILITY_MMS);
+                    DataProfile dataProfile = mDataNetworkController.getDataProfileManager()
+                            .getDataProfileForNetworkRequest(new TelephonyNetworkRequest(
+                                            new NetworkRequest.Builder().addCapability(
+                                                    netCapability).build(), mPhone, mFlags),
+                                    TelephonyManager.NETWORK_TYPE_IWLAN, false, false, false);
+                    // If we find another data data profile that can support MMS/XCAP on IWLAN, then
+                    // remove the MMS/XCAP capability from this cellular network. This will allow
+                    // IWLAN to be brought up for MMS/XCAP later.
+                    if (dataProfile != null && !dataProfile.getApn()
+                            .equals(mDataProfile.getApn())) {
+                        log("Found a different apn name " + dataProfile.getApn()
+                                + " that can serve "
+                                + DataUtils.networkCapabilityToString(netCapability)
+                                + " on IWLAN. Current data profile " + mDataProfile.getApn());
+                        builder.removeCapability(netCapability);
+                    }
                 }
             }
         }
@@ -2623,7 +2658,7 @@ public class DataNetwork extends StateMachine {
                                 NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED);
                 case CarrierConfigManager.SATELLITE_DATA_SUPPORT_BANDWIDTH_CONSTRAINED -> {
                     try {
-                        builder.removeCapability(DataUtils
+                        builder.removeCapability(NetworkCapabilities
                                 .NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED);
                     } catch (Exception ignored) { }
                 }

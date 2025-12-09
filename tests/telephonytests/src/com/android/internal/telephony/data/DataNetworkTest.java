@@ -23,10 +23,10 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.nullable;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
@@ -82,6 +82,7 @@ import android.util.Pair;
 import android.util.SparseArray;
 
 import com.android.internal.telephony.PhoneConstants;
+import com.android.internal.telephony.SimulatedCommands;
 import com.android.internal.telephony.TelephonyTest;
 import com.android.internal.telephony.data.AccessNetworksManager.AccessNetworksManagerCallback;
 import com.android.internal.telephony.data.DataConfigManager.DataConfigManagerCallback;
@@ -92,7 +93,6 @@ import com.android.internal.telephony.data.DataSettingsManager.DataSettingsManag
 import com.android.internal.telephony.data.LinkBandwidthEstimator.LinkBandwidthEstimatorCallback;
 import com.android.internal.telephony.data.PhoneSwitcher.PhoneSwitcherCallback;
 import com.android.internal.telephony.metrics.DataCallSessionStats;
-import com.android.internal.telephony.test.SimulatedCommands;
 
 import org.junit.After;
 import org.junit.Before;
@@ -133,7 +133,8 @@ public class DataNetworkTest extends TelephonyTest {
             .setApnName("fake_apn")
             .setUser("user")
             .setPassword("passwd")
-            .setApnTypeBitmask(ApnSetting.TYPE_DEFAULT | ApnSetting.TYPE_SUPL | ApnSetting.TYPE_MMS)
+            .setApnTypeBitmask(ApnSetting.TYPE_DEFAULT | ApnSetting.TYPE_SUPL | ApnSetting.TYPE_MMS
+                    | ApnSetting.TYPE_XCAP)
             .setProtocol(ApnSetting.PROTOCOL_IPV6)
             .setRoamingProtocol(ApnSetting.PROTOCOL_IP)
             .setCarrierEnabled(true)
@@ -150,6 +151,18 @@ public class DataNetworkTest extends TelephonyTest {
             .setEntryName("fake_mms_apn")
             .setApnName("fake_mms_apn")
             .setApnTypeBitmask(ApnSetting.TYPE_MMS)
+            .setProtocol(ApnSetting.PROTOCOL_IPV6)
+            .setRoamingProtocol(ApnSetting.PROTOCOL_IP)
+            .setCarrierEnabled(true)
+            .setNetworkTypeBitmask((int) TelephonyManager.NETWORK_TYPE_BITMASK_IWLAN)
+            .build();
+
+    private final ApnSetting mXcapApnSetting = new ApnSetting.Builder()
+            .setId(2164)
+            .setOperatorNumeric("12345")
+            .setEntryName("fake_xcap_apn")
+            .setApnName("fake_xcap_apn")
+            .setApnTypeBitmask(ApnSetting.TYPE_XCAP)
             .setProtocol(ApnSetting.PROTOCOL_IPV6)
             .setRoamingProtocol(ApnSetting.PROTOCOL_IP)
             .setCarrierEnabled(true)
@@ -181,6 +194,11 @@ public class DataNetworkTest extends TelephonyTest {
 
     private final DataProfile mMmsDataProfile = new DataProfile.Builder()
             .setApnSetting(mMmsApnSetting)
+            .setTrafficDescriptor(new TrafficDescriptor("fake_apn", null))
+            .build();
+
+    private final DataProfile mXcapDataProfile = new DataProfile.Builder()
+            .setApnSetting(mXcapApnSetting)
             .setTrafficDescriptor(new TrafficDescriptor("fake_apn", null))
             .build();
 
@@ -1229,13 +1247,32 @@ public class DataNetworkTest extends TelephonyTest {
         // Access network change
         serviceStateChanged(TelephonyManager.NETWORK_TYPE_NR,
                 NetworkRegistrationInfo.REGISTRATION_STATE_HOME, /*isNtn=*/false);
-        processAllMessages();
         verifyImsDataNetwork(3, List.of(AccessNetworkType.EUTRAN, AccessNetworkType.EUTRAN,
                 AccessNetworkType.NGRAN), List.of(TelephonyManager.DATA_CONNECTING,
                 TelephonyManager.DATA_CONNECTED, TelephonyManager.DATA_CONNECTED),
                 List.of(AccessNetworkConstants.TRANSPORT_TYPE_WWAN,
                 AccessNetworkConstants.TRANSPORT_TYPE_WWAN,
                 AccessNetworkConstants.TRANSPORT_TYPE_WWAN), List.of(0, 0, 0));
+    }
+
+    @Test
+    public void testImsDataNetwork_SuspendedToConnected() throws Exception {
+        testCreateImsDataNetwork();
+        // Became to OOS
+        serviceStateChanged(TelephonyManager.NETWORK_TYPE_LTE,
+                NetworkRegistrationInfo.REGISTRATION_STATE_NOT_REGISTERED_OR_SEARCHING,
+                false/*isNtn*/);
+        setSuccessfulSetupDataResponse(mMockedWlanDataServiceManager, 456);
+        // Now handover to IWLAN
+        mDataNetworkUT.startHandover(AccessNetworkConstants.TRANSPORT_TYPE_WLAN, null);
+        processAllMessages();
+        verifyImsDataNetwork(3, List.of(AccessNetworkType.EUTRAN, AccessNetworkType.EUTRAN,
+                AccessNetworkType.IWLAN), List.of(TelephonyManager.DATA_CONNECTING,
+                TelephonyManager.DATA_CONNECTED, TelephonyManager.DATA_CONNECTED),
+                List.of(AccessNetworkConstants.TRANSPORT_TYPE_WWAN,
+                AccessNetworkConstants.TRANSPORT_TYPE_WWAN,
+                AccessNetworkConstants.TRANSPORT_TYPE_WLAN),
+                List.of(0, 0, SubscriptionManager.INVALID_SIM_SLOT_INDEX));
     }
 
     @Test
@@ -2657,8 +2694,8 @@ public class DataNetworkTest extends TelephonyTest {
                 .onPreferredTransportChanged(NetworkCapabilities.NET_CAPABILITY_MMS, false);
         processAllMessages();
 
-        // Check if MMS capability is removed, and we don't recreat network agent which triggers
-        // powering comsuming internet validation.
+        // Check if MMS capability is removed, and we don't recreate network agent which triggers
+        // powering consuming internet validation.
         assertThat(mDataNetworkUT.getNetworkCapabilities()
                 .hasCapability(NetworkCapabilities.NET_CAPABILITY_MMS)).isFalse();
         verify(mockNetworkAgent, never()).abandon();
@@ -2673,6 +2710,76 @@ public class DataNetworkTest extends TelephonyTest {
         // Check if MMS capability is added back.
         assertThat(mDataNetworkUT.getNetworkCapabilities()
                 .hasCapability(NetworkCapabilities.NET_CAPABILITY_MMS)).isTrue();
+    }
+
+    @Test
+    public void testXcapCapabilityRemovedWhenXcapPreferredOnIwlan() throws Exception {
+        setupDataNetwork();
+
+        TelephonyNetworkAgent mockNetworkAgent = Mockito.mock(TelephonyNetworkAgent.class);
+        replaceInstance(DataNetwork.class, "mNetworkAgent",
+                mDataNetworkUT, mockNetworkAgent);
+
+        assertThat(mDataNetworkUT.getNetworkCapabilities()
+                .hasCapability(NetworkCapabilities.NET_CAPABILITY_XCAP)).isTrue();
+
+        ArgumentCaptor<AccessNetworksManagerCallback> accessNetworksManagerCallbackArgumentCaptor =
+                ArgumentCaptor.forClass(AccessNetworksManagerCallback.class);
+        verify(mAccessNetworksManager).registerCallback(
+                accessNetworksManagerCallbackArgumentCaptor.capture());
+
+        // Now QNS prefers XCAP on IWLAN
+        doReturn(AccessNetworkConstants.TRANSPORT_TYPE_WLAN).when(mAccessNetworksManager)
+                .getPreferredTransportByNetworkCapability(NetworkCapabilities.NET_CAPABILITY_XCAP);
+        // Verify an xcap apn that shares the same apn name doesn't count as an alternative.
+        ApnSetting xcapApnWithSameApn = new ApnSetting.Builder()
+                .setId(2164)
+                .setOperatorNumeric("12345")
+                .setEntryName("fake_xcap_apn")
+                .setApnName("fake_apn")
+                .setApnTypeBitmask(ApnSetting.TYPE_XCAP)
+                .setProtocol(ApnSetting.PROTOCOL_IPV6)
+                .setRoamingProtocol(ApnSetting.PROTOCOL_IP)
+                .setCarrierEnabled(true)
+                .setNetworkTypeBitmask((int) TelephonyManager.NETWORK_TYPE_BITMASK_IWLAN)
+                .build();
+        doReturn(new DataProfile.Builder().setApnSetting(xcapApnWithSameApn)
+                .setTrafficDescriptor(new TrafficDescriptor("fake_apn", null))
+                .build()).when(mDataProfileManager).getDataProfileForNetworkRequest(
+                any(TelephonyNetworkRequest.class),
+                eq(TelephonyManager.NETWORK_TYPE_IWLAN), eq(false), eq(false), eq(false));
+        accessNetworksManagerCallbackArgumentCaptor.getValue()
+                .onPreferredTransportChanged(NetworkCapabilities.NET_CAPABILITY_XCAP, false);
+        processAllMessages();
+
+        // Check if XCAP capability remains intact.
+        assertThat(mDataNetworkUT.getNetworkCapabilities()
+                .hasCapability(NetworkCapabilities.NET_CAPABILITY_XCAP)).isTrue();
+
+        // Verify XCAP capability is removed if using a valid XCAP alternative APN.
+        doReturn(mXcapDataProfile).when(mDataProfileManager).getDataProfileForNetworkRequest(
+                any(TelephonyNetworkRequest.class),
+                eq(TelephonyManager.NETWORK_TYPE_IWLAN), eq(false), eq(false), eq(false));
+        accessNetworksManagerCallbackArgumentCaptor.getValue()
+                .onPreferredTransportChanged(NetworkCapabilities.NET_CAPABILITY_XCAP, false);
+        processAllMessages();
+
+        // Check if XCAP capability is removed, and we don't recreate network agent which triggers
+        // powering consuming internet validation.
+        assertThat(mDataNetworkUT.getNetworkCapabilities()
+                .hasCapability(NetworkCapabilities.NET_CAPABILITY_XCAP)).isFalse();
+        verify(mockNetworkAgent, never()).abandon();
+
+        // Now QNS prefers XCAP on WWAN
+        doReturn(AccessNetworkConstants.TRANSPORT_TYPE_WWAN).when(mAccessNetworksManager)
+                .getPreferredTransportByNetworkCapability(NetworkCapabilities.NET_CAPABILITY_XCAP);
+        accessNetworksManagerCallbackArgumentCaptor.getValue()
+                .onPreferredTransportChanged(NetworkCapabilities.NET_CAPABILITY_XCAP, false);
+        processAllMessages();
+
+        // Check if XCAP capability is added back.
+        assertThat(mDataNetworkUT.getNetworkCapabilities()
+                .hasCapability(NetworkCapabilities.NET_CAPABILITY_XCAP)).isTrue();
     }
 
     @Test
@@ -2733,8 +2840,8 @@ public class DataNetworkTest extends TelephonyTest {
         assertThat(mDataNetworkUT.getNetworkCapabilities()
                 .hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)).isTrue();
         try {
-            assertThat(mDataNetworkUT.getNetworkCapabilities()
-                    .hasCapability(DataUtils.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED)).isFalse();
+            assertThat(mDataNetworkUT.getNetworkCapabilities().hasCapability(
+                    NetworkCapabilities.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED)).isFalse();
         } catch (Exception ignored) { }
 
         // Test unconstrained traffic
@@ -2771,8 +2878,8 @@ public class DataNetworkTest extends TelephonyTest {
         assertThat(mDataNetworkUT.getNetworkCapabilities()
                 .hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)).isTrue();
         try {
-            assertThat(mDataNetworkUT.getNetworkCapabilities()
-                    .hasCapability(DataUtils.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED)).isFalse();
+            assertThat(mDataNetworkUT.getNetworkCapabilities().hasCapability(
+                    NetworkCapabilities.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED)).isFalse();
         } catch (Exception ignored) { }
 
         // Test not constrained traffic

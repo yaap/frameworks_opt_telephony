@@ -261,8 +261,6 @@ public class GsmInboundSmsHandler extends InboundSmsHandler {
      * Add SMS of type 0 to metrics.
      */
     private void addSmsTypeZeroToMetrics(@SmsSource int smsSource, int pduLength) {
-        mMetrics.writeIncomingSmsTypeZero(mPhone.getPhoneId(),
-                android.telephony.SmsMessage.FORMAT_3GPP);
         mPhone.getSmsStats().onIncomingSmsTypeZero(smsSource, pduLength);
     }
 
@@ -270,8 +268,6 @@ public class GsmInboundSmsHandler extends InboundSmsHandler {
      * Add voicemail indication SMS 0 to metrics.
      */
     private void addVoicemailSmsToMetrics(@SmsSource int smsSource, int pduLength) {
-        mMetrics.writeIncomingVoiceMailSms(mPhone.getPhoneId(),
-                android.telephony.SmsMessage.FORMAT_3GPP);
         mPhone.getSmsStats().onIncomingSmsVoicemail(false /* is3gpp2 */, smsSource, pduLength);
     }
 

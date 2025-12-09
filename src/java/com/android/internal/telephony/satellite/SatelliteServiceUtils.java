@@ -194,6 +194,44 @@ public class SatelliteServiceUtils {
     }
 
     /**
+     * Convert satellite global connect type from carrier roaming ntn connect type to
+     * metric logging definitions.
+     * @param supportedConnectionMode The global connect type
+     * @return The converted supportedConnectionMode for metric logging
+     */
+    @SatelliteConstants.SatelliteGlobalConnectType
+    public static int fromSupportedConnectionMode(int supportedConnectionMode) {
+        return switch (supportedConnectionMode) {
+            case CarrierConfigManager.CARRIER_ROAMING_NTN_CONNECT_AUTOMATIC ->
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_AUTOMATIC;
+            case CarrierConfigManager.CARRIER_ROAMING_NTN_CONNECT_MANUAL ->
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_MANUAL;
+            case CarrierConfigManager.CARRIER_ROAMING_NTN_CONNECT_HYBRID ->
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_HYBRID;
+            default ->
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
+        };
+    }
+
+    /**
+     * Convert satellite session connect type from carrier roaming ntn connect type to
+     * metric logging definitions.
+     * @param sessionConnectionMode The global connect type
+     * @return The converted supportedConnectionMode for metric logging
+     */
+    @SatelliteConstants.SatelliteSessionConnectType
+    public static int fromSessionConnectionMode(int sessionConnectionMode) {
+        return switch (sessionConnectionMode) {
+            case CarrierConfigManager.CARRIER_ROAMING_NTN_CONNECT_AUTOMATIC ->
+                    SatelliteConstants.SESSION_NTN_CONNECT_TYPE_AUTOMATIC;
+            case CarrierConfigManager.CARRIER_ROAMING_NTN_CONNECT_MANUAL ->
+                    SatelliteConstants.SESSION_NTN_CONNECT_TYPE_MANUAL;
+            default ->
+                    SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
+        };
+    }
+
+    /**
      * Convert SatelliteCapabilities from service definition to framework definition.
      * @param capabilities The SatelliteCapabilities from the satellite service.
      * @return The converted SatelliteCapabilities for the framework.

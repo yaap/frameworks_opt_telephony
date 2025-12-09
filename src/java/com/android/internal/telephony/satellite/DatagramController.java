@@ -427,8 +427,7 @@ public class DatagramController {
                         R.bool.config_satellite_allow_check_message_in_not_connected);
         if (datagramType == DATAGRAM_TYPE_CHECK_PENDING_INCOMING_SMS
                 && satelliteModemState == SATELLITE_MODEM_STATE_NOT_CONNECTED
-                && allowCheckMessageInNotConnected
-                && mFeatureFlags.carrierRoamingNbIotNtn()) {
+                && allowCheckMessageInNotConnected) {
             return false;
         }
         if (satelliteModemState != SATELLITE_MODEM_STATE_CONNECTED

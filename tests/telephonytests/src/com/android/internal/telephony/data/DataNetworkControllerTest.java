@@ -5605,6 +5605,9 @@ public class DataNetworkControllerTest extends TelephonyTest {
 
         verifyAllDataDisconnected();
 
+        // clear available services at no service
+        mCarrierSupportedServices.clear();
+
         // Test Allow if voice is in service if RAT is 2g/3g, use voice RAT to select data profile
         ServiceState ss = createSS(TelephonyManager.NETWORK_TYPE_UNKNOWN /* data RAT */,
                 TelephonyManager.NETWORK_TYPE_1xRTT /* voice RAT */,
@@ -5618,6 +5621,57 @@ public class DataNetworkControllerTest extends TelephonyTest {
         processAllMessages();
 
         verifyConnectedNetworkHasCapabilities(NetworkCapabilities.NET_CAPABILITY_MMS);
+    }
+
+    @Test
+    public void testOnDemandDataSupport_WithLegacyNoVoiceReg_NonDds_WithNoPSService()
+            throws Exception {
+        // this slot is 0, modem preferred on slot 1
+        doReturn(1).when(mPhoneSwitcher).getPreferredDataPhoneId();
+        TelephonyNetworkRequest request = createNetworkRequest(
+                NetworkCapabilities.NET_CAPABILITY_MMS);
+
+        // clear available services at no service
+        mCarrierSupportedServices.clear();
+
+        // Test Allow if voice is in service if RAT is 2g/3g, use voice RAT to select data profile
+        ServiceState ss = createSS(TelephonyManager.NETWORK_TYPE_UNKNOWN /* data RAT */,
+                TelephonyManager.NETWORK_TYPE_1xRTT /* voice RAT */,
+                NetworkRegistrationInfo.REGISTRATION_STATE_NOT_REGISTERED_OR_SEARCHING ,
+                NetworkRegistrationInfo.REGISTRATION_STATE_NOT_REGISTERED_OR_SEARCHING,
+                NetworkRegistrationInfo.REGISTRATION_STATE_NOT_REGISTERED_OR_SEARCHING, null, true);
+        doReturn(ss).when(mSST).getServiceState();
+        mDataNetworkControllerUT.obtainMessage(EVENT_SERVICE_STATE_CHANGED).sendToTarget();
+        mDataNetworkControllerUT.removeNetworkRequest(request);
+        mDataNetworkControllerUT.addNetworkRequest(request);
+        processAllMessages();
+
+        // With no voice reg, PS Attach/ on demand data support for 2g/3g not allowed
+        verifyNoConnectedNetworkHasCapability(NetworkCapabilities.NET_CAPABILITY_MMS);
+    }
+
+    @Test
+    public void testOnDemandDataSupport_Legacy_Dds_WithNoPSService() throws Exception {
+        TelephonyNetworkRequest request = createNetworkRequest(
+                NetworkCapabilities.NET_CAPABILITY_MMS);
+
+        // clear available services at no service
+        mCarrierSupportedServices.clear();
+
+        // Test Allow if voice is in service if RAT is 2g/3g, use voice RAT to select data profile
+        ServiceState ss = createSS(TelephonyManager.NETWORK_TYPE_UNKNOWN /* data RAT */,
+                TelephonyManager.NETWORK_TYPE_1xRTT /* voice RAT */,
+                NetworkRegistrationInfo.REGISTRATION_STATE_NOT_REGISTERED_OR_SEARCHING ,
+                NetworkRegistrationInfo.REGISTRATION_STATE_HOME,
+                NetworkRegistrationInfo.REGISTRATION_STATE_NOT_REGISTERED_OR_SEARCHING, null, true);
+        doReturn(ss).when(mSST).getServiceState();
+        mDataNetworkControllerUT.obtainMessage(EVENT_SERVICE_STATE_CHANGED).sendToTarget();
+        mDataNetworkControllerUT.removeNetworkRequest(request);
+        mDataNetworkControllerUT.addNetworkRequest(request);
+        processAllMessages();
+
+        //With dds and no PS Service, on demand data support for 2g/3g not allowed
+        verifyNoConnectedNetworkHasCapability(NetworkCapabilities.NET_CAPABILITY_MMS);
     }
 
     @Test
@@ -5721,7 +5775,7 @@ public class DataNetworkControllerTest extends TelephonyTest {
         NetworkCapabilities netCaps = new NetworkCapabilities();
         netCaps.addCapability(NetworkCapabilities.NET_CAPABILITY_RCS);
         try {
-            netCaps.addCapability(DataUtils.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED);
+            netCaps.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED);
         } catch (Exception ignored) { }
         request = new TelephonyNetworkRequest(new NetworkRequest(netCaps,
                 ConnectivityManager.TYPE_MOBILE, ++mNetworkRequestId,
@@ -5737,7 +5791,7 @@ public class DataNetworkControllerTest extends TelephonyTest {
         netCaps.addCapability(NetworkCapabilities.NET_CAPABILITY_RCS);
         netCaps.removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED);
         try {
-            netCaps.addCapability(DataUtils.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED);
+            netCaps.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED);
         } catch (Exception ignored) { }
         request = new TelephonyNetworkRequest(new NetworkRequest(netCaps,
                 ConnectivityManager.TYPE_MOBILE, ++mNetworkRequestId,

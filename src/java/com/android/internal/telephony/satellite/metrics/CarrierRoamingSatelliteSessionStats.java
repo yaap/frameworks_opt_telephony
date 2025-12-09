@@ -51,6 +51,7 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.util.SparseArray;
 
+import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.MccTable;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.flags.FeatureFlags;
@@ -121,6 +122,8 @@ public class CarrierRoamingSatelliteSessionStats {
     private long[] mPerAppSatelliteDataConsumedBytesArray = new long[]{0L};
     private static final int MAX_SATELLITE_TOP_APPS_TRACKED = 5;
     private int[] mSatelliteAppsUidArray = new int[MAX_SATELLITE_TOP_APPS_TRACKED];
+    private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
+    private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
 
     private final ConnectivityManager.NetworkCallback mNetworkCallback =
             new ConnectivityManager.NetworkCallback() {
@@ -292,10 +295,18 @@ public class CarrierRoamingSatelliteSessionStats {
         }
     }
 
+    /**
+     * Clear all CarrierRoamingSatelliteSessionStats instances. This is used for testing only.
+     */
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PRIVATE)
+    public static void clearInstancesForTest() {
+        sCarrierRoamingSatelliteSessionStats.clear();
+    }
+
     /** Log carrier roaming satellite session start */
     public void onSessionStart(
             int carrierId, Phone phone, int[] supportedServices, int serviceDataPolicy,
-            List<String> satelliteApps,
+            List<String> satelliteApps, int supportedConnectionMode, int sessionConnectionMode,
             @NonNull FeatureFlags featureFlags) {
         mPhone = phone;
         mContext = mPhone.getContext();
@@ -307,6 +318,8 @@ public class CarrierRoamingSatelliteSessionStats {
         onConnectionStart(mPhone);
         mDataUsageOnSessionStartBytes = getDataUsage();
         logd("current data consumed: " + mDataUsageOnSessionStartBytes);
+        mSupportedConnectionMode = supportedConnectionMode;
+        mSessionConnectionMode = sessionConnectionMode;
         mFeatureFlags = featureFlags;
         registerForSatelliteDataNetworkCallback();
         if (mFeatureFlags.satelliteDataMetrics()) {
@@ -485,19 +498,20 @@ public class CarrierRoamingSatelliteSessionStats {
         for (Map.Entry<String, Long> entry : map2.entrySet()) {
             String key = entry.getKey();
             Long currentDataUsageBytes = entry.getValue();
+            long dataUsageDuringSession;
 
-            // Check if the key from Map2 exists in Map1
+            // Check if the package exists in the session-start map
             if (mPerAppDataUsageOnSessionStartMap.containsKey(key)) {
-                Long initialDataUsageBytes =
-                        mPerAppDataUsageOnSessionStartMap.get(key);
-                // If available, find the difference (Map2 - Map1)
-                satelliteSessionUsageMap.put(key,
-                        currentDataUsageBytes
-                                - initialDataUsageBytes);
+                long initialDataUsageBytes = mPerAppDataUsageOnSessionStartMap.get(key);
+                dataUsageDuringSession = currentDataUsageBytes - initialDataUsageBytes;
             } else {
-                // If Map2 key is not found in Map1,
-                // add Map2 key and its corresponding value to the new map
-                satelliteSessionUsageMap.put(key, currentDataUsageBytes);
+                // If not in the start map, usage is the current value
+                dataUsageDuringSession = currentDataUsageBytes;
+            }
+
+            // Only store positive data usage values
+            if (dataUsageDuringSession > 0) {
+                satelliteSessionUsageMap.put(key, dataUsageDuringSession);
             }
         }
         return satelliteSessionUsageMap;
@@ -803,6 +817,8 @@ public class CarrierRoamingSatelliteSessionStats {
         SatelliteStats.CarrierRoamingSatelliteSessionParams params =
                 new SatelliteStats.CarrierRoamingSatelliteSessionParams.Builder()
                         .setCarrierId(mCarrierId)
+                        .setSupportedConnectionMode(mSupportedConnectionMode)
+                        .setSessionConnectionMode(mSessionConnectionMode)
                         .setIsNtnRoamingInHomeCountry(mIsNtnRoamingInHomeCountry)
                         .setTotalSatelliteModeTimeSec(totalSatelliteModeTimeSec)
                         .setNumberOfSatelliteConnections(numberOfSatelliteConnections)
@@ -847,6 +863,8 @@ public class CarrierRoamingSatelliteSessionStats {
 
     private void initializeParams() {
         mCarrierId = TelephonyManager.UNKNOWN_CARRIER_ID;
+        mSupportedConnectionMode = SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
+        mSessionConnectionMode = SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
         mIsNtnRoamingInHomeCountry = false;
         mCountOfIncomingSms = 0;
         mCountOfOutgoingSms = 0;

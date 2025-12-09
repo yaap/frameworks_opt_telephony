@@ -47,7 +47,7 @@ import java.util.stream.Collectors;
  *   <li>The device does not support
  * {@link android.telephony.TelephonyManager#CAPABILITY_SIM_PHONEBOOK_IN_MODEM}.</li>
  * </ol>
- * {@hide}
+ * @hide
  */
 @RequiresFeature(
         enforcement = "android.telephony.TelephonyManager#isRadioInterfaceCapabilitySupported",

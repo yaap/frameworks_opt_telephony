@@ -75,7 +75,6 @@ import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
 import com.android.internal.telephony.TelephonyTest;
 import com.android.internal.telephony.flags.FeatureFlags;
-import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.metrics.SatelliteStats;
 import com.android.internal.telephony.subscription.SubscriptionManagerService;
 
@@ -160,7 +159,6 @@ public class SatelliteSOSMessageRecommenderTest extends TelephonyTest {
                 .thenReturn(TEST_EMERGENCY_CALL_TO_SOS_MSG_HYSTERESIS_TIMEOUT_MILLIS);
         when(mResources.getString(R.string.config_oem_enabled_satellite_sos_handover_app))
                 .thenReturn(DEFAULT_SOS_HANDOVER_APP);
-        when(mFeatureFlags.carrierRoamingNbIotNtn()).thenReturn(true);
         mTestSatelliteController = new TestSatelliteController(mContext,
                 Looper.myLooper(), mFeatureFlags);
         mTestImsManager = new TestImsManager(
@@ -777,8 +775,6 @@ public class SatelliteSOSMessageRecommenderTest extends TelephonyTest {
 
     @Test
     public void testGetEmergencyCallToSatelliteHandoverType_SatelliteViaCarrierAndOemAvailable() {
-        mSetFlagsRule.enableFlags(Flags.FLAG_CARRIER_ROAMING_NB_IOT_NTN);
-
         mTestSatelliteController.setSatelliteConnectedViaCarrierWithinHysteresisTime(
             true, SUB_ID1);
         mTestSatelliteController.mIsDeviceProvisionedForTest = true;
@@ -786,14 +782,10 @@ public class SatelliteSOSMessageRecommenderTest extends TelephonyTest {
         assertEquals(EMERGENCY_CALL_TO_SATELLITE_HANDOVER_TYPE_T911,
                 mTestSOSMessageRecommender.getEmergencyCallToSatelliteHandoverType());
         verify(mMockSatelliteStats, never()).onSatelliteSosMessageRecommender(any());
-
-        mSetFlagsRule.disableFlags(Flags.FLAG_CARRIER_ROAMING_NB_IOT_NTN);
     }
 
     @Test
     public void testGetEmergencyCallToSatelliteHandoverType_OnlySatelliteViaCarrierAvailable() {
-        mSetFlagsRule.enableFlags(Flags.FLAG_CARRIER_ROAMING_NB_IOT_NTN);
-
         mTestSatelliteController.setSatelliteConnectedViaCarrierWithinHysteresisTime(
             true, SUB_ID1);
         mTestSatelliteController.mIsDeviceProvisionedForTest = false;
@@ -801,14 +793,10 @@ public class SatelliteSOSMessageRecommenderTest extends TelephonyTest {
         assertEquals(EMERGENCY_CALL_TO_SATELLITE_HANDOVER_TYPE_T911,
                 mTestSOSMessageRecommender.getEmergencyCallToSatelliteHandoverType());
         verify(mMockSatelliteStats, never()).onSatelliteSosMessageRecommender(any());
-
-        mSetFlagsRule.disableFlags(Flags.FLAG_CARRIER_ROAMING_NB_IOT_NTN);
     }
 
     @Test
     public void testGetEmergencyCallToSatelliteHandoverType_OnlySatelliteViaOemAvailable() {
-        mSetFlagsRule.enableFlags(Flags.FLAG_CARRIER_ROAMING_NB_IOT_NTN);
-
         mTestSatelliteController.setSatelliteConnectedViaCarrierWithinHysteresisTime(true, SUB_ID1);
         mTestSatelliteController.isSatelliteEmergencyMessagingSupportedViaCarrier = false;
         mTestSatelliteController.isOemEnabledSatelliteSupported = true;
@@ -817,14 +805,10 @@ public class SatelliteSOSMessageRecommenderTest extends TelephonyTest {
         assertEquals(EMERGENCY_CALL_TO_SATELLITE_HANDOVER_TYPE_SOS,
                 mTestSOSMessageRecommender.getEmergencyCallToSatelliteHandoverType());
         verify(mMockSatelliteStats, never()).onSatelliteSosMessageRecommender(any());
-
-        mSetFlagsRule.disableFlags(Flags.FLAG_CARRIER_ROAMING_NB_IOT_NTN);
     }
 
     @Test
     public void testGetEmergencyCallToSatelliteHandoverType_OemAndCarrierNotAvailable() {
-        mSetFlagsRule.enableFlags(Flags.FLAG_CARRIER_ROAMING_NB_IOT_NTN);
-
         mTestSatelliteController.setSatelliteConnectedViaCarrierWithinHysteresisTime(false, -1);
         mTestSatelliteController.mIsDeviceProvisionedForTest = true;
         mTestSOSMessageRecommender.onEmergencyCallStarted(mTestConnection, false);
@@ -837,8 +821,6 @@ public class SatelliteSOSMessageRecommenderTest extends TelephonyTest {
         assertEquals(EMERGENCY_CALL_TO_SATELLITE_HANDOVER_TYPE_SOS,
                 mTestSOSMessageRecommender.getEmergencyCallToSatelliteHandoverType());
         verify(mMockSatelliteStats, never()).onSatelliteSosMessageRecommender(any());
-
-        mSetFlagsRule.disableFlags(Flags.FLAG_CARRIER_ROAMING_NB_IOT_NTN);
     }
 
     private void testStopTrackingCallBeforeTimeout(

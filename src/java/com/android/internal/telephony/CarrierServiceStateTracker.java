@@ -54,7 +54,7 @@ import java.util.Map;
 /**
  * This contains Carrier specific logic based on the states/events
  * managed in ServiceStateTracker.
- * {@hide}
+ * @hide
  */
 public class CarrierServiceStateTracker extends Handler {
     private static final String LOG_TAG = "CSST";
@@ -716,10 +716,8 @@ public class CarrierServiceStateTracker extends Handler {
          */
         private Notification.Action createDoNotShowAgainAction(Context c) {
             Intent broadcastIntent = new Intent(ACTION_NEVER_ASK_AGAIN);
-            if (mFeatureFlags.immediatelyProcessDoNotShowAgainBroadcast()) {
-                // Ensure immediate delivery of the broadcast to the receiver!
-                broadcastIntent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
-            }
+            // Ensure immediate delivery of the broadcast to the receiver!
+            broadcastIntent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
             final PendingIntent pendingIntent = PendingIntent.getBroadcast(
                     c,
                     0,

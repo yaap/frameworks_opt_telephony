@@ -153,27 +153,6 @@ public class CarrierDisplayNameResolver {
     }
 
     /**
-     * Update the ef for CDMA eri text. The ef records from this source will be set all of the
-     * following situation are satisfied.
-     *
-     * 1. {@code eriText} is neither empty nor null.
-     * 2. Current network is CDMA or CdmaLte
-     * 3. ERI is allowed.
-     *
-     * @param eriText
-     */
-    public void updateEfForEri(String eriText) {
-        PersistableBundle config = getCarrierConfig();
-        int key = getSourcePriority(EF_SOURCE_ERI);
-        if (!TextUtils.isEmpty(eriText) && (mPhone.isPhoneTypeCdma() || mPhone.isPhoneTypeCdmaLte())
-                && config.getBoolean(CarrierConfigManager.KEY_ALLOW_ERI_BOOL)) {
-            mEf.put(key, new EriEfData(eriText));
-        } else {
-            mEf.remove(key);
-        }
-    }
-
-    /**
      * Update the ef for brandOverride. If {@code operatorName} is empty or null, the ef records
      * from this source will be removed.
      *

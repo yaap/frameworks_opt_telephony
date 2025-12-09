@@ -27,6 +27,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 import android.content.Context;
+import android.hardware.radio.network.DisplayNetworkType;
 import android.os.AsyncResult;
 import android.os.Handler;
 import android.os.IPowerManager;
@@ -2292,5 +2293,80 @@ public class NetworkTypeControllerTest extends TelephonyTest {
         mNetworkTypeController.sendMessage(3 /* EVENT_SERVICE_STATE_CHANGED */);
         processAllMessages();
         assertEquals("connected", getCurrentState().getName());
+    }
+
+    @Test
+    public void testModemOverrideFlow() throws Exception {
+        // Start in a known state: LTE with NR available (NSA), so 5G icon is shown.
+        doReturn(NetworkRegistrationInfo.NR_STATE_CONNECTED).when(mServiceState).getNrState();
+        mNetworkTypeController.sendMessage(3 /* EVENT_SERVICE_STATE_CHANGED */);
+        processAllMessages();
+        assertEquals("connected", getCurrentState().getName());
+        assertEquals(TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA,
+                mNetworkTypeController.getOverrideNetworkType());
+        assertEquals(TelephonyManager.NETWORK_TYPE_LTE,
+                mNetworkTypeController.getDataNetworkType());
+
+        // --- Test 1: Feature is disabled (default) ---
+        // Send a modem override event. It should be ignored.
+        mNetworkTypeController.sendMessage(14 /* EVENT_MODEM_DISPLAY_NETWORK_TYPE_OVERRIDE */,
+                new AsyncResult(null, DisplayNetworkType.NR_ADVANCED, null));
+        processAllMessages();
+
+        // Verify that the override type has NOT changed because the feature is off.
+        assertEquals(TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA,
+                mNetworkTypeController.getOverrideNetworkType());
+        assertEquals(TelephonyManager.NETWORK_TYPE_LTE,
+                mNetworkTypeController.getDataNetworkType());
+
+        // --- Test 2: Enable the feature via CarrierConfig ---
+        mBundle.putBoolean(CarrierConfigManager.KEY_USE_MODEM_DISPLAY_NETWORK_TYPE_BOOL, true);
+        sendCarrierConfigChanged();
+
+        // Verify that the override type is still the same, as no modem event has been sent yet.
+        assertEquals(TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA,
+                mNetworkTypeController.getOverrideNetworkType());
+
+        // --- Test 3: Modem sends an override for NR_ADVANCED ---
+        mNetworkTypeController.sendMessage(14 /* EVENT_MODEM_DISPLAY_NETWORK_TYPE_OVERRIDE */,
+                new AsyncResult(null, DisplayNetworkType.NR_ADVANCED, null));
+        processAllMessages();
+
+        // Verify that the modem's opinion now takes precedence.
+        assertEquals(TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED,
+                mNetworkTypeController.getOverrideNetworkType());
+        assertEquals(TelephonyManager.NETWORK_TYPE_NR, mNetworkTypeController.getDataNetworkType());
+        // The internal state of the state machine should remain unchanged.
+        assertEquals("connected", getCurrentState().getName());
+
+        // --- Test 4: Modem sends a non-advanced override, resetting the state ---
+        mNetworkTypeController.sendMessage(14 /* EVENT_MODEM_DISPLAY_NETWORK_TYPE_OVERRIDE */,
+                new AsyncResult(null, DisplayNetworkType.UNKNOWN, null));
+        processAllMessages();
+
+        // Verify that the override is cleared and the display types revert to the state machine's
+        // calculated values.
+        assertEquals(TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA,
+                mNetworkTypeController.getOverrideNetworkType());
+        assertEquals(TelephonyManager.NETWORK_TYPE_LTE,
+                mNetworkTypeController.getDataNetworkType());
+
+        // --- Test 5: Disable the feature after an override was active ---
+        // First, set the modem override again.
+        mNetworkTypeController.sendMessage(14 /* EVENT_MODEM_DISPLAY_NETWORK_TYPE_OVERRIDE */,
+                new AsyncResult(null, DisplayNetworkType.NR_ADVANCED, null));
+        processAllMessages();
+        assertEquals(TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED,
+                mNetworkTypeController.getOverrideNetworkType());
+
+        // Now, disable the feature via a carrier config change.
+        mBundle.putBoolean(CarrierConfigManager.KEY_USE_MODEM_DISPLAY_NETWORK_TYPE_BOOL, false);
+        sendCarrierConfigChanged();
+
+        // Verify that the modem override is immediately reverted upon the config change.
+        assertEquals(TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA,
+                mNetworkTypeController.getOverrideNetworkType());
+        assertEquals(TelephonyManager.NETWORK_TYPE_LTE,
+                mNetworkTypeController.getDataNetworkType());
     }
 }

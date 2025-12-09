@@ -106,6 +106,10 @@ public class UiccCardInfoTest extends TelephonyTest {
                 mPortList);
 
         UiccCardInfo sanitizedInfo = originalCardInfo.createSensitiveInfoSanitizedCopy(false);
+        List<UiccPortInfo> expectedPorts = new ArrayList<>();
+        for (UiccPortInfo portInfo : mPortList) {
+            expectedPorts.add(portInfo.createSensitiveInfoSanitizedCopy());
+        }
 
         UiccCardInfo expectedCardInfo = new UiccCardInfo(
                 true, // isEuicc
@@ -114,7 +118,7 @@ public class UiccCardInfoTest extends TelephonyTest {
                 1, // physicalSlotIndex
                 true, // isRemovable
                 false, // isMultipleEnabledProfilesSupported
-                List.of() // portList
+                expectedPorts // portList
         );
         assertEquals(expectedCardInfo, sanitizedInfo);
     }
