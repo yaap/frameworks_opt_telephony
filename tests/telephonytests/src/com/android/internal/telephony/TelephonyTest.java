@@ -83,6 +83,7 @@ import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyDisplayInfo;
 import android.telephony.TelephonyManager;
 import android.telephony.TelephonyRegistryManager;
+import android.telephony.data.TrafficDescriptor;
 import android.telephony.emergency.EmergencyNumber;
 import android.telephony.euicc.EuiccManager;
 import android.telephony.ims.ImsCallProfile;
@@ -105,10 +106,12 @@ import com.android.internal.telephony.data.DataProfileManager;
 import com.android.internal.telephony.data.DataRetryManager;
 import com.android.internal.telephony.data.DataServiceManager;
 import com.android.internal.telephony.data.DataSettingsManager;
+import com.android.internal.telephony.data.DataUtils;
 import com.android.internal.telephony.data.LinkBandwidthEstimator;
 import com.android.internal.telephony.data.PhoneSwitcher;
 import com.android.internal.telephony.domainselection.DomainSelectionResolver;
 import com.android.internal.telephony.emergency.EmergencyNumberTracker;
+import com.android.internal.telephony.emergency.EmergencyStateTracker;
 import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.imsphone.ImsExternalCallTracker;
 import com.android.internal.telephony.imsphone.ImsNrSaModeHandler;
@@ -268,6 +271,7 @@ public abstract class TelephonyTest {
     protected CellularNetworkSecuritySafetySource mSafetySource;
     protected CellularIdentifierDisclosureNotifier mIdentifierDisclosureNotifier;
     protected DomainSelectionResolver mDomainSelectionResolver;
+    protected EmergencyStateTracker mEmergencyStateTracker;
     protected NullCipherNotifier mNullCipherNotifier;
 
     // Initialized classes
@@ -502,7 +506,11 @@ public abstract class TelephonyTest {
         mIsimUiccRecords = Mockito.mock(IsimUiccRecords.class);
         mProxyController = Mockito.mock(ProxyController.class);
         mPhoneSwitcher = Mockito.mock(PhoneSwitcher.class);
-        mIActivityManagerSingleton = Mockito.mock(Singleton.class);
+        Field activityManagerSingletionField =
+                ActivityManager.class.getDeclaredField("IActivityManagerSingleton");
+        activityManagerSingletionField.setAccessible(true);
+        mIActivityManagerSingleton =
+                (Singleton<IActivityManager>) activityManagerSingletionField.get(null);
         mIActivityManager = Mockito.mock(IActivityManager.class);
         mIIntentSender = Mockito.mock(IIntentSender.class);
         mIBinder = Mockito.mock(IBinder.class);
@@ -557,14 +565,24 @@ public abstract class TelephonyTest {
         mSafetySource = Mockito.mock(CellularNetworkSecuritySafetySource.class);
         mIdentifierDisclosureNotifier = Mockito.mock(CellularIdentifierDisclosureNotifier.class);
         mDomainSelectionResolver = Mockito.mock(DomainSelectionResolver.class);
+        mEmergencyStateTracker = Mockito.mock(EmergencyStateTracker.class);
         mNullCipherNotifier = Mockito.mock(NullCipherNotifier.class);
 
-        lenient().doReturn(true).when(mFeatureFlags).dataServiceCheck();
-        lenient().doReturn(true).when(mFeatureFlags).dynamicModemShutdown();
         lenient().doReturn(true).when(mFeatureFlags).dataServiceNotifyImsDataNetwork();
         lenient().doReturn(true).when(mFeatureFlags).keepWfcOnApm();
-        lenient().doReturn(true).when(mFeatureFlags).allowMultiCountryMcc();
         lenient().doReturn(true).when(mFeatureFlags).deleteCdma();
+        lenient().doReturn(true).when(mFeatureFlags).macroBasedOpportunisticNetworks();
+        lenient().doReturn(true).when(mFeatureFlags).exposeOpptAutoDataSwitchPolicies();
+        lenient().doReturn(true).when(mFeatureFlags)
+                .enableTrafficDescriptorConnectionCapability();
+        lenient().doReturn(true).when(mFeatureFlags).supportPsimToEsimConversion();
+        lenient().doReturn(true).when(mFeatureFlags).getPhoneNumberTs43Api();
+        lenient().doReturn(true).when(mFeatureFlags).subscriptionPlanEnhancement();
+        lenient().doReturn(true).when(mFeatureFlags)
+                .removeTetheringConditionWhenEnablingIndications();
+        lenient().doReturn(true).when(mFeatureFlags).enableDataStallRecoveryRandomization();
+        lenient().doReturn(true).when(mFeatureFlags).adsRespectOwnersPreference();
+        lenient().doReturn(true).when(mFeatureFlags).allowNonStandaloneOpportunisticAdsPolicy();
 
         WorkerThread.reset();
         TelephonyManager.disableServiceHandleCaching();
@@ -907,6 +925,7 @@ public abstract class TelephonyTest {
                 .when(mDataConfigManager).getAnomalyImsReleaseRequestThreshold();
         lenient().doReturn(new DataConfigManager.EventFrequency(300000, 12))
                 .when(mDataConfigManager).getAnomalyNetworkUnwantedThreshold();
+        lenient().doReturn(true).when(mDataConfigManager).isApnMatchedRequired();
 
         // CellularNetworkValidator
         lenient().doReturn(SubscriptionManager.INVALID_PHONE_INDEX)
@@ -928,6 +947,8 @@ public abstract class TelephonyTest {
         lenient().doReturn(false).when(mDomainSelectionResolver).isDomainSelectionSupported();
         DomainSelectionResolver.setDomainSelectionResolver(mDomainSelectionResolver);
 
+        replaceInstance(EmergencyStateTracker.class, "INSTANCE", null, mEmergencyStateTracker);
+
         //Use reflection to mock singletons
         replaceInstance(CallManager.class, "INSTANCE", null, mCallManager);
         replaceInstance(TelephonyComponentFactory.class, "sInstance", null,
@@ -937,8 +958,6 @@ public abstract class TelephonyTest {
                 mSubscriptionManagerService);
         replaceInstance(ProxyController.class, "sProxyController", null, mProxyController);
         replaceInstance(PhoneSwitcher.class, "sPhoneSwitcher", null, mPhoneSwitcher);
-        replaceInstance(ActivityManager.class, "IActivityManagerSingleton", null,
-                mIActivityManagerSingleton);
         replaceInstance(SimulatedCommandsVerifier.class, "sInstance", null,
                 mSimulatedCommandsVerifier);
         replaceInstance(Singleton.class, "mInstance", mIActivityManagerSingleton,
@@ -1027,6 +1046,7 @@ public abstract class TelephonyTest {
         mTestableLoopers.clear();
         mTestableLoopers = null;
         mTestableLooper = null;
+        mEmergencyStateTracker = null;
         DomainSelectionResolver.setDomainSelectionResolver(null);
     }
 
@@ -1038,7 +1058,6 @@ public abstract class TelephonyTest {
         // Normally, these two should suffice. But we're having some flakiness due to restored
         // instances being mocks...
         restoreInstance(Singleton.class, "mInstance", mIActivityManagerSingleton);
-        restoreInstance(ActivityManager.class, "IActivityManagerSingleton", null);
 
         // Copy-paste from android.app.ActivityManager.IActivityManagerSingleton
         Singleton<IActivityManager> amSingleton = new Singleton<IActivityManager>() {
@@ -1053,7 +1072,6 @@ public abstract class TelephonyTest {
         // ...so we're setting correct values explicitly, to be sure and not let the flake propagate
         // to other tests.
         replaceInstance(Singleton.class, "mInstance", mIActivityManagerSingleton, null);
-        replaceInstance(ActivityManager.class, "IActivityManagerSingleton", null, amSingleton);
     }
 
     public static class FakeBlockedNumberContentProvider extends MockContentProvider {
@@ -1370,5 +1388,53 @@ public abstract class TelephonyTest {
         for (TestableLooper looper : mTestableLoopers) {
             looper.moveTimeForward(milliSeconds);
         }
+    }
+
+    /**
+     * Helper for subclasses to mock DataConfigManager default behavior.
+     * Maps NetworkCapability to ConnectionCapability (Simulates Default/Static logic).
+     */
+    protected int getTestConnectionCapability(int netCap) {
+        return switch (netCap) {
+            case NetworkCapabilities.NET_CAPABILITY_MMS ->
+                    TrafficDescriptor.CONNECTION_CAPABILITY_MMS;
+            case NetworkCapabilities.NET_CAPABILITY_SUPL ->
+                    TrafficDescriptor.CONNECTION_CAPABILITY_SUPL;
+            case NetworkCapabilities.NET_CAPABILITY_IMS ->
+                    TrafficDescriptor.CONNECTION_CAPABILITY_IMS;
+            case NetworkCapabilities.NET_CAPABILITY_INTERNET ->
+                    TrafficDescriptor.CONNECTION_CAPABILITY_INTERNET;
+            case NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_LATENCY ->
+                    TrafficDescriptor.CONNECTION_CAPABILITY_REAL_TIME_INTERACTIVE;
+            case NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH ->
+                    TrafficDescriptor.CONNECTION_CAPABILITY_DOWNLINK_STREAMING;
+            case DataUtils.NET_CAPABILITY_PRIORITIZE_UNIFIED_COMMUNICATIONS ->
+                    TrafficDescriptor.CONNECTION_CAPABILITY_UNIFIED_COMMUNICATIONS;
+            default -> TrafficDescriptor.CONNECTION_CAPABILITY_UNKNOWN;
+        };
+    }
+
+    /**
+     * Helper for subclasses to mock DataConfigManager default behavior.
+     * Maps ConnectionCapability to NetworkCapability.
+     */
+    protected int getTestNetworkCapability(int connCap) {
+        return switch (connCap) {
+            case TrafficDescriptor.CONNECTION_CAPABILITY_MMS ->
+                    NetworkCapabilities.NET_CAPABILITY_MMS;
+            case TrafficDescriptor.CONNECTION_CAPABILITY_SUPL ->
+                    NetworkCapabilities.NET_CAPABILITY_SUPL;
+            case TrafficDescriptor.CONNECTION_CAPABILITY_IMS ->
+                    NetworkCapabilities.NET_CAPABILITY_IMS;
+            case TrafficDescriptor.CONNECTION_CAPABILITY_INTERNET ->
+                    NetworkCapabilities.NET_CAPABILITY_INTERNET;
+            case TrafficDescriptor.CONNECTION_CAPABILITY_REAL_TIME_INTERACTIVE ->
+                    NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_LATENCY;
+            case TrafficDescriptor.CONNECTION_CAPABILITY_DOWNLINK_STREAMING ->
+                    NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH;
+            case TrafficDescriptor.CONNECTION_CAPABILITY_UNIFIED_COMMUNICATIONS ->
+                    DataUtils.NET_CAPABILITY_PRIORITIZE_UNIFIED_COMMUNICATIONS;
+            default -> -1; // Corresponds to no capability
+        };
     }
 }

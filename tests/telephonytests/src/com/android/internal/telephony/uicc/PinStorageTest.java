@@ -15,6 +15,13 @@
  */
 package com.android.internal.telephony.uicc;
 
+import static android.security.Flags.FLAG_AUTO_SIM_PIN_MANAGEMENT;
+import static android.security.keystore.KeyProperties.BLOCK_MODE_GCM;
+import static android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE;
+import static android.security.keystore.KeyProperties.KEY_ALGORITHM_AES;
+import static android.security.keystore.KeyProperties.PURPOSE_DECRYPT;
+import static android.security.keystore.KeyProperties.PURPOSE_ENCRYPT;
+
 import static com.android.internal.telephony.uicc.IccCardStatus.PinState.PINSTATE_ENABLED_VERIFIED;
 
 import static com.google.common.truth.Truth.assertThat;
@@ -30,8 +37,12 @@ import android.content.Intent;
 import android.os.Looper;
 import android.os.PersistableBundle;
 import android.os.WorkSource;
+import android.platform.test.annotations.RequiresFlagsEnabled;
+import android.platform.test.flag.junit.CheckFlagsRule;
+import android.platform.test.flag.junit.DeviceFlagsValueProvider;
 import android.preference.PreferenceManager;
 import android.provider.Settings;
+import android.security.keystore.KeyGenParameterSpec;
 import android.telephony.CarrierConfigManager;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
@@ -43,19 +54,46 @@ import androidx.test.InstrumentationRegistry;
 import com.android.internal.R;
 import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.telephony.TelephonyTest;
+import com.android.internal.telephony.nano.StoredPinProto;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import java.security.GeneralSecurityException;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.util.List;
+import java.util.Set;
+
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+
 @RunWith(AndroidTestingRunner.class)
 @TestableLooper.RunWithLooper
 public class PinStorageTest extends TelephonyTest {
+    @Rule
+    public final CheckFlagsRule mCheckFlagsRule = DeviceFlagsValueProvider.createCheckFlagsRule();
+
     private static final String ICCID_1 = "89010003006562472370";
     private static final String ICCID_2 = "89010003006562472399";
+    private static final String ICCID_3 = "8981100022152967705F";
+    private static final String PIN_1 = "1234";
+    private static final String PIN_2 = "2345";
+    private static final String PIN_3 = "3456";
+
+    private static final StoredPinProto.PlatformManagedPin PLATFORM_PIN_1 =
+            new StoredPinProto.PlatformManagedPin();
+    private static final StoredPinProto.PlatformManagedPin PLATFORM_PIN_2 =
+            new StoredPinProto.PlatformManagedPin();
+    private static final StoredPinProto.PlatformManagedPin PLATFORM_PIN_3 =
+            new StoredPinProto.PlatformManagedPin();
+
     private static final String ICCID_INVALID = "1234";
     private static final String PACKAGE_NAME = "com.package.name";
     private static final int UID = -1;
@@ -114,6 +152,13 @@ public class PinStorageTest extends TelephonyTest {
         // Simulate the device is not secure by default
         when(mKeyguardManager.isDeviceSecure()).thenReturn(false);
         when(mKeyguardManager.isDeviceLocked()).thenReturn(false);
+
+        PLATFORM_PIN_1.iccid = ICCID_1;
+        PLATFORM_PIN_1.pin = PIN_1;
+        PLATFORM_PIN_2.iccid = ICCID_2;
+        PLATFORM_PIN_2.pin = PIN_2;
+        PLATFORM_PIN_3.iccid = ICCID_3;
+        PLATFORM_PIN_3.pin = PIN_3;
 
         createPinStorageAndCaptureListener();
     }
@@ -426,5 +471,270 @@ public class PinStorageTest extends TelephonyTest {
         processAllMessages();
 
         assertThat(mPinStorage.getPin(0, ICCID_1)).isEqualTo("");
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void storePin_notPlatformManaged_indicatesCorrectly() {
+        mPinStorage.storePin("1234", 0);
+
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(false);
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void storePin_platformManaged_indicatesCorrectly() {
+        mPinStorage.storePlatformManagedPin(0, "1234", "0000");
+
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void storePin_simIsRemoved_stillPlatformManaged() throws Exception {
+        mPinStorage.storePlatformManagedPin(0, "1234", "0000");
+
+        // SIM is removed
+        final Intent intent = new Intent(TelephonyManager.ACTION_SIM_CARD_STATE_CHANGED);
+        intent.putExtra(PhoneConstants.PHONE_KEY, 0);
+        intent.putExtra(TelephonyManager.EXTRA_SIM_STATE, TelephonyManager.SIM_STATE_ABSENT);
+        mContext.sendBroadcast(intent);
+        processAllMessages();
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+
+        // Assert the state removed after preparing unattended reboot.
+        int result = mPinStorage.prepareUnattendedReboot(sWorkSource);
+        assertThat(result).isEqualTo(TelephonyManager.PREPARE_UNATTENDED_REBOOT_SUCCESS);
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+
+        // And after "rebooting".
+        simulateReboot();
+        processAllMessages();
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void storePin_platformManaged_doesNotChangeStateViaStorePin() throws Exception {
+        mPinStorage.storePlatformManagedPin(0, "1234", "0000");
+
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+        mPinStorage.storePin("1234", 0);
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+        simulateReboot();
+        processAllMessages();
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void storePin_platformManaged_doesNotChangeStateViaClearPin() throws Exception {
+        mPinStorage.storePlatformManagedPin(0, "1234", "0000");
+
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+        mPinStorage.clearPin(0);
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+        simulateReboot();
+        processAllMessages();
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void storePin_platformManaged_unenrollsCorrectly() throws Exception {
+        mPinStorage.storePlatformManagedPin(0, "1234", "0000");
+
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+        mPinStorage.clearPlatformManagedPin(0);
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(false);
+        simulateReboot();
+        processAllMessages();
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(false);
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void storePin_platformManaged_indicatesCorrectlyWhenDeviceLocked() throws Exception {
+        mPinStorage.storePlatformManagedPin(0, "1234", "0000");
+
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+
+        when(mKeyguardManager.isDeviceSecure()).thenReturn(true);
+        when(mKeyguardManager.isDeviceLocked()).thenReturn(true);
+        simulateReboot();
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void storePin_notPlatformManaged_cannotReadWhenDeviceLocked() throws Exception {
+        mPinStorage.storePin("1234", 0);
+
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(false);
+
+        when(mKeyguardManager.isDeviceSecure()).thenReturn(true);
+        when(mKeyguardManager.isDeviceLocked()).thenReturn(true);
+        simulateReboot();
+        assertThat(mPinStorage.getPin(0, ICCID_1)).isEqualTo("");
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void storePin_platformManaged_canReadOnlyOnceWhenDeviceLocked() throws Exception {
+        mPinStorage.storePlatformManagedPin(0, "1234", "0000");
+
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+        mPinStorage.handleMessage(mPinStorage.obtainMessage(7 /* DEVICE_UNLOCKED_EVENT */));
+
+        when(mKeyguardManager.isDeviceSecure()).thenReturn(true);
+        when(mKeyguardManager.isDeviceLocked()).thenReturn(true);
+        simulateReboot();
+        assertThat(mPinStorage.getPin(0, ICCID_1)).isEqualTo("1234");
+        assertThat(mPinStorage.getPin(0, ICCID_1)).isEqualTo("");
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void clearPin_platformManaged_indicatesCorrectly() throws Exception {
+        mPinStorage.storePlatformManagedPin(0, "1234", "0000");
+
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(true);
+        mPinStorage.clearPlatformManagedPin(0);
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(false);
+        assertThat(mPinStorage.getPin(0, ICCID_1)).isEqualTo("");
+        // Make sure the state remains correct after a reboot.
+        simulateReboot();
+        assertThat(mPinStorage.isPinPlatformManaged(ICCID_1)).isEqualTo(false);
+        assertThat(mPinStorage.getPin(0, ICCID_1)).isEqualTo("");
+        assertThat(mPinStorage.getOldPin(ICCID_1)).isEqualTo("");
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void storePin_platformManaged_canReadPins() {
+        mPinStorage.storePlatformManagedPin(0, "1234", "0000");
+
+        assertThat(mPinStorage.getPin(0, ICCID_1)).isEqualTo("1234");
+        assertThat(mPinStorage.getOldPin(ICCID_1)).isEqualTo("0000");
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void storePin_platformManaged_doesNotProvidePinForOtherIccid() {
+        mPinStorage.storePlatformManagedPin(0, "1234", "0000");
+
+        // Change to the second ICCID
+        doReturn(ICCID_2).when(mPhone).getFullIccSerialNumber();
+        assertThat(mPinStorage.getPin(0, ICCID_1)).isEqualTo("1234");
+        assertThat(mPinStorage.getPin(0, ICCID_2)).isEqualTo("");
+    }
+
+    private SecretKey createSecretKey(String alias)
+            throws InvalidAlgorithmParameterException, NoSuchAlgorithmException,
+            NoSuchProviderException {
+        final KeyGenerator keyGenerator =
+                KeyGenerator.getInstance(KEY_ALGORITHM_AES, "AndroidKeyStore");
+        KeyGenParameterSpec.Builder keyGenParameterSpec =
+                new KeyGenParameterSpec.Builder(alias, PURPOSE_ENCRYPT | PURPOSE_DECRYPT)
+                        .setBlockModes(BLOCK_MODE_GCM)
+                        .setEncryptionPaddings(ENCRYPTION_PADDING_NONE);
+
+        keyGenerator.init(keyGenParameterSpec.build());
+        return keyGenerator.generateKey();
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void testEncryptAndDecryptOfPlatformManagedPins_canDecrypt()
+            throws Exception {
+        String keyAlias = "encryption_test";
+        byte[] payload = "hello".getBytes();
+
+        SecretKey key = createSecretKey(keyAlias);
+
+        byte[] ciphertext = PinStorage.encryptPlatformManagedPins(key, payload);
+        StoredPinProto.EncryptedPlatformManagedPins platformPins =
+                StoredPinProto.EncryptedPlatformManagedPins.parseFrom(ciphertext);
+        assertThat(platformPins.encryptedPlatformPins.length).isGreaterThan(0);
+        assertThat(platformPins.iv.length).isGreaterThan(0);
+
+        byte[] plaintext = PinStorage.decryptPlatformManagedPins(key, ciphertext);
+        assertThat(plaintext).isEqualTo(payload);
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void testEncryptAndDecryptOfPlatformManagedPins_emptyOnDecryptionFailure()
+            throws GeneralSecurityException {
+
+        String keyAlias = "decryption_test";
+
+        SecretKey key = createSecretKey(keyAlias);
+
+        byte[] plaintext = PinStorage.decryptPlatformManagedPins(key, "invalid".getBytes());
+        assertThat(plaintext).isNull();
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void testSerializationOfIccIds() {
+        String iccid1 = "8981100022152967705F";
+        String iccid2 = "8981100022152961205F";
+        Set<String> iccids = Set.of(iccid1, iccid2);
+
+        String serialized = PinStorage.serializeIccidsSet(iccids);
+
+        Set<String> deserialized = PinStorage.deserializeIccids(serialized);
+        assertThat(deserialized).containsExactly(iccid1, iccid2);
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void testGetPlatformManagedPinsForBackup() {
+        mPinStorage.storePlatformManagedPin(0, "1234", "0000");
+        assertThat(mPinStorage.getPlatformManagedPinsForBackup()).isNotEmpty();
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void testMergingOfPlatformManagedPins() {
+        StoredPinProto.PlatformManagedPin platformPin2Modified =
+                new StoredPinProto.PlatformManagedPin();
+        platformPin2Modified.iccid = PLATFORM_PIN_2.iccid;
+        platformPin2Modified.pin = "7890";
+
+        StoredPinProto.PlatformManagedPins existingPins = new StoredPinProto.PlatformManagedPins();
+        existingPins.pins = new StoredPinProto.PlatformManagedPin[]{PLATFORM_PIN_1, PLATFORM_PIN_2};
+
+        StoredPinProto.PlatformManagedPins backupPins = new StoredPinProto.PlatformManagedPins();
+        backupPins.pins =
+                new StoredPinProto.PlatformManagedPin[]{platformPin2Modified, PLATFORM_PIN_3};
+
+        List<StoredPinProto.PlatformManagedPin> merged = PinStorage.mergeExistingAndBackupPins(
+                existingPins, backupPins);
+
+        assertThat(merged).containsExactly(PLATFORM_PIN_1, PLATFORM_PIN_2, PLATFORM_PIN_3);
+    }
+
+    @RequiresFlagsEnabled(FLAG_AUTO_SIM_PIN_MANAGEMENT)
+    @Test
+    public void testRestorePlatformManagedPinsFromBackup() {
+        mPinStorage.storePlatformManagedPin(0, PIN_1, "0000");
+
+        StoredPinProto.PlatformManagedPin platformPin1Modified =
+                new StoredPinProto.PlatformManagedPin();
+        platformPin1Modified.iccid = PLATFORM_PIN_1.iccid;
+        platformPin1Modified.pin = "7890";
+
+        StoredPinProto.PlatformManagedPins pinsToRestore = new StoredPinProto.PlatformManagedPins();
+        pinsToRestore.pins =
+                new StoredPinProto.PlatformManagedPin[]{platformPin1Modified, PLATFORM_PIN_2,
+                        PLATFORM_PIN_3};
+        byte[] blobToRestore = StoredPinProto.PlatformManagedPins.toByteArray(pinsToRestore);
+
+        mPinStorage.restorePlatformManagedPinsFromBackup(blobToRestore);
+        assertThat(mPinStorage.getPin(0, ICCID_1)).isEqualTo(PIN_1);
+        assertThat(mPinStorage.getPin(0, ICCID_2)).isEqualTo(PIN_2);
+        assertThat(mPinStorage.getPin(0, ICCID_3)).isEqualTo(PIN_3);
     }
 }

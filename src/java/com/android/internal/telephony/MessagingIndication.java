@@ -21,6 +21,7 @@ import static android.telephony.TelephonyManager.HAL_SERVICE_MESSAGING;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_CDMA_RUIM_SMS_STORAGE_FULL;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_CDMA_NEW_SMS;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_NEW_BROADCAST_SMS;
+import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_NEW_SECURE_SMS;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_NEW_SMS;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_NEW_SMS_ON_SIM;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_NEW_SMS_STATUS_REPORT;
@@ -28,8 +29,11 @@ import static com.android.internal.telephony.RILConstants.RIL_UNSOL_SIM_SMS_STOR
 
 import android.hardware.radio.messaging.IRadioMessagingIndication;
 import android.os.AsyncResult;
+import android.provider.DeviceConfig;
 import android.telephony.SmsMessage;
+import android.telephony.NetworkSecurityEvent;
 
+import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.uicc.IccUtils;
 
 /**
@@ -157,6 +161,34 @@ public class MessagingIndication extends IRadioMessagingIndication.Stub {
 
         if (mRil.mIccSmsFullRegistrant != null) {
             mRil.mIccSmsFullRegistrant.notifyRegistrant();
+        }
+    }
+
+    /**
+     * Indicates when new secure SMS is received.
+     * @param indicationType Type of radio indication
+     * @param pdu PDU of SMS-DELIVER represented as byte array.
+     * @param event The associated network security event. May be null.
+     */
+    public void newSecureSms(int indicationType, byte[] pdu,
+            android.hardware.radio.network.NetworkSecurityEvent event) {
+        if (!Flags.smsNetworkSecurityEvents()) {
+            if (mRil.isLogOrTrace()) {
+                mRil.riljLog("newSecureSms: secure sms feature is disabled.");
+            }
+            newSms(indicationType, pdu);
+            return;
+        }
+
+        mRil.processIndication(HAL_SERVICE_MESSAGING, indicationType);
+        if (mRil.isLogOrTrace()) mRil.unsljLog(RIL_UNSOL_RESPONSE_NEW_SECURE_SMS);
+
+        SmsMessageBase smsb =
+                com.android.internal.telephony.gsm.SmsMessage.createFromPdu(pdu,
+                        RILUtils.convertHalNetworkSecurityEvent(event));
+        if (mRil.mGsmSmsRegistrant != null) {
+            mRil.mGsmSmsRegistrant.notifyRegistrant(
+                    new AsyncResult(null, smsb == null ? null : new SmsMessage(smsb), null));
         }
     }
 

@@ -227,7 +227,7 @@ public abstract class Connection {
     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
     protected String mAddress;     // MAY BE NULL!!!
     // The VERSTAT number verification status; defaults to not verified.
-    protected @android.telecom.Connection.VerificationStatus int mNumberVerificationStatus =
+    protected @android.telecom.Annotation.VerificationStatus int mNumberVerificationStatus =
             android.telecom.Connection.VERIFICATION_STATUS_NOT_VERIFIED;
 
     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
@@ -681,9 +681,15 @@ public abstract class Connection {
 
         if (DomainSelectionResolver.getInstance().isDomainSelectionSupported()) {
             // Updates EmergencyNumber information for the emergency routing ECCs.
-            if (dialArgs != null && dialArgs.intentExtras != null
-                    && dialArgs.intentExtras.getBoolean(
-                            PhoneConstants.EXTRA_USE_EMERGENCY_ROUTING, false)) {
+            int emergencyRoutingUpdateCause =
+                    PhoneConstants.EMERGENCY_ROUTING_UPDATE_CAUSE_UNSPECIFIED;
+            if (dialArgs != null && dialArgs.intentExtras != null) {
+                emergencyRoutingUpdateCause = dialArgs.intentExtras.getInt(
+                        PhoneConstants.EXTRA_EMERGENCY_ROUTING_UPDATE_CAUSE,
+                        PhoneConstants.EMERGENCY_ROUTING_UPDATE_CAUSE_UNSPECIFIED);
+            }
+            if (emergencyRoutingUpdateCause
+                    != PhoneConstants.EMERGENCY_ROUTING_UPDATE_CAUSE_UNSPECIFIED) {
                 if (mEmergencyNumberInfo == null) {
                     Rlog.d(TAG, "setEmergencyCallInfo: create EmergencyNumber");
                     setNonDetectableEmergencyCallInfo(dialArgs.eccCategory,
@@ -716,7 +722,10 @@ public abstract class Connection {
                             mEmergencyNumberInfo.getMnc(),
                             eccCategory,
                             emergencyUrns,
-                            getEmergencyNumberSourceForEmergencyRouting(),
+                            emergencyRoutingUpdateCause == PhoneConstants
+                                    .EMERGENCY_ROUTING_UPDATE_CAUSE_ALTERNATE_SERVICE
+                                    ? getEmergencyNumberSourceForEmergencyRouting()
+                                    : mEmergencyNumberInfo.getEmergencyNumberSourceBitmask(),
                             EmergencyNumber.EMERGENCY_CALL_ROUTING_EMERGENCY);
                 }
             }
@@ -1625,7 +1634,7 @@ public abstract class Connection {
     /**
      * @return The number verification status; only applicable for IMS calls.
      */
-    public @android.telecom.Connection.VerificationStatus int getNumberVerificationStatus() {
+    public @android.telecom.Annotation.VerificationStatus int getNumberVerificationStatus() {
         return mNumberVerificationStatus;
     }
 
@@ -1634,7 +1643,7 @@ public abstract class Connection {
      * @param verificationStatus The new verification status
      */
     public void setNumberVerificationStatus(
-            @android.telecom.Connection.VerificationStatus int verificationStatus) {
+            @android.telecom.Annotation.VerificationStatus int verificationStatus) {
         mNumberVerificationStatus = verificationStatus;
     }
 

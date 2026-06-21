@@ -1019,7 +1019,7 @@ public class MultiSimSettingControllerTest extends TelephonyTest {
 
     @Test
     public void testDailogsAndWarnings_WithBootstrapSim() {
-        doReturn(true).when(mFeatureFlags).esimBootstrapProvisioningFlag();
+
 
         // Mark sub 2 as inactive.
         markSubscriptionInactive(2);

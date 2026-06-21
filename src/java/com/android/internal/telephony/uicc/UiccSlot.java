@@ -43,6 +43,7 @@ import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.IccCardConstants;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
+import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.uicc.IccCardStatus.CardState;
 import com.android.internal.telephony.uicc.IccSlotStatus.MultipleEnabledProfilesMode;
@@ -110,10 +111,14 @@ public class UiccSlot extends Handler {
     private static final int EVENT_CARD_REMOVED = 13;
     private static final int EVENT_CARD_ADDED = 14;
 
-    public UiccSlot(Context c, boolean isActive) {
+    @NonNull
+    private final FeatureFlags mFeatureFlags;
+
+    public UiccSlot(Context c, boolean isActive, @NonNull FeatureFlags flags) {
         if (DBG) log("Creating");
         mContext = c;
         mActive = isActive;
+        mFeatureFlags = flags;
         mSupportedMepMode = MultipleEnabledProfilesMode.NONE;
     }
 
@@ -122,6 +127,8 @@ public class UiccSlot extends Handler {
      */
     public void update(CommandsInterface ci, IccCardStatus ics, int phoneId, int slotIndex) {
         synchronized (mLock) {
+            int oldPhoneId = mPortIdxToPhoneId.getOrDefault(ics.mSlotPortMapping.mPortIndex,
+                    INVALID_PHONE_ID);
             mPortIdxToPhoneId.put(ics.mSlotPortMapping.mPortIndex, phoneId);
             CardState oldState = mCardState.get(ics.mSlotPortMapping.mPortIndex);
             mCardState.put(ics.mSlotPortMapping.mPortIndex, ics.mCardState);
@@ -137,16 +144,27 @@ public class UiccSlot extends Handler {
             if (DBG) {
                 log(phoneId,
                         "update: radioState=" + radioState + " mLastRadioState=" + mLastRadioState
-                                + " on slotIndex=" + slotIndex);
+                                + " on physicalSlotIndex=" + slotIndex
+                                + " portIndex=" + ics.mSlotPortMapping.mPortIndex
+                                + " oldPhoneId=" + oldPhoneId + " phoneId=" + phoneId
+                                + " slotPortSwitchFailureFix="
+                                + mFeatureFlags.slotPortSwitchFailureFix());
             }
 
             if (absentStateUpdateNeeded(oldState, ics.mSlotPortMapping.mPortIndex)) {
                 updateCardStateAbsent(ci.getRadioState(), phoneId,
                         ics.mSlotPortMapping.mPortIndex);
-            // Because mUiccCard may be updated in both IccCardStatus and IccSlotStatus, we need to
-            // create a new UiccCard instance in two scenarios:
-            //   1. mCardState is changing from ABSENT to non ABSENT.
-            //   2. The latest mCardState is not ABSENT, but there is no UiccCard instance.
+            } else if (mFeatureFlags.slotPortSwitchFailureFix()
+                    && oldPhoneId != INVALID_PHONE_ID && oldPhoneId != phoneId) {
+                log("update IccSlotStatus: phoneId is remapped for the port but"
+                        + " CARDSTATE_ABSENT is not received. Handle port disposal to"
+                        + " avoid stale phoneId and port mapping");
+                updateCardStateAbsent(ci.getRadioState(), oldPhoneId,
+                        ics.mSlotPortMapping.mPortIndex);
+                // Because mUiccCard may be updated in both IccCardStatus and IccSlotStatus, we
+                // need to create a new UiccCard instance in two scenarios:
+                //   1. mCardState is changing from ABSENT to non ABSENT.
+                //   2. The latest mCardState is not ABSENT, but there is no UiccCard instance.
             } else if ((oldState == null || oldState == CardState.CARDSTATE_ABSENT
                     || mUiccCard == null) && mCardState.get(ics.mSlotPortMapping.mPortIndex)
                     != CardState.CARDSTATE_ABSENT) {
@@ -211,13 +229,17 @@ public class UiccSlot extends Handler {
 
             for (int i = 0; i < simPortInfos.length; i++) {
                 int phoneId = iss.mSimPortInfos[i].mLogicalSlotIndex;
+                int oldPhoneId = mPortIdxToPhoneId.getOrDefault(i, INVALID_PHONE_ID);
                 CardState oldState = mCardState.get(i);
                 mCardState.put(i, iss.cardState);
                 mIccIds.put(i, simPortInfos[i].mIccId);
                 if (DBG) {
                     log(phoneId, "update: oldCardState=" + oldState + " CardState=" + iss.cardState
                             + " on slotIndex=" + slotIndex + " isPortActive="
-                            + iss.mSimPortInfos[i].mPortActive);
+                            + iss.mSimPortInfos[i].mPortActive + " oldPhoneId=" + oldPhoneId
+                            + " phoneId=" + phoneId
+                            + " slotPortSwitchFailureFix="
+                            + mFeatureFlags.slotPortSwitchFailureFix());
                 }
                 if (!iss.mSimPortInfos[i].mPortActive) {
                     // TODO: (b/79432584) evaluate whether should broadcast card state change
@@ -236,6 +258,15 @@ public class UiccSlot extends Handler {
                                 ci[phoneId].getRadioState() :
                                 TelephonyManager.RADIO_POWER_UNAVAILABLE;
                         updateCardStateAbsent(radioState, phoneId, i);
+                    } else if (mFeatureFlags.slotPortSwitchFailureFix()
+                            && oldPhoneId != INVALID_PHONE_ID && oldPhoneId != phoneId) {
+                        log("update IccSlotStatus: phoneId is remapped for the port but"
+                                + " CARDSTATE_ABSENT is not received. Handle port disposal to"
+                                + " avoid stale phoneId and port mapping");
+                        int radioState = SubscriptionManager.isValidPhoneId(oldPhoneId)
+                                ? ci[oldPhoneId].getRadioState()
+                                : TelephonyManager.RADIO_POWER_UNAVAILABLE;
+                        updateCardStateAbsent(radioState, oldPhoneId, i);
                     }
                     // TODO: (b/79432584) Create UiccCard or EuiccCard object here.
                     // Right now It's OK not creating it because Card status update will do it.

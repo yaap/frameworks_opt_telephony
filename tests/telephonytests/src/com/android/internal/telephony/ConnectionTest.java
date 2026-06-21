@@ -227,7 +227,8 @@ public class ConnectionTest extends TelephonyTest {
         assertEquals(getTestEmergencyNumber(), connection.getEmergencyNumberInfo());
 
         Bundle extras = new Bundle();
-        extras.putBoolean(PhoneConstants.EXTRA_USE_EMERGENCY_ROUTING, true);
+        extras.putInt(PhoneConstants.EXTRA_EMERGENCY_ROUTING_UPDATE_CAUSE,
+                PhoneConstants.EMERGENCY_ROUTING_UPDATE_CAUSE_ALTERNATE_SERVICE);
         extras.putInt(PhoneConstants.EXTRA_EMERGENCY_SERVICE_CATEGORY,
                 EmergencyNumber.EMERGENCY_SERVICE_CATEGORY_POLICE);
         dialArgs = new DialArgs.Builder().setIntentExtras(extras).build();

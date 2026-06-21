@@ -26,6 +26,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -49,6 +50,8 @@ import com.android.ims.internal.IImsConfig;
 import com.android.ims.internal.IImsMMTelFeature;
 import com.android.ims.internal.IImsServiceController;
 
+import com.google.common.util.concurrent.MoreExecutors;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -56,6 +59,7 @@ import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 
 import java.util.HashSet;
+import java.util.concurrent.ExecutorService;
 
 @RunWith(AndroidJUnit4.class)
 public class ImsServiceControllerCompatTest extends ImsTestBase {
@@ -107,9 +111,10 @@ public class ImsServiceControllerCompatTest extends ImsTestBase {
         // Can't mock MmTelFeatureCompatAdapter due to final getBinder() method.
         mMmTelCompatAdapterSpy = spy(new MmTelFeatureCompatAdapter(mMockContext, SLOT_0,
                 mMockMmTelInterfaceAdapter));
+        ExecutorService syncExecutor = MoreExecutors.newDirectExecutorService();
         mTestImsServiceController = new ImsServiceControllerCompat(mMockContext, mTestComponentName,
                  mMockCallbacks, mHandler, REBIND_RETRY, mRepo,
-                (a, b, c) -> mMmTelCompatAdapterSpy);
+                (a, b, c) -> mMmTelCompatAdapterSpy, syncExecutor);
         when(mMockContext.bindServiceAsUser(any(), any(), anyInt(), any())).thenReturn(true);
         when(mMockServiceControllerBinder.createMMTelFeature(anyInt()))
                 .thenReturn(mMockRemoteMMTelFeature);
@@ -140,10 +145,8 @@ public class ImsServiceControllerCompatTest extends ImsTestBase {
         SparseIntArray slotIdToSubIdMap = new SparseIntArray();
         slotIdToSubIdMap.put(SLOT_0, SUB_1);
         ServiceConnection conn = bindAndConnectService(slotIdToSubIdMap);
-        long delay = mTestImsServiceController.getRebindDelay();
-        waitForHandlerActionDelayed(mHandler, delay, 2 * delay);
         // add the MMTelFeature
-        verify(mMockServiceControllerBinder).createMMTelFeature(SLOT_0);
+        verify(mMockServiceControllerBinder, timeout(2000)).createMMTelFeature(SLOT_0);
         verify(mMockServiceControllerBinder).addFeatureStatusCallback(eq(SLOT_0),
                 eq(ImsFeature.FEATURE_MMTEL), any());
         verify(mMockCallbacks).imsServiceFeatureCreated(eq(SLOT_0), eq(SUB_1),
@@ -151,8 +154,7 @@ public class ImsServiceControllerCompatTest extends ImsTestBase {
         validateMmTelFeatureContainerExists(SLOT_0);
         // Remove the feature
         conn.onBindingDied(mTestComponentName);
-        delay = REBIND_RETRY.getStartDelay();
-        waitForHandlerActionDelayed(mHandler, delay, 2 * delay);
+        waitForHandlerAction(mHandler, REBIND_RETRY.getStartDelay() * 2L);
         verify(mMmTelCompatAdapterSpy).onFeatureRemoved();
         verify(mMockServiceControllerBinder).removeImsFeature(eq(SLOT_0),
                 eq(ImsFeature.FEATURE_MMTEL));

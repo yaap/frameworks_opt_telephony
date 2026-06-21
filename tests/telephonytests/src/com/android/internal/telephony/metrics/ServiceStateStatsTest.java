@@ -58,6 +58,7 @@ import com.android.internal.telephony.TelephonyTest;
 import com.android.internal.telephony.data.DataNetwork;
 import com.android.internal.telephony.nano.PersistAtomsProto.CellularDataServiceSwitch;
 import com.android.internal.telephony.nano.PersistAtomsProto.CellularServiceState;
+import com.android.internal.telephony.satellite.SatelliteConstants;
 import com.android.internal.telephony.uicc.IccCardStatus.CardState;
 import com.android.internal.telephony.uicc.UiccSlot;
 
@@ -1388,6 +1389,40 @@ public class ServiceStateStatsTest extends TelephonyTest {
                 .addCellularServiceStateAndCellularDataServiceSwitch(captor.capture(), eq(null));
         state = captor.getValue();
         assertTrue(state.isNbIotNtn);
+    }
+
+    @Test
+    public void testSatellitePlmn() {
+
+        when(mSatelliteController.isInSatelliteModeForCarrierRoaming(any())).thenReturn(true);
+        when(mSatelliteController.isInCarrierRoamingNbIotNtn(any())).thenReturn(true);
+        when(mSatelliteController.getSatellitePlmnForMetrics(any())).thenReturn("");
+        mServiceStateStats.onServiceStateChanged(mServiceState);
+        mServiceStateStats.incTimeMillis(100L);
+        mServiceStateStats.conclude();
+
+        ArgumentCaptor<CellularServiceState> captor =
+                ArgumentCaptor.forClass(CellularServiceState.class);
+        verify(mPersistAtomsStorage)
+                .addCellularServiceStateAndCellularDataServiceSwitch(captor.capture(), eq(null));
+        CellularServiceState state = captor.getValue();
+        assertEquals("", state.plmn);
+
+        reset(mPersistAtomsStorage);
+        reset(mServiceState);
+
+        when(mSatelliteController.isInSatelliteModeForCarrierRoaming(any())).thenReturn(true);
+        when(mSatelliteController.isInCarrierRoamingNbIotNtn(any())).thenReturn(true);
+        when(mSatelliteController.getSatellitePlmnForMetrics(any()))
+                .thenReturn(SatelliteConstants.DEFAULT_PLMN);
+        mServiceStateStats.onServiceStateChanged(mServiceState);
+        mServiceStateStats.incTimeMillis(100L);
+        mServiceStateStats.conclude();
+
+        verify(mPersistAtomsStorage)
+                .addCellularServiceStateAndCellularDataServiceSwitch(captor.capture(), eq(null));
+        state = captor.getValue();
+        assertEquals(SatelliteConstants.DEFAULT_PLMN, state.plmn);
     }
 
     private void mockWwanPsRat(@NetworkType int rat) {

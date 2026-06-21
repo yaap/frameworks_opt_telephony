@@ -68,6 +68,8 @@ public class SubscriptionInfoTest {
                     SubscriptionManager.SERVICE_CAPABILITY_DATA_BITMASK))
                 .setTransferStatus(1)
                 .setSatelliteESOSSupported(true)
+                .setStreamingAppMaxDownlinkKbps(100000)
+                .setStreamingAppMaxUplinkKbps(1000)
                 .build();
     }
 
@@ -93,6 +95,8 @@ public class SubscriptionInfoTest {
         if (Flags.supportPsimToEsimConversion()) {
             assertThat(mSubscriptionInfoUT.getTransferStatus()).isEqualTo(1);
         }
+        assertThat(mSubscriptionInfoUT.getStreamingAppMaxDownlinkKbps()).isEqualTo(100000);
+        assertThat(mSubscriptionInfoUT.getStreamingAppMaxUplinkKbps()).isEqualTo(1000);
     }
 
     @Test

@@ -104,9 +104,9 @@ import com.android.internal.telephony.metrics.ServiceStateStats;
 import com.android.internal.telephony.satellite.SatelliteController;
 import com.android.internal.telephony.subscription.SubscriptionInfoInternal;
 import com.android.internal.telephony.uicc.IccCardApplicationStatus;
+import com.android.internal.telephony.uicc.IccCardStatus;
 import com.android.internal.telephony.uicc.IccRecords;
 
-import java.util.Set;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Ignore;
@@ -121,6 +121,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
@@ -234,6 +235,10 @@ public class ServiceStateTrackerTest extends TelephonyTest {
                 mSatelliteController);
         doReturn(new ArrayList<>()).when(mSatelliteController).getSatellitePlmnsForCarrier(
                 anyInt());
+        doReturn(new Pair<>(false, null)).when(mSatelliteController)
+                .isUsingNonTerrestrialNetworkViaCarrier();
+        doReturn(false).when(mSatelliteController)
+                .isUsingNonTerrestrialNetworkViaCarrier(anyInt());
 
         mContextFixture.putResource(R.string.kg_text_message_separator, " \u2014 ");
 
@@ -816,6 +821,25 @@ public class ServiceStateTrackerTest extends TelephonyTest {
                 mSimulatedCommands.getGetVoiceRegistrationStateCallCount());
         assertEquals(getNetworkSelectionModeCallCount + 2,
                 mSimulatedCommands.getGetNetworkSelectionModeCallCount());
+    }
+
+    @Test
+    public void testInitialPollState() {
+        final int getOperatorCallCount = mSimulatedCommands.getGetOperatorCallCount();
+        final int getDataRegistrationStateCallCount =
+                mSimulatedCommands.getGetDataRegistrationStateCallCount();
+        final int getVoiceRegistrationStateCallCount =
+                mSimulatedCommands.getGetVoiceRegistrationStateCallCount();
+
+        sst.requestInitialPollState();
+        processAllMessages();
+
+        // Verify that pollStateInternal(true) was triggered
+        assertEquals(getOperatorCallCount + 1, mSimulatedCommands.getGetOperatorCallCount());
+        assertEquals(getDataRegistrationStateCallCount + 1,
+                mSimulatedCommands.getGetDataRegistrationStateCallCount());
+        assertEquals(getVoiceRegistrationStateCallCount + 1,
+                mSimulatedCommands.getGetVoiceRegistrationStateCallCount());
     }
 
     @Ignore
@@ -2940,6 +2964,42 @@ public class ServiceStateTrackerTest extends TelephonyTest {
     }
 
     @Test
+    public void testUpdateSpnDisplay_hybridMode_autoConnected_showSatelliteName() {
+        doReturn(true).when(mFeatureFlags).vzwAstSkyloFallback();
+
+        // Set connect type to HYBRID
+        mBundle.putInt(
+                CarrierConfigManager.KEY_CARRIER_ROAMING_NTN_CONNECT_TYPE_INT,
+                CarrierConfigManager.CARRIER_ROAMING_NTN_CONNECT_HYBRID);
+        // mBundle.putString(CarrierConfigManager.KEY_SATELLITE_DISPLAY_NAME_STRING,
+        //         SATELLITE_DISPLAY_NAME);
+        mBundle.putBoolean(
+                CarrierConfigManager.KEY_ENABLE_CARRIER_DISPLAY_NAME_RESOLVER_BOOL, false);
+        sendCarrierConfigUpdate(PHONE_ID);
+
+        // In Service
+        ServiceState ss = new ServiceState();
+        ss.setVoiceRegState(ServiceState.STATE_IN_SERVICE);
+        ss.setDataRegState(ServiceState.STATE_IN_SERVICE);
+        sst.mSS = ss;
+
+        // Mock auto satellite is connected
+        doReturn(true).when(mSatelliteController)
+                .isUsingNonTerrestrialNetworkViaCarrier(anyInt());
+        doReturn(false).when(mSatelliteController).isInCarrierRoamingNbIotNtn(any());
+
+        // update the spn
+        sst.updateCarrierDisplayName();
+        processAllMessages();
+
+        // PLMN should be the satellite display name
+        Bundle b = getExtrasFromLastSpnUpdateIntent();
+        assertThat(b.getString(TelephonyManager.EXTRA_PLMN)).isEqualTo(SATELLITE_DISPLAY_NAME);
+        assertThat(b.getBoolean(TelephonyManager.EXTRA_SHOW_PLMN)).isTrue();
+        assertThat(b.getBoolean(TelephonyManager.EXTRA_SHOW_SPN)).isFalse();
+    }
+
+    @Test
     public void testShouldForceDisplayNoService_forceBasedOnLocale() {
         // set up unaffected locale (US) and clear the resource
         doReturn("us").when(mLocaleTracker).getLastKnownCountryIso();
@@ -3040,6 +3100,100 @@ public class ServiceStateTrackerTest extends TelephonyTest {
         assertThat(b.getString(TelephonyManager.EXTRA_PLMN))
                 .isEqualTo(CARRIER_NAME_DISPLAY_NO_SERVICE);
         assertThat(b.getBoolean(TelephonyManager.EXTRA_SHOW_PLMN)).isTrue();
+    }
+
+    @Test
+    public void testShowOperatorName_configUpdateFalse() throws Exception {
+        doReturn(mUiccCard).when(mUiccController).getUiccCard(anyInt());
+        doReturn(IccCardStatus.CardState.CARDSTATE_PRESENT).when(mUiccCard).getCardState();
+        doReturn(true).when(mSimRecords).getRecordsLoaded();
+        doReturn(false).when(mFeatureFlags).updateCarrierNameAfterSimReady();
+
+        // config_update_operator_name_after_carrier_config_loaded is false.
+        // showOperatorName() should be true regardless of carrier config loaded state.
+        mContextFixture.putBooleanResource(
+                com.android.internal.R.bool.config_update_operator_name_after_carrier_config_loaded,
+                false);
+        mBundle.putBoolean(CarrierConfigManager.KEY_CARRIER_CONFIG_APPLIED_BOOL, false);
+        sendCarrierConfigUpdate(PHONE_ID);
+
+        assertTrue(sst.showOperatorName());
+    }
+
+    @Test
+    public void testShowOperatorName_configUpdateTrue_notApplied() throws Exception {
+        doReturn(mUiccCard).when(mUiccController).getUiccCard(anyInt());
+        doReturn(IccCardStatus.CardState.CARDSTATE_PRESENT).when(mUiccCard).getCardState();
+        doReturn(true).when(mSimRecords).getRecordsLoaded();
+        doReturn(false).when(mFeatureFlags).updateCarrierNameAfterSimReady();
+
+        // config_update_operator_name_after_carrier_config_loaded is true, and
+        // carrier config is not applied. showOperatorName() should be false.
+        mContextFixture.putBooleanResource(
+                com.android.internal.R.bool.config_update_operator_name_after_carrier_config_loaded,
+                true);
+        mBundle.putBoolean(CarrierConfigManager.KEY_CARRIER_CONFIG_APPLIED_BOOL, false);
+        sendCarrierConfigUpdate(PHONE_ID);
+        assertFalse(sst.showOperatorName());
+    }
+
+    @Test
+    public void testShowOperatorName_flagEnabled() throws Exception {
+        doReturn(mUiccCard).when(mUiccController).getUiccCard(anyInt());
+        doReturn(IccCardStatus.CardState.CARDSTATE_PRESENT).when(mUiccCard).getCardState();
+        doReturn(true).when(mSimRecords).getRecordsLoaded();
+        doReturn(true).when(mFeatureFlags).updateCarrierNameAfterSimReady();
+        mContextFixture.putBooleanResource(
+                com.android.internal.R.bool.config_update_operator_name_after_carrier_config_loaded,
+                true);
+        mBundle.putBoolean(CarrierConfigManager.KEY_CARRIER_CONFIG_APPLIED_BOOL, true);
+        sendCarrierConfigUpdate(PHONE_ID);
+        // Poll the network state to update mIsSimReadyForDisplay.
+        mSimulatedCommands.notifyNetworkStateChanged();
+        processAllMessages();
+        assertTrue(sst.showOperatorName());
+    }
+
+    @Test
+    public void testShowOperatorName_simAbsent() throws Exception {
+        doReturn(mUiccCard).when(mUiccController).getUiccCard(anyInt());
+        doReturn(IccCardStatus.CardState.CARDSTATE_ABSENT).when(mUiccCard).getCardState();
+        doReturn(true).when(mSimRecords).getRecordsLoaded();
+        doReturn(true).when(mFeatureFlags).updateCarrierNameAfterSimReady();
+        mContextFixture.putBooleanResource(
+                com.android.internal.R.bool.config_update_operator_name_after_carrier_config_loaded,
+                true);
+        mBundle.putBoolean(CarrierConfigManager.KEY_CARRIER_CONFIG_APPLIED_BOOL, true);
+        sendCarrierConfigUpdate(PHONE_ID);
+
+        // Poll the network state to update mIsSimReadyForDisplay.
+        mSimulatedCommands.notifyNetworkStateChanged();
+        processAllMessages();
+        assertFalse(sst.showOperatorName());
+    }
+
+    @Test
+    public void testShowOperatorName_simPresentAfterAbsent() throws Exception {
+        doReturn(mUiccCard).when(mUiccController).getUiccCard(anyInt());
+        doReturn(true).when(mSimRecords).getRecordsLoaded();
+        doReturn(true).when(mFeatureFlags).updateCarrierNameAfterSimReady();
+        mContextFixture.putBooleanResource(
+                com.android.internal.R.bool.config_update_operator_name_after_carrier_config_loaded,
+                true);
+        mBundle.putBoolean(CarrierConfigManager.KEY_CARRIER_CONFIG_APPLIED_BOOL, true);
+        sendCarrierConfigUpdate(PHONE_ID);
+
+        // SIM is absent.
+        doReturn(IccCardStatus.CardState.CARDSTATE_ABSENT).when(mUiccCard).getCardState();
+        mSimulatedCommands.notifyNetworkStateChanged();
+        processAllMessages();
+        assertFalse(sst.showOperatorName());
+
+        // SIM is present again.
+        doReturn(IccCardStatus.CardState.CARDSTATE_PRESENT).when(mUiccCard).getCardState();
+        mSimulatedCommands.notifyNetworkStateChanged();
+        processAllMessages();
+        assertTrue(sst.showOperatorName());
     }
 
     private Bundle getExtrasFromLastSpnUpdateIntent() {
@@ -3230,6 +3384,8 @@ public class ServiceStateTrackerTest extends TelephonyTest {
                 new CellIdentityGsm(0, 1, 900, 5, "101", "23", "test", "tst",
                         Collections.emptyList());
         doReturn(Set.of("10123")).when(mSatelliteController).getAllPlmnSet();
+        doReturn(true).when(mSatelliteController)
+                .isDtcSatelliteTechnologySupported(sst.mSubId, "10123");
         doReturn(satelliteSupportedServiceList).when(mSatelliteController)
                 .getSupportedSatelliteServicesForPlmn(sst.mSubId, "10123");
 
@@ -3276,7 +3432,73 @@ public class ServiceStateTrackerTest extends TelephonyTest {
     }
 
     @Test
-    public void testSatelliteModemStateCallback() throws Exception {
+    public void testSatelliteModemStateCallback_ManualMode_ManualConnect() throws Exception {
+        ArgumentCaptor<ISatelliteModemStateCallback> captor =
+                ArgumentCaptor.forClass(ISatelliteModemStateCallback.class);
+        verify(mSatelliteController, times(1))
+                .registerForSatelliteModemStateChanged(captor.capture());
+        ISatelliteModemStateCallback callback = captor.getValue();
+
+        doReturn(1).when(mSatelliteController).getSelectedSatelliteSubId();
+        doReturn(1).when(mPhone).getSubId();
+
+        mSimulatedCommands.setVoiceRegState(
+                NetworkRegistrationInfo.REGISTRATION_STATE_NOT_REGISTERED_OR_SEARCHING);
+        mSimulatedCommands.setVoiceRadioTech(ServiceState.RIL_RADIO_TECHNOLOGY_UNKNOWN);
+        mSimulatedCommands.setDataRegState(
+                NetworkRegistrationInfo.REGISTRATION_STATE_NOT_REGISTERED_OR_SEARCHING);
+        mSimulatedCommands.setDataRadioTech(ServiceState.RIL_RADIO_TECHNOLOGY_UNKNOWN);
+        doReturn(ServiceState.STATE_OUT_OF_SERVICE).when(mServiceState).getState();
+        doReturn(ServiceState.STATE_OUT_OF_SERVICE).when(mServiceState).getDataRegistrationState();
+        sst.mSS = mServiceState;
+
+        mBundle.putBoolean(
+                CarrierConfigManager.KEY_ENABLE_CARRIER_DISPLAY_NAME_RESOLVER_BOOL, false);
+        mBundle.putInt(
+                CarrierConfigManager.KEY_CARRIER_ROAMING_NTN_CONNECT_TYPE_INT,
+                CarrierConfigManager.CARRIER_ROAMING_NTN_CONNECT_MANUAL);
+        sendCarrierConfigUpdate(PHONE_ID);
+
+        doReturn(true).when(mSatelliteController).isInConnectedState();
+        callback.onSatelliteModemStateChanged(SatelliteManager.SATELLITE_MODEM_STATE_CONNECTED);
+        processAllMessages();
+
+        // update the spn
+        sst.updateCarrierDisplayName();
+
+        Bundle b = getExtrasFromLastSpnUpdateIntent();
+        assertThat(b.getString(TelephonyManager.EXTRA_PLMN)).isEqualTo(SATELLITE_DISPLAY_NAME);
+        assertThat(b.getBoolean(TelephonyManager.EXTRA_SHOW_PLMN)).isTrue();
+
+        // Override operator name to "Satellite" when registration state is IN_SERVICE.
+        mSimulatedCommands.setVoiceRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
+        mSimulatedCommands.setVoiceRadioTech(ServiceState.RIL_RADIO_TECHNOLOGY_LTE);
+        mSimulatedCommands.setDataRegState(NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING);
+        mSimulatedCommands.setDataRadioTech(ServiceState.RIL_RADIO_TECHNOLOGY_LTE);
+        doReturn(ServiceState.STATE_IN_SERVICE).when(mServiceState).getState();
+        doReturn(ServiceState.STATE_IN_SERVICE).when(mServiceState).getDataRegistrationState();
+        doReturn("Skylo Technologies").when(mServiceState).getOperatorAlpha();
+
+        mBundle.putBoolean(
+                CarrierConfigManager.KEY_ENABLE_CARRIER_DISPLAY_NAME_RESOLVER_BOOL, false);
+        mBundle.putBoolean(CarrierConfigManager.KEY_CARRIER_NAME_OVERRIDE_BOOL, true);
+        mBundle.putString(CarrierConfigManager.KEY_CARRIER_NAME_STRING, "");
+        sendCarrierConfigUpdate(PHONE_ID);
+
+        callback.onSatelliteModemStateChanged(
+                SatelliteManager.SATELLITE_MODEM_STATE_DATAGRAM_TRANSFERRING);
+        processAllMessages();
+
+        // update the spn
+        sst.updateCarrierDisplayName();
+
+        b = getExtrasFromLastSpnUpdateIntent();
+        assertThat(b.getString(TelephonyManager.EXTRA_PLMN)).isEqualTo(SATELLITE_DISPLAY_NAME);
+        assertThat(b.getBoolean(TelephonyManager.EXTRA_SHOW_PLMN)).isTrue();
+    }
+
+    @Test
+    public void testSatelliteName_HybridMode_ManualConnect() throws Exception {
         ArgumentCaptor<ISatelliteModemStateCallback> captor =
                 ArgumentCaptor.forClass(ISatelliteModemStateCallback.class);
         verify(mSatelliteController, times(1)).registerForSatelliteModemStateChanged(
@@ -3298,6 +3520,9 @@ public class ServiceStateTrackerTest extends TelephonyTest {
 
         mBundle.putBoolean(
                 CarrierConfigManager.KEY_ENABLE_CARRIER_DISPLAY_NAME_RESOLVER_BOOL, false);
+        mBundle.putInt(
+                CarrierConfigManager.KEY_CARRIER_ROAMING_NTN_CONNECT_TYPE_INT,
+                CarrierConfigManager.CARRIER_ROAMING_NTN_CONNECT_HYBRID);
         sendCarrierConfigUpdate(PHONE_ID);
 
         doReturn(true).when(mSatelliteController).isInConnectedState();
@@ -3336,6 +3561,80 @@ public class ServiceStateTrackerTest extends TelephonyTest {
         sst.updateCarrierDisplayName();
 
         b = getExtrasFromLastSpnUpdateIntent();
+        assertThat(b.getString(TelephonyManager.EXTRA_PLMN)).isEqualTo(SATELLITE_DISPLAY_NAME);
+        assertThat(b.getBoolean(TelephonyManager.EXTRA_SHOW_PLMN)).isTrue();
+    }
+
+    @Test
+    public void testUpdateSpnDisplay_vzwAstSkyloFallback_subscriptionAware_noService()
+            throws Exception {
+        int subId = 1;
+        doReturn(subId).when(mPhone).getSubId();
+        doReturn(true).when(mFeatureFlags).vzwAstSkyloFallback();
+
+        mBundle.putBoolean(
+                CarrierConfigManager.KEY_ENABLE_CARRIER_DISPLAY_NAME_RESOLVER_BOOL, false);
+        sendCarrierConfigUpdate(PHONE_ID);
+
+        // Completely out of service
+        ServiceState ss = new ServiceState();
+        ss.setVoiceRegState(ServiceState.STATE_OUT_OF_SERVICE);
+        ss.setDataRegState(ServiceState.STATE_OUT_OF_SERVICE);
+        ss.setEmergencyOnly(false);
+        sst.mSS = ss;
+
+        // Satellite is used by ANOTHER subscription
+        doReturn(new Pair<>(true, subId + 1)).when(mSatelliteController)
+                .isUsingNonTerrestrialNetworkViaCarrier();
+        // Satellite is used by ANOTHER subscription
+        doReturn(true).when(mSatelliteController)
+                .isUsingNonTerrestrialNetworkViaCarrier(eq(subId + 1));
+        doReturn(false).when(mSatelliteController)
+                .isUsingNonTerrestrialNetworkViaCarrier(eq(subId));
+
+        // update the spn
+        sst.updateCarrierDisplayName();
+
+        // Plmn should be shown, and the string should be "No service" (not "Satellite")
+        Bundle b = getExtrasFromLastSpnUpdateIntent();
+        assertThat(b.getString(TelephonyManager.EXTRA_PLMN))
+                .isEqualTo(CARRIER_NAME_DISPLAY_NO_SERVICE);
+        assertThat(b.getBoolean(TelephonyManager.EXTRA_SHOW_PLMN)).isTrue();
+
+    }
+
+    @Test
+    public void testUpdateSpnDisplay_vzwAstSkyloFallback_subscriptionAware_satellite()
+            throws Exception {
+        int subId = 1;
+        doReturn(subId).when(mPhone).getSubId();
+        doReturn(true).when(mFeatureFlags).vzwAstSkyloFallback();
+
+        mBundle.putBoolean(
+                CarrierConfigManager.KEY_ENABLE_CARRIER_DISPLAY_NAME_RESOLVER_BOOL, false);
+        sendCarrierConfigUpdate(PHONE_ID);
+
+        // Completely out of service
+        ServiceState ss = new ServiceState();
+        ss.setVoiceRegState(ServiceState.STATE_OUT_OF_SERVICE);
+        ss.setDataRegState(ServiceState.STATE_OUT_OF_SERVICE);
+        ss.setEmergencyOnly(false);
+        sst.mSS = ss;
+
+        // Satellite is used by THIS subscription
+        doReturn(new Pair<>(true, subId)).when(mSatelliteController)
+                .isUsingNonTerrestrialNetworkViaCarrier();
+        // Satellite is used by ANOTHER subscription
+        doReturn(false).when(mSatelliteController)
+                .isUsingNonTerrestrialNetworkViaCarrier(eq(subId + 1));
+        doReturn(true).when(mSatelliteController)
+                .isUsingNonTerrestrialNetworkViaCarrier(eq(subId));
+
+        // update the spn
+        sst.updateCarrierDisplayName();
+
+        // Plmn should be shown, and the string should be "Satellite"
+        Bundle b = getExtrasFromLastSpnUpdateIntent();
         assertThat(b.getString(TelephonyManager.EXTRA_PLMN)).isEqualTo(SATELLITE_DISPLAY_NAME);
         assertThat(b.getBoolean(TelephonyManager.EXTRA_SHOW_PLMN)).isTrue();
     }

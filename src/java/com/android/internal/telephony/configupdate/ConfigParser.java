@@ -100,6 +100,12 @@ public abstract class ConfigParser<T> {
      */
     protected abstract void parseData(@Nullable byte[] data);
 
+    /**
+     * Get the domain of the config
+     *
+     * @return the domain of the config
+     */
+    public abstract String getDomain();
 
     /**
      * This API is used by CTS to override the version

@@ -23,11 +23,8 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 
-import android.platform.test.annotations.RequiresFlagsEnabled;
 import android.telephony.SubscriptionPlan;
 import android.testing.AndroidTestingRunner;
-
-import com.android.internal.telephony.flags.Flags;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -41,7 +38,6 @@ public class SubscriptionPlanTest {
             ZonedDateTime.parse("2007-03-14T00:00:00.000Z");
 
     @Test
-    @RequiresFlagsEnabled(Flags.FLAG_SUBSCRIPTION_PLAN_ALLOW_STATUS_AND_END_DATE)
     public void testBuilderExpirationDateSetsCorrectly() {
         ZonedDateTime endDate = ZonedDateTime.parse("2024-11-07T00:00:00.000Z");
 
@@ -59,7 +55,6 @@ public class SubscriptionPlanTest {
     }
 
     @Test
-    @RequiresFlagsEnabled(Flags.FLAG_SUBSCRIPTION_PLAN_ALLOW_STATUS_AND_END_DATE)
     public void testBuilderValidSubscriptionStatusSetsCorrectly() {
         @SubscriptionPlan.SubscriptionStatus int status = SUBSCRIPTION_STATUS_ACTIVE;
 
@@ -73,7 +68,6 @@ public class SubscriptionPlanTest {
     }
 
     @Test
-    @RequiresFlagsEnabled(Flags.FLAG_SUBSCRIPTION_PLAN_ALLOW_STATUS_AND_END_DATE)
     public void testBuilderInvalidSubscriptionStatusThrowsError() {
         int minInvalid = -1;
         int maxInvalid = 5;

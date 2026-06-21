@@ -37,6 +37,8 @@ import android.net.NetworkScore;
 import android.net.TelephonyNetworkSpecifier;
 import android.net.connectivity.android.net.INetworkOfferCallback;
 import android.os.Looper;
+import android.platform.test.annotations.EnableFlags;
+import android.platform.test.flag.junit.SetFlagsRule;
 import android.telephony.Annotation.NetCapability;
 import android.telephony.SubscriptionManager;
 import android.testing.AndroidTestingRunner;
@@ -45,10 +47,15 @@ import android.testing.TestableLooper;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
 import com.android.internal.telephony.TelephonyTest;
+import com.android.internal.telephony.configupdate.ConfigParser;
+import com.android.internal.telephony.configupdate.ConfigProviderAdaptor;
+import com.android.internal.telephony.configupdate.TelephonyConfigUpdateInstallReceiver;
 import com.android.internal.telephony.data.PhoneSwitcher.PhoneSwitcherCallback;
+import com.android.internal.telephony.flags.Flags;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
@@ -57,10 +64,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Executor;
 
 @RunWith(AndroidTestingRunner.class)
 @TestableLooper.RunWithLooper
 public class TelephonyNetworkProviderTest extends TelephonyTest {
+
+    @Rule
+    public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
 
     private TelephonyNetworkProvider mTelephonyNetworkProvider;
 
@@ -68,6 +79,7 @@ public class TelephonyNetworkProviderTest extends TelephonyTest {
 
     // Mocked classes
     private DataNetworkController mDataNetworkController2;
+    private TelephonyConfigUpdateInstallReceiver mTelephonyConfigUpdateInstallReceiver;
 
 
     /**
@@ -257,6 +269,10 @@ public class TelephonyNetworkProviderTest extends TelephonyTest {
             return 1;
         }).when(mConnectivityManager).registerNetworkProvider(any(NetworkProvider.class));
 
+        mTelephonyConfigUpdateInstallReceiver = mock(TelephonyConfigUpdateInstallReceiver.class);
+        replaceInstance(TelephonyConfigUpdateInstallReceiver.class,
+                "sReceiverAdaptorInstance", null, mTelephonyConfigUpdateInstallReceiver);
+
         mTelephonyNetworkProvider = new TelephonyNetworkProvider(Looper.myLooper(),
                 mContext, mFeatureFlags);
 
@@ -272,6 +288,45 @@ public class TelephonyNetworkProviderTest extends TelephonyTest {
     public void tearDown() throws Exception {
         logd("tearDown");
         super.tearDown();
+    }
+
+    @Test
+    @EnableFlags(Flags.FLAG_ENABLE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY)
+    public void testDynamicDataConfigUpdate() throws Exception {
+        // Verify that the provider registered a callback during initialization in setUp()
+        ArgumentCaptor<ConfigProviderAdaptor.Callback> callbackCaptor =
+                ArgumentCaptor.forClass(ConfigProviderAdaptor.Callback.class);
+        verify(mTelephonyConfigUpdateInstallReceiver).registerCallback(
+                any(Executor.class), callbackCaptor.capture());
+        ConfigProviderAdaptor.Callback callback = callbackCaptor.getValue();
+
+        // Create a mock DataConfig
+        DataConfig mockDataConfig = mock(DataConfig.class);
+        doReturn(Set.of(NetworkCapabilities.NET_CAPABILITY_OEM_PAID))
+                .when(mockDataConfig).getAllNetworkCapabilities();
+
+        // Mock ConfigParser
+        ConfigParser mockParser = mock(DataConfigParser.class);
+        doReturn(mockDataConfig).when(mockParser).getConfig();
+
+        // Trigger the callback to simulate a config update
+        callback.onChanged(mockParser);
+        processAllMessages();
+
+        // Verify unoffer called
+        verify(mConnectivityManager).unofferNetwork(any());
+
+        // Verify offerNetwork was called twice:
+        // 1. In setUp() (initial offer)
+        // 2. In onChanged() (updated offer)
+        ArgumentCaptor<NetworkCapabilities> capsCaptor =
+                ArgumentCaptor.forClass(NetworkCapabilities.class);
+        verify(mConnectivityManager, times(2)).offerNetwork(anyInt(), any(NetworkScore.class),
+                capsCaptor.capture(), any(INetworkOfferCallback.class));
+
+        // Get the latest capture (the updated offer)
+        NetworkCapabilities caps = capsCaptor.getValue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_OEM_PAID)).isTrue();
     }
 
     @Test
@@ -400,22 +455,30 @@ public class TelephonyNetworkProviderTest extends TelephonyTest {
 
     @Test
     public void testMakeNetworkFilter() {
-        doReturn(Set.of(NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH,
-                NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_LATENCY,
-                NetworkCapabilities.NET_CAPABILITY_VSIM, NetworkCapabilities.NET_CAPABILITY_MMS,
-                NetworkCapabilities.NET_CAPABILITY_XCAP)).when(mDataConfigManager)
-                .getUnsupportedNetworkCapabilities();
-
         NetworkCapabilities caps = mTelephonyNetworkProvider.makeNetworkFilter();
-        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_MMS)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_SUPL)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_DUN)).isTrue();
         assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_FOTA)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_IMS)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CBS)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_XCAP)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_EIMS)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_MCX)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_ENTERPRISE)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VSIM)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_BIP)).isTrue();
+        assertThat(
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_LATENCY)).isTrue();
+        assertThat(caps.hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_RCS)).isTrue();
+        assertThat(caps.hasCapability(
+                DataUtils.NET_CAPABILITY_PRIORITIZE_UNIFIED_COMMUNICATIONS)).isTrue();
         assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_IA)).isTrue();
-        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH))
-                .isFalse();
-        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_LATENCY))
-                .isFalse();
-        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VSIM)).isFalse();
-        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_MMS)).isFalse();
-        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_XCAP)).isFalse();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_MMTEL)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)).isTrue();
+        assertThat(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VCN_MANAGED)).isTrue();
     }
 }

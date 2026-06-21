@@ -108,6 +108,7 @@ public class UiccProfileTest extends TelephonyTest {
         mServiceManagerMockedServices.put("isub", mIBinder);
 
         doReturn(1).when(mMockedIsub).getSubId(0);
+        doReturn(1).when(mPhone).getSubId();
         /* initially there are no application available, but the array should not be empty. */
         IccCardApplicationStatus umtsApp = composeUiccApplicationStatus(
                 IccCardApplicationStatus.AppType.APPTYPE_USIM,
@@ -469,7 +470,7 @@ public class UiccProfileTest extends TelephonyTest {
     }
 
     @Test
-    public void testCarrierConfigHandlingForFailCase() {
+    public void testCarrierConfigHandlingForInvalidSlotIndex() {
         testUpdateUiccProfileApplication();
 
         // Fake carrier name
@@ -479,12 +480,12 @@ public class UiccProfileTest extends TelephonyTest {
         carrierConfigBundle.putString(CarrierConfigManager.KEY_CARRIER_NAME_STRING,
                 fakeCarrierName);
 
-        // send carrier config change
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mPhone.getPhoneId(), mPhone.getSubId(),
-                TelephonyManager.UNKNOWN_CARRIER_ID, TelephonyManager.UNKNOWN_CARRIER_ID);
+        // send carrier config change with invalid slot index
+        mCarrierConfigChangeListener.onCarrierConfigChanged(10, mPhone.getSubId(),
+                TEST_CARRIER_ID, TEST_CARRIER_ID);
         processAllMessages();
 
-        // verify that setSimOperatorNameForPhone() is called with fakeCarrierName
+        // verify that setSimOperatorNameForPhone() is NOT called with fakeCarrierName
         ArgumentCaptor<String> stringArgumentCaptor = ArgumentCaptor.forClass(String.class);
         verify(mTelephonyManager, atLeast(1)).setSimOperatorNameForPhone(anyInt(),
                 stringArgumentCaptor.capture());
@@ -495,7 +496,7 @@ public class UiccProfileTest extends TelephonyTest {
                 break;
             }
         }
-        // As we are sending inValid carrierId it fails to set the carrierName
+        // As we are sending invalid slot index it fails to set the carrierName
         assertFalse(carrierFound);
     }
 
@@ -555,5 +556,29 @@ public class UiccProfileTest extends TelephonyTest {
         // If we update there's no application, then we are on empty profile.
         testUpdateUiccProfileApplicationNoApplication();
         assertTrue(mUiccProfile.isEmptyProfile());
+    }
+
+    @Test
+    public void testCarrierConfigHandlingForInvalidCarrierId() {
+        testUpdateUiccProfileApplication();
+        String fakeCarrierName = "Private Network";
+        PersistableBundle carrierConfigBundle = mContextFixture.getCarrierConfigBundle();
+        carrierConfigBundle.putBoolean(CarrierConfigManager.KEY_CARRIER_NAME_OVERRIDE_BOOL, true);
+        carrierConfigBundle.putString(CarrierConfigManager.KEY_CARRIER_NAME_STRING,
+                fakeCarrierName);
+
+        // send carrier config change with carrierId = -1
+        mCarrierConfigChangeListener.onCarrierConfigChanged(mPhone.getPhoneId(), mPhone.getSubId(),
+                TelephonyManager.UNKNOWN_CARRIER_ID, TelephonyManager.UNKNOWN_CARRIER_ID);
+        processAllMessages();
+
+        // verify that setSimOperatorNameForPhone() is called with carrierNameOverride
+        ArgumentCaptor<String> stringArgumentCaptor = ArgumentCaptor.forClass(String.class);
+        verify(mTelephonyManager, atLeast(1)).setSimOperatorNameForPhone(anyInt(),
+                stringArgumentCaptor.capture());
+        boolean carrierFound = stringArgumentCaptor.getAllValues().stream()
+                .anyMatch(carrierName -> fakeCarrierName.equals(carrierName));
+        // As we are sending invalid slot index it fails to set the carrierName
+        assertTrue(carrierFound);
     }
 }

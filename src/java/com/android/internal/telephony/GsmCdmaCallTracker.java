@@ -165,14 +165,14 @@ public class GsmCdmaCallTracker extends CallTracker {
         filter.addAction(TelephonyIntents.ACTION_EMERGENCY_CALLBACK_MODE_CHANGED);
         mPhone.getContext().registerReceiver(mEcmExitReceiver, filter);
 
-        updatePhoneType(true);
+        onInitialPollRequest(true);
     }
 
-    public void updatePhoneType() {
-        updatePhoneType(false);
+    public void requestInitialPollState() {
+        onInitialPollRequest(false);
     }
 
-    private void updatePhoneType(boolean duringInit) {
+    private void onInitialPollRequest(boolean duringInit) {
         if (mFeatureFlags.deleteCdma()) return;
         if (!duringInit) {
             reset();

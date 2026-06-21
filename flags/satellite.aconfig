@@ -75,15 +75,6 @@ flag {
   is_exported: true
 }
 
-# OWNER=arunvoddu TARGET=25Q2
-flag {
-  name: "starlink_data_bugfix"
-  namespace: "telephony"
-  description: "This flag controls the satellite related bug fixes"
-  bug: "393966687"
-  is_exported: true
-}
-
 # OWNER=amallampati TARGET=25Q3
 flag {
     name: "satellite_exit_p2p_session_outside_geofence"
@@ -106,17 +97,6 @@ flag {
     metadata {
         purpose: PURPOSE_BUGFIX
     }
-}
-
-# OWNER=nagendranb TARGET=25Q3
-flag {
-  name: "satellite_data_metrics"
-  namespace: "telephony"
-  description: "Support Satellite Data metrics at satellite session"
-  bug: "405107194"
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
 }
 
 # OWNER=youngtaecha TARGET=26Q2
@@ -169,6 +149,10 @@ flag {
   namespace: "telephony"
   description: "This flag controls the changes for the new satellite APIs in 26Q2"
   bug: "434764963"
+  metadata {
+    purpose: PURPOSE_FEATURE
+  }
+  is_exported: true
 }
 
 # OWNER=arunvoddu TARGET=26Q2
@@ -177,6 +161,154 @@ flag {
   namespace: "telephony"
   description: "Support Telephony Satellite public api support"
   bug: "371872603"
+  metadata {
+    purpose: PURPOSE_FEATURE
+  }
+  is_exported: true
+}
+
+# OWNER=tnd TARGET=26Q1
+flag {
+    name: "fix_satellite_provision_state_out_of_sync"
+    namespace: "telephony"
+    description: "Fix satellite provision state out of sync"
+    bug:"445769117"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=youngtaecha TARGET=26Q1
+flag {
+  name: "update_device_satellite_plmn_by_configupdater"
+  is_exported: false
+  namespace: "telephony"
+  description: "Support updating device satellite plmn by configupdater"
+  bug:"442556034"
+  metadata {
+      purpose: PURPOSE_BUGFIX
+  }
+}
+
+# OWNER=karthickmj TARGET=26Q2
+flag {
+  name: "satellite_upsell"
+  namespace: "telephony"
+  description: "Introduce Satellite Upsell capabilities"
+  bug: "460027582"
+  metadata {
+    purpose: PURPOSE_FEATURE
+  }
+  is_exported: true
+}
+
+# OWNER=hakjunc TARGET=26Q2
+flag {
+  name: "satellite_metrics_enhancement"
+  namespace: "telephony"
+  description: "Enhance satellite metrics by adding new features."
+  bug: "461649453"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+# OWNER=nagendranb TARGET=26Q3
+flag {
+  name: "satellite_data_metrics_enhancement"
+  namespace: "telephony"
+  description: "enhance satellite data metrics to report consumed rx and tx values"
+  bug: "461649453"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+# OWNER=shilpasatish TARGET=26Q2
+flag {
+  name: "satellite_suspend"
+  is_exported: true
+  namespace: "telephony"
+  description: "Enables the satellite network suspend API."
+  bug: "460876921"
+   metadata {
+    purpose: PURPOSE_FEATURE
+  }
+}
+
+# OWNER=tnd TARGET=26Q2
+flag {
+  name: "new_satellite_icon"
+  namespace: "telephony"
+  description: "This flag controls the changes for the new satellite icon"
+  bug: "462776094"
+  metadata {
+    purpose: PURPOSE_FEATURE
+  }
+}
+
+# OWNER=youngtaecha TARGET=26Q2
+flag {
+  name: "nr_ntn"
+  namespace: "telephony"
+  description: "This flag controls the changes for nr_ntn"
+  bug: "469263921"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+# OWNER=amallampati TARGET=26Q2
+flag {
+  name: "emergency_messaging_routing_for_international_roaming"
+  namespace: "telephony"
+  description: "This flag controls the changes for emergency messaging routing feature"
+  bug: "469434135"
+  metadata {
+    purpose: PURPOSE_FEATURE
+  }
+}
+
+# OWNER=tnd TARGET=26Q2
+flag {
+  name: "system_selection_specifier_enhancement"
+  namespace: "telephony"
+  description: "This flag controls the enhancement for SystemSelectionSpecifier"
+  bug: "471059941"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+  is_exported: true
+}
+
+# OWNER=paulsoumyadeep TARGET=26Q4
+flag {
+  name: "satellite_upsell_26q4"
+  namespace: "telephony"
+  description: "Introduce Satellite Upsell capabilities for 26Q4"
+  bug: "484961757"
+  metadata {
+    purpose: PURPOSE_FEATURE
+  }
+}
+
+# OWNER=youngtaecha TARGET=26Q2
+flag {
+  name: "config_for_enabling_carrier"
+  namespace: "telephony"
+  description: "This flag controls the satellite configuration via configupdater"
+  bug: "492366993"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+# OWNER=paulsoumyadeep TARGET=26Q4
+flag {
+  name: "satellite_26q4_apis"
+  namespace: "telephony"
+  description: "This flag controls the changes for the new satellite APIs in 26Q4"
+  bug: "493057859"
   metadata {
     purpose: PURPOSE_FEATURE
   }

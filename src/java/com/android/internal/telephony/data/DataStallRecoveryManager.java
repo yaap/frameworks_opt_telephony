@@ -63,6 +63,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * DataStallRecoveryManager monitors the network validation result from connectivity service and
@@ -217,8 +218,17 @@ public class DataStallRecoveryManager extends Handler {
     /** The boolean array for the flags. They are used to skip the recovery actions if needed. */
     @NonNull
     private boolean[] mSkipRecoveryActionArray;
+    /**
+     * An array containing pre-calculated random offsets, in milliseconds, corresponding to each
+     * data stall recovery action. These offsets are added to the base delays for each action to
+     * randomize recovery intervals.
+     */
+    @NonNull
+    private long[] mDataStallRecoveryRandomizedMillisArray;
 
     private int mActiveDataSubId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+
+    private ActiveDataSubscriptionIdChangedCallback mActiveDataSubscriptionIdChangedCallback;
 
     /**
      * The content URI for the DSRM recovery actions.
@@ -378,15 +388,16 @@ public class DataStallRecoveryManager extends Handler {
         mPhone.getContext().getContentResolver().registerContentObserver(
                 CONTENT_URL_DSRM_DURATION_MILLIS, false, mContentObserver);
 
-        // This does not require a TM with any particular subscription.
-        mTelephonyManager.registerTelephonyCallback(
-                this::post,
+        mActiveDataSubscriptionIdChangedCallback =
                 new ActiveDataSubscriptionIdChangedCallback() {
                     @Override
                     public void onActiveDataSubscriptionIdChanged(int subId) {
                         mActiveDataSubId = subId;
                     }
-                });
+                };
+        // This does not require a TM with any particular subscription.
+        mTelephonyManager.registerTelephonyCallback(
+                this::post, mActiveDataSubscriptionIdChangedCallback);
     }
 
     @Override
@@ -532,10 +543,53 @@ public class DataStallRecoveryManager extends Handler {
     private void updateDataStallRecoveryConfigs() {
         mDataStallRecoveryDelayMillisArray = mDataConfigManager.getDataStallRecoveryDelayMillis();
         mSkipRecoveryActionArray = mDataConfigManager.getDataStallRecoveryShouldSkipArray();
-
+        mDataStallRecoveryRandomizedMillisArray = createDataStallRecoveryRandomOffsetsMillis();
         //Update Global settings
         updateGlobalConfigActions();
         updateGlobalConfigDurations();
+    }
+
+    @VisibleForTesting
+    protected long getRandomOffsetsMillis(long bound) {
+        return ThreadLocalRandom.current().nextLong(bound);
+    }
+
+    /**
+     * Calculates and returns an array of randomized millisecond offsets for each data stall
+     * recovery stage.
+     *
+     * <p>Each element in the returned array represents a random offset for a specific
+     * recovery action. The offset is a random value between 0 (inclusive) and the maximum
+     * randomization value (exclusive) configured for the corresponding recovery stage,
+     * obtained from {@code DataConfigManager.getDataStallRecoveryRandomizationMillis()}.
+     * These offsets are designed to be added to the base data stall recovery delays,
+     * introducing a random jitter to prevent multiple devices from retrying simultaneously
+     * and overloading the network.
+     *
+     * @return A new {@code long[]} containing the calculated randomized millisecond offsets.
+     */
+    private long[] createDataStallRecoveryRandomOffsetsMillis() {
+        long[] randomOffsetsMillis = new long[mDataStallRecoveryDelayMillisArray.length];
+
+        if (!mFeatureFlags.enableDataStallRecoveryRandomization()) {
+            log("createDataStallRecoveryRandomOffsetsMillis(): Randomization disabled.");
+            return randomOffsetsMillis;
+        }
+
+        long[] maxRandomOffsetsConfig =
+                mDataConfigManager.getDataStallRecoveryRandomizationMillis();
+
+        int length = Math.min(randomOffsetsMillis.length, maxRandomOffsetsConfig.length);
+
+        for (int i = 0; i < length; i++) {
+            if (maxRandomOffsetsConfig[i] > 0) {
+                randomOffsetsMillis[i] = getRandomOffsetsMillis(maxRandomOffsetsConfig[i]);
+            }
+        }
+
+        log("createDataStallRecoveryRandomOffsetsMillis(): "
+                + Arrays.toString(randomOffsetsMillis));
+        return randomOffsetsMillis;
     }
 
     /**
@@ -546,11 +600,18 @@ public class DataStallRecoveryManager extends Handler {
      */
     @VisibleForTesting
     public long getDataStallRecoveryDelayMillis(@RecoveryAction int recoveryAction) {
+        int delayMillisIdx = recoveryAction;
         if (recoveryAction == RECOVERY_ACTION_RESET_MODEM && !mIsAttemptedAllSteps) {
             // Use the previous delay time if attempting to retry the modem reset.
-            recoveryAction = RECOVERY_ACTION_RADIO_RESTART;
+            delayMillisIdx = RECOVERY_ACTION_RADIO_RESTART;
         }
-        return mDataStallRecoveryDelayMillisArray[recoveryAction];
+        long delay = mDataStallRecoveryDelayMillisArray[delayMillisIdx];
+
+        // Add pre-calculated random offset if randomization is enabled.
+        if (mFeatureFlags.enableDataStallRecoveryRandomization()) {
+            delay += mDataStallRecoveryRandomizedMillisArray[delayMillisIdx];
+        }
+        return delay;
     }
 
     /**
@@ -617,7 +678,7 @@ public class DataStallRecoveryManager extends Handler {
         final boolean isValid = status == NetworkAgent.VALIDATION_STATUS_VALID;
 
         // The state has not changed so there are no actions to perform.
-        if (mFeatureFlags.ignoreInitialDataStallRecovered() && isValid && !mDataStalled) {
+        if (isValid && !mDataStalled) {
             reset(false);
             return;
         }
@@ -820,13 +881,19 @@ public class DataStallRecoveryManager extends Handler {
             delayMillisIdx = action;
         }
 
-        log("startNetworkCheckTimer(): " + getDataStallRecoveryDelayMillis(action) + "ms");
+        long delay = mDataStallRecoveryDelayMillisArray[delayMillisIdx];
+
+        // Check if the data stall recovery randomization feature is enabled.
+        if (mFeatureFlags.enableDataStallRecoveryRandomization()) {
+            // Calculate delay with pre-calculated random offset
+            delay += mDataStallRecoveryRandomizedMillisArray[delayMillisIdx];
+        }
+        log("startNetworkCheckTimer(): Scheduling in " + delay + "ms");
+
         if (!mNetworkCheckTimerStarted) {
             mNetworkCheckTimerStarted = true;
             mTimeLastRecoveryStartMs = SystemClock.elapsedRealtime();
-            sendMessageDelayed(
-                    obtainMessage(EVENT_SEND_DATA_STALL_BROADCAST),
-                    getDataStallRecoveryDelayMillis(delayMillisIdx));
+            sendMessageDelayed(obtainMessage(EVENT_SEND_DATA_STALL_BROADCAST), delay);
         }
     }
 
@@ -856,8 +923,7 @@ public class DataStallRecoveryManager extends Handler {
             return false;
         }
 
-        if (mFeatureFlags.inactiveDataNetworkIsNotStalled()
-                && mPhone.getSubId() != mActiveDataSubId) {
+        if (mPhone.getSubId() != mActiveDataSubId) {
             logl("skip data stall recovery for non-active data connection");
             return false;
         }
@@ -980,10 +1046,6 @@ public class DataStallRecoveryManager extends Handler {
         boolean isFirstDataStall = false;
         boolean isFirstValidationAfterDoRecovery = false;
         @RecoveredReason int reason = getRecoveredReason(isValid);
-        // Validation status is true and was not data stall.
-        if (!mFeatureFlags.ignoreInitialDataStallRecovered() && isValid && !mDataStalled) {
-            return;
-        }
 
         if (!mDataStalled) {
             // First data stall
@@ -1226,6 +1288,9 @@ public class DataStallRecoveryManager extends Handler {
                 "DataStallRecoveryDelayMillisArray="
                         + Arrays.toString(mDataStallRecoveryDelayMillisArray));
         pw.println("SkipRecoveryActionArray=" + Arrays.toString(mSkipRecoveryActionArray));
+        pw.println(
+                "mDataStallRecoveryRandomizedMillisArray="
+                        + Arrays.toString(mDataStallRecoveryRandomizedMillisArray));
         pw.decreaseIndent();
         pw.println("");
 

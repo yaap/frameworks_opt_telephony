@@ -25,6 +25,7 @@ import java.util.concurrent.Executor;
 public interface ConfigProviderAdaptor {
 
     String DOMAIN_SATELLITE = "satellite";
+    String DOMAIN_DATA = "data";
 
     /**
      * Get the config from the provider

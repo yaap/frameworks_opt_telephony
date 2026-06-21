@@ -820,6 +820,8 @@ public class DatagramReceiver extends Handler {
                                 .getSupportedConnectTypeMetrics())
                         .setSessionConnectionMode((SatelliteController.getInstance()
                                 .getSessionConnectTypeMetrics()))
+                        .setPlmn(SatelliteController.getInstance()
+                                .getSatellitePlmnForMetrics())
                         .build());
 
         mControllerMetricsStats.reportIncomingDatagramCount(resultCode, mIsDemoMode.get());

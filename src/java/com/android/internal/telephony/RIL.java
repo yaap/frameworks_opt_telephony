@@ -38,6 +38,8 @@ import android.hardware.radio.V1_0.RadioIndicationType;
 import android.hardware.radio.V1_0.RadioResponseInfo;
 import android.hardware.radio.V1_0.RadioResponseType;
 import android.hardware.radio.modem.ImeiInfo;
+import android.hardware.radio.network.PrioritizedNetworkScanRequest;
+import android.hardware.radio.network.SatelliteNetworkInfo;
 import android.net.KeepalivePacketData;
 import android.net.LinkProperties;
 import android.os.AsyncResult;
@@ -463,7 +465,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
             mLinkedFlags = 0;
         }
 
-        public void linkToDeath(IBinder service) throws RemoteException {
+        public synchronized void linkToDeath(IBinder service) throws RemoteException {
             if (service != null) {
                 riljLog("Linked to death for service " + serviceToString(mService));
                 mBinder = service;
@@ -4425,9 +4427,9 @@ public class RIL extends BaseCommands implements CommandsInterface {
         }
 
         radioServiceInvokeHelper(HAL_SERVICE_DATA, rr, "notifyImsDataNetwork", () -> {
-            dataProxy.notifyImsDataNetwork(rr.mSerial, accessNetwork,
-                    RILUtils.convertToHalDataNetworkState(dataNetworkState),
-                    physicalTransportType, physicalNetworkSlotIndex);
+            dataProxy.notifyImsDataNetwork(rr.mSerial,
+                    RILUtils.convertToHalImsDataNetworkInfo(accessNetwork, dataNetworkState,
+                    physicalTransportType, physicalNetworkSlotIndex));
         });
     }
 
@@ -5060,6 +5062,32 @@ public class RIL extends BaseCommands implements CommandsInterface {
      * {@inheritDoc}
      */
     @Override
+    public void getSupportedNetworkAlertCategories(Message result) {
+        RadioNetworkProxy networkProxy = getRadioServiceProxy(RadioNetworkProxy.class);
+        if (!canMakeRequest(
+                "getSupportedNetworkAlertCategories",
+                networkProxy,
+                result,
+                RADIO_HAL_VERSION_2_4)) {
+            return;
+        }
+
+        RILRequest rr = obtainRequest(RIL_REQUEST_GET_SUPPORTED_NETWORK_ALERT_CATEGORIES, result,
+                mRILDefaultWorkSource);
+
+        if (RILJ_LOGD) {
+            riljLog(rr.serialString() + "> " + RILUtils.requestToString(rr.mRequest));
+        }
+
+        radioServiceInvokeHelper(
+                HAL_SERVICE_NETWORK, rr, "getSupportedNetworkAlertCategories", () -> {
+                networkProxy.getSupportedNetworkAlertCategories(rr.mSerial);
+            });
+    }
+    /**
+     * {@inheritDoc}
+     */
+    @Override
     public void setSatellitePlmn(int simSlot, @NonNull List<String> carrierPlmnList,
             @NonNull List<String> allSatellitePlmnList, Message result) {
         RadioNetworkProxy networkProxy = getRadioServiceProxy(RadioNetworkProxy.class);
@@ -5086,6 +5114,96 @@ public class RIL extends BaseCommands implements CommandsInterface {
                 () -> {
                     networkProxy.setSatellitePlmn(rr.mSerial, carrierPlmnList,
                             allSatellitePlmnList);
+                });
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setSatelliteNetworkInfo(int simSlot,
+            @NonNull SatelliteNetworkInfo satelliteNetworkInfo, Message result) {
+        RadioNetworkProxy networkProxy = getRadioServiceProxy(RadioNetworkProxy.class);
+        if (getHalVersion(HAL_SERVICE_NETWORK).less(RADIO_HAL_VERSION_2_4)) {
+            riljLog("setSatelliteNetworkInfo: SatelliteModemInterface is used.");
+            SatelliteModemInterface.getInstance().setSatelliteNetworkInfo(
+                    simSlot, satelliteNetworkInfo, result);
+            return;
+        }
+
+        RILRequest rr = obtainRequest(RIL_REQUEST_SET_SATELLITE_NETWORK_INFO, result,
+                mRILDefaultWorkSource);
+
+        if (RILJ_LOGD) {
+            riljLog(rr.serialString() + "> " + RILUtils.requestToString(rr.mRequest)
+                    + " simSlot=" + simSlot + " satelliteNetworkInfo=" + satelliteNetworkInfo);
+        }
+
+        radioServiceInvokeHelper(
+                HAL_SERVICE_NETWORK,
+                rr,
+                "setSatelliteNetworkInfo",
+                () -> {
+                    networkProxy.setSatelliteNetworkInfo(rr.mSerial, satelliteNetworkInfo);
+                });
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void enablePrioritizedNetworkScan(int simSlot,
+            @NonNull PrioritizedNetworkScanRequest scanRequest, Message result) {
+        RadioNetworkProxy networkProxy = getRadioServiceProxy(RadioNetworkProxy.class);
+        if (getHalVersion(HAL_SERVICE_NETWORK).less(RADIO_HAL_VERSION_2_4)) {
+            SatelliteModemInterface.getInstance().enablePrioritizedNetworkScan(
+                    simSlot, scanRequest, result);
+            return;
+        }
+
+        RILRequest rr = obtainRequest(RIL_REQUEST_START_PRIORITIZED_NETWORK_SCAN, result,
+                mRILDefaultWorkSource);
+
+        if (RILJ_LOGD) {
+            riljLog(rr.serialString() + "> " + RILUtils.requestToString(rr.mRequest)
+                    + " simSlot=" + simSlot + " scanRequest=" + scanRequest);
+        }
+
+        radioServiceInvokeHelper(
+                HAL_SERVICE_NETWORK,
+                rr,
+                "enablePrioritizedNetworkScan",
+                () -> {
+                    networkProxy.enablePrioritizedNetworkScan(rr.mSerial, scanRequest);
+                });
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void disablePrioritizedNetworkScan(int simSlot, Message result) {
+        RadioNetworkProxy networkProxy = getRadioServiceProxy(RadioNetworkProxy.class);
+        if (getHalVersion(HAL_SERVICE_NETWORK).less(RADIO_HAL_VERSION_2_4)) {
+            SatelliteModemInterface.getInstance().disablePrioritizedNetworkScan(
+                    simSlot, result);
+            return;
+        }
+
+        RILRequest rr = obtainRequest(RIL_REQUEST_STOP_PRIORITIZED_NETWORK_SCAN, result,
+                mRILDefaultWorkSource);
+
+        if (RILJ_LOGD) {
+            riljLog(rr.serialString() + "> " + RILUtils.requestToString(rr.mRequest)
+                    + " simSlot=" + simSlot);
+        }
+
+        radioServiceInvokeHelper(
+                HAL_SERVICE_NETWORK,
+                rr,
+                "disablePrioritizedNetworkScan",
+                () -> {
+                    networkProxy.disablePrioritizedNetworkScan(rr.mSerial);
                 });
     }
 

@@ -202,7 +202,6 @@ public class PhoneConfigurationManager {
      * associated sub IDs as well as notifies listeners.
      */
     private void updateSimultaneousSubIdsFromPhoneIdMappingAndNotify() {
-        if (!mFeatureFlags.simultaneousCallingIndications()) return;
         Set<Integer> slotCandidates = mSlotsSupportingSimultaneousCellularCalls.stream()
                 .map(i -> mPhones[i].getSubId())
                 .filter(i ->i > SubscriptionManager.INVALID_SUBSCRIPTION_ID)
@@ -246,8 +245,7 @@ public class PhoneConfigurationManager {
             final PhoneCapability staticCapability) {
         boolean isVDsdaEnabled = staticCapability.getLogicalModemList().size() > 1
                 && mVirtualDsdaEnabled;
-        boolean isBkwdCompatDsdaEnabled = mFeatureFlags.simultaneousCallingIndications()
-                && mMi.getMultiSimProperty().orElse(SSSS).equals(DSDA);
+        boolean isBkwdCompatDsdaEnabled = mMi.getMultiSimProperty().orElse(SSSS).equals(DSDA);
         if (isVDsdaEnabled || isBkwdCompatDsdaEnabled) {
             // Since we already initialized maxActiveVoiceSubscriptions to the count the
             // modem is capable of, we are only able to increase that count via this method. We do
@@ -263,8 +261,7 @@ public class PhoneConfigurationManager {
     }
 
     private void maybeEnableCellularDSDASupport() {
-        boolean bkwdsCompatDsda = mFeatureFlags.simultaneousCallingIndications()
-                && getPhoneCount() > 1
+        boolean bkwdsCompatDsda = getPhoneCount() > 1
                 && mMi.getMultiSimProperty().orElse(SSSS).equals(DSDA);
         boolean halSupportSimulCalling = mRadioConfig != null
                 && mRadioConfig.getRadioConfigProxy(null).getVersion().greaterOrEqual(
@@ -287,8 +284,7 @@ public class PhoneConfigurationManager {
             notifySimultaneousCellularCallingSlotsChanged();
         }
         // Register for subId updates to notify listeners when simultaneous calling is configured
-        if (mFeatureFlags.simultaneousCallingIndications()
-                && (bkwdsCompatDsda || halSupportSimulCalling)) {
+        if (bkwdsCompatDsda || halSupportSimulCalling) {
             Log.d(LOG_TAG, "maybeEnableCellularDSDASupport: registering "
                             + "mSubscriptionsChangedListener");
             mContext.getSystemService(TelephonyRegistryManager.class)
@@ -413,10 +409,8 @@ public class PhoneConfigurationManager {
                                 + "simultaneous calling." + ar.exception);
                         mSlotsSupportingSimultaneousCellularCalls.clear();
                     }
-                    if (mFeatureFlags.simultaneousCallingIndications()) {
-                        updateSimultaneousSubIdsFromPhoneIdMappingAndNotify();
-                        notifySimultaneousCellularCallingSlotsChanged();
-                    }
+                    updateSimultaneousSubIdsFromPhoneIdMappingAndNotify();
+                    notifySimultaneousCellularCallingSlotsChanged();
                     break;
                 default:
                     log("Unknown event: " + msg.what);
@@ -710,28 +704,29 @@ public class PhoneConfigurationManager {
             } else {
                 // The number of active modems is 0 or 1, disable cellular DSDA:
                 mSlotsSupportingSimultaneousCellularCalls.clear();
-                if (mFeatureFlags.simultaneousCallingIndications()) {
-                    updateSimultaneousSubIdsFromPhoneIdMappingAndNotify();
-                    notifySimultaneousCellularCallingSlotsChanged();
-                }
+                updateSimultaneousSubIdsFromPhoneIdMappingAndNotify();
+                notifySimultaneousCellularCallingSlotsChanged();
             }
 
-            // When the user enables DSDS mode, the default VOICE and SMS subId should be switched
-            // to "No Preference".  Doing so will sync the network/sim settings and telephony.
+            // When the user enables Multi-Sim mode, the default VOICE and SMS subId should be
+            // switched to "No Preference".  Doing so will sync the network/sim settings and
+            // telephony.
             // (see b/198123192)
-            if (numOfActiveModems > oldNumOfActiveModems && numOfActiveModems == 2) {
-                Log.i(LOG_TAG, " onMultiSimConfigChanged: DSDS mode enabled; "
+            if (numOfActiveModems > oldNumOfActiveModems && numOfActiveModems >= 2) {
+                Log.i(LOG_TAG, " onMultiSimConfigChanged: Multi-SIM mode enabled; "
                         + "setting VOICE & SMS subId to -1 (No Preference)");
 
                 //Set the default VOICE subId to -1 ("No Preference")
                 SubscriptionManagerService.getInstance().setDefaultVoiceSubId(
                         SubscriptionManager.INVALID_SUBSCRIPTION_ID);
 
-                //TODO:: Set the default SMS sub to "No Preference". Tracking this bug (b/227386042)
+                //Set the default SMS subId to -1 ("No Preference")
+                SubscriptionManagerService.getInstance().setDefaultSmsSubId(
+                        SubscriptionManager.INVALID_SUBSCRIPTION_ID);
             } else {
                 Log.i(LOG_TAG,
-                        "onMultiSimConfigChanged: DSDS mode NOT detected.  NOT setting the "
-                                + "default VOICE and SMS subId to -1 (No Preference)");
+                        "onMultiSimConfigChanged: Multi-SIM mode NOT detected.  NOT setting"
+                                + " the default VOICE and SMS subId to -1 (No Preference)");
             }
         }
     }
@@ -792,7 +787,7 @@ public class PhoneConfigurationManager {
         log("setModemService: " + serviceName);
         boolean statusRadioConfig = false;
         boolean statusRil = false;
-        final boolean isAllowed = SystemProperties.getBoolean(ALLOW_MOCK_MODEM_PROPERTY, false);
+        final boolean isAllowed = SystemProperties.getBoolean(ALLOW_MOCK_MODEM_PROPERTY, true);
         final boolean isAllowedForBoot =
                 SystemProperties.getBoolean(BOOT_ALLOW_MOCK_MODEM_PROPERTY, false);
 

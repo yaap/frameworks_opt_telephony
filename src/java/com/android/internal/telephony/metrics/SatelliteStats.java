@@ -19,8 +19,10 @@ package com.android.internal.telephony.metrics;
 import static android.telephony.TelephonyManager.UNKNOWN_CARRIER_ID;
 import static android.telephony.satellite.NtnSignalStrength.NTN_SIGNAL_STRENGTH_NONE;
 
+import static com.android.internal.telephony.metrics.PersistAtomsStorage.SATELLITE_SESSION_GAP_INVALID_SEC;
 import static com.android.internal.telephony.satellite.SatelliteConstants.TRIGGERING_EVENT_UNKNOWN;
 
+import android.telephony.TelephonyManager;
 import android.telephony.satellite.NtnSignalStrength;
 import android.telephony.satellite.SatelliteManager;
 
@@ -68,7 +70,7 @@ public class SatelliteStats {
      * A data class to contain whole component of {@link SatelliteController) atom.
      * Refer to {@link #onSatelliteControllerMetrics(SatelliteControllerParams)}.
      */
-    public class SatelliteControllerParams {
+    public static class SatelliteControllerParams {
         private final int mCountOfSatelliteServiceEnablementsSuccess;
         private final int mCountOfSatelliteServiceEnablementsFail;
         private final int mCountOfOutgoingDatagramSuccess;
@@ -916,8 +918,7 @@ public class SatelliteStats {
              * {@link SatelliteController} atom
              */
             public SatelliteControllerParams build() {
-                return new SatelliteStats()
-                        .new SatelliteControllerParams(this);
+                return new SatelliteControllerParams(this);
             }
         }
 
@@ -994,7 +995,7 @@ public class SatelliteStats {
      * A data class to contain whole component of {@link SatelliteSession) atom.
      * Refer to {@link #onSatelliteSessionMetrics(SatelliteSessionParams)}.
      */
-    public class SatelliteSessionParams {
+    public static class SatelliteSessionParams {
         private final int mSatelliteServiceInitializationResult;
         private final int mSatelliteTechnology;
         private final int mTerminationResult;
@@ -1016,6 +1017,13 @@ public class SatelliteStats {
         private final boolean mIsNtnOnlyCarrier;
         private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
         private final @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
+        private final String mPlmn;
+        private final int mScreenOnTimeSec;
+        private final int mBatteryLevelDropPercent;
+        private final boolean mWasChargingDuringSession;
+        private final int mBatteryDesignCapacityMah;
+        private final long mEnergyConsumedNwh;
+
 
         private SatelliteSessionParams(Builder builder) {
             this.mSatelliteServiceInitializationResult =
@@ -1042,6 +1050,12 @@ public class SatelliteStats {
             this.mMaxInactivityDurationSec = builder.mMaxInactivityDurationSec;
             this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
             this.mSessionConnectionMode = builder.mSessionConnectionMode;
+            this.mPlmn = builder.mPlmn;
+            this.mScreenOnTimeSec = builder.mScreenOnTimeSec;
+            this.mBatteryLevelDropPercent = builder.mBatteryLevelDropPercent;
+            this.mWasChargingDuringSession = builder.mWasChargingDuringSession;
+            this.mBatteryDesignCapacityMah = builder.mBatteryDesignCapacityMah;
+            this.mEnergyConsumedNwh = builder.mEnergyConsumedNwh;
         }
 
         public int getSatelliteServiceInitializationResult() {
@@ -1128,6 +1142,47 @@ public class SatelliteStats {
             return mSessionConnectionMode;
         }
 
+        public String getPlmn() {
+            return mPlmn;
+        }
+
+        /**
+         * Returns the screen on time period for the session.
+         */
+        public int getScreenOnTimeSec() {
+            return mScreenOnTimeSec;
+        }
+
+        /**
+         * Returns the battery drop level while the satellite session was enabled.
+         * @return the battery drop percentage (0 or a positive integer), or -1 if the measurement
+         * was invalid (e.g., failed to retrieve start or end battery level).
+         */
+        public int getBatteryLevelDropPercent() {
+            return mBatteryLevelDropPercent;
+        }
+
+        /**
+         * Returns {@code true} if the device was charged at any point during the satellite session.
+         */
+        public boolean wasChargingDuringSession() {
+            return mWasChargingDuringSession;
+        }
+
+        /**
+         * Returns the factory-rated design capacity of the battery in milliampere-hours (mAh).
+         */
+        public int getBatteryDesignCapacityMah() {
+            return mBatteryDesignCapacityMah;
+        }
+
+        /**
+         * Returns the absolute energy consumed during the satellite session in nanowatt-hours.
+         */
+        public long getEnergyConsumedNwh() {
+            return mEnergyConsumedNwh;
+        }
+
         /**
          * A builder class to create {@link SatelliteSessionParams} data structure class
          */
@@ -1156,6 +1211,12 @@ public class SatelliteStats {
                     SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
             private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode =
                     SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
+            private String mPlmn = "UNKNOWN";
+            private int mScreenOnTimeSec = 0;
+            private int mBatteryLevelDropPercent = 0;
+            private boolean mWasChargingDuringSession = false;
+            private int mBatteryDesignCapacityMah = 0;
+            private long mEnergyConsumedNwh = 0;
 
             /**
              * Sets satelliteServiceInitializationResult value of {@link SatelliteSession}
@@ -1314,12 +1375,65 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets plmn value of {@link SatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setPlmn(String plmn) {
+                this.mPlmn = plmn;
+                return this;
+            }
+
+            /**
+             * Sets screenOnTimeSec value of {@link SatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setScreenOnTimeSec(int screenOnTimeSec) {
+                this.mScreenOnTimeSec = screenOnTimeSec;
+                return this;
+            }
+
+            /**
+             * Sets batteryLevelDropPercent value of {@link SatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setBatteryLevelDropPercent(int batteryLevelDropPercent) {
+                this.mBatteryLevelDropPercent = batteryLevelDropPercent;
+                return this;
+            }
+
+            /**
+             * Sets whether the charger was connected during satellite session was enabled in the
+             * {@link SatelliteSession} atom then returns Builder class
+             */
+            public Builder setWasChargingDuringSession(boolean wasChargingDuringSession) {
+                this.mWasChargingDuringSession = wasChargingDuringSession;
+                return this;
+            }
+
+            /**
+             * Sets batteryDesignCapacityMah value of {@link SatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setBatteryDesignCapacityMah(int batteryDesignCapacityMah) {
+                this.mBatteryDesignCapacityMah = batteryDesignCapacityMah;
+                return this;
+            }
+
+            /**
+             * Sets energyConsumedNwh value of {@link SatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setEnergyConsumedNwh(long energyConsumedNwh) {
+                this.mEnergyConsumedNwh = energyConsumedNwh;
+                return this;
+            }
+
+            /**
              * Returns SessionParams, which contains whole component of
              * {@link SatelliteSession} atom
              */
             public SatelliteSessionParams build() {
-                return new SatelliteStats()
-                        .new SatelliteSessionParams(this);
+                return new SatelliteSessionParams(this);
             }
         }
 
@@ -1348,6 +1462,12 @@ public class SatelliteStats {
                     + ", MaxInactivityDurationSec=" + mMaxInactivityDurationSec
                     + ", SupportedConnectionMode=" + mSupportedConnectionMode
                     + ", SessionConnectionMode=" + mSessionConnectionMode
+                    + ", PLMN=" + mPlmn
+                    + ", ScreenOntimeSec=" + mScreenOnTimeSec
+                    + ", BatteryLevelDropPercent=" + mBatteryLevelDropPercent
+                    + ", WasChargingDuringSession=" + mWasChargingDuringSession
+                    + ", BatteryDesignCapacityMah=" + mBatteryDesignCapacityMah
+                    + ", EnergyConsumedNwh=" + mEnergyConsumedNwh
                     + ")";
         }
     }
@@ -1356,7 +1476,7 @@ public class SatelliteStats {
      * A data class to contain whole component of {@link SatelliteIncomingDatagram} atom.
      * Refer to {@link #onSatelliteIncomingDatagramMetrics(SatelliteIncomingDatagramParams)}.
      */
-    public class SatelliteIncomingDatagramParams {
+    public static class SatelliteIncomingDatagramParams {
         private final int mResultCode;
         private final int mDatagramSizeBytes;
         private final long mDatagramTransferTimeMillis;
@@ -1365,6 +1485,7 @@ public class SatelliteStats {
         private final boolean mIsNtnOnlyCarrier;
         private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
         private final @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
+        private final String mPlmn;
 
         private SatelliteIncomingDatagramParams(Builder builder) {
             this.mResultCode = builder.mResultCode;
@@ -1375,6 +1496,7 @@ public class SatelliteStats {
             this.mIsNtnOnlyCarrier = builder.mIsNtnOnlyCarrier;
             this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
             this.mSessionConnectionMode = builder.mSessionConnectionMode;
+            this.mPlmn = builder.mPlmn;
         }
 
         public int getResultCode() {
@@ -1409,6 +1531,10 @@ public class SatelliteStats {
             return mSessionConnectionMode;
         }
 
+        public String getPlmn() {
+            return mPlmn;
+        }
+
         /**
          * A builder class to create {@link SatelliteIncomingDatagramParams} data structure class
          */
@@ -1423,6 +1549,7 @@ public class SatelliteStats {
                     SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
             private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode =
                     SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
+            private String mPlmn = "UNKNOWN";
 
             /**
              * Sets resultCode value of {@link SatelliteIncomingDatagram} atom
@@ -1494,12 +1621,20 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets satellite plmn value of {@link SatelliteIncomingDatagram} atom
+             * then returns Builder class
+             */
+            public Builder setPlmn(String plmn) {
+                this.mPlmn = plmn;
+                return this;
+            }
+
+            /**
              * Returns IncomingDatagramParams, which contains whole component of
              * {@link SatelliteIncomingDatagram} atom
              */
             public SatelliteIncomingDatagramParams build() {
-                return new SatelliteStats()
-                        .new SatelliteIncomingDatagramParams(Builder.this);
+                return new SatelliteIncomingDatagramParams(Builder.this);
             }
         }
 
@@ -1514,6 +1649,7 @@ public class SatelliteStats {
                     + ", isNtnOnlyCarrier=" + mIsNtnOnlyCarrier
                     + ", supportedConnectionMode=" + mSupportedConnectionMode
                     + ", sessionConnectionMode=" + mSessionConnectionMode
+                    + ", plmn=" + mPlmn
                     + ")";
         }
     }
@@ -1522,7 +1658,7 @@ public class SatelliteStats {
      * A data class to contain whole component of {@link SatelliteOutgoingDatagram} atom.
      * Refer to {@link #onSatelliteOutgoingDatagramMetrics(SatelliteOutgoingDatagramParams)}.
      */
-    public class SatelliteOutgoingDatagramParams {
+    public static class SatelliteOutgoingDatagramParams {
         private final int mDatagramType;
         private final int mResultCode;
         private final int mDatagramSizeBytes;
@@ -1532,6 +1668,7 @@ public class SatelliteStats {
         private final boolean mIsNtnOnlyCarrier;
         private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
         private final @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
+        private final String mPlmn;
 
         private SatelliteOutgoingDatagramParams(Builder builder) {
             this.mDatagramType = builder.mDatagramType;
@@ -1543,6 +1680,7 @@ public class SatelliteStats {
             this.mIsNtnOnlyCarrier = builder.mIsNtnOnlyCarrier;
             this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
             this.mSessionConnectionMode = builder.mSessionConnectionMode;
+            this.mPlmn = builder.mPlmn;
         }
 
         public int getDatagramType() {
@@ -1581,6 +1719,10 @@ public class SatelliteStats {
             return mSessionConnectionMode;
         }
 
+        public String getPlmn() {
+            return mPlmn;
+        }
+
         /**
          * A builder class to create {@link SatelliteOutgoingDatagramParams} data structure class
          */
@@ -1596,6 +1738,7 @@ public class SatelliteStats {
                     SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
             private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode =
                     SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
+            private String mPlmn = "UNKNOWN";
 
 
             /**
@@ -1677,12 +1820,20 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets satellite plmn value of {@link SatelliteOutgoingDatagram} atom
+             * then returns Builder class
+             */
+            public Builder setPlmn(String plmn) {
+                this.mPlmn = plmn;
+                return this;
+            }
+
+            /**
              * Returns OutgoingDatagramParams, which contains whole component of
              * {@link SatelliteOutgoingDatagram} atom
              */
             public SatelliteOutgoingDatagramParams build() {
-                return new SatelliteStats()
-                        .new SatelliteOutgoingDatagramParams(Builder.this);
+                return new SatelliteOutgoingDatagramParams(Builder.this);
             }
         }
 
@@ -1698,6 +1849,7 @@ public class SatelliteStats {
                     + ", isNtnOnlyCarrier=" + mIsNtnOnlyCarrier
                     + ", supportedConnectionMode=" + mSupportedConnectionMode
                     + ", sessionConnectionMode=" + mSessionConnectionMode
+                    + ", plmn=" + mPlmn
                     + ")";
         }
     }
@@ -1706,7 +1858,7 @@ public class SatelliteStats {
      * A data class to contain whole component of {@link SatelliteProvision} atom.
      * Refer to {@link #onSatelliteProvisionMetrics(SatelliteProvisionParams)}.
      */
-    public class SatelliteProvisionParams {
+    public static class SatelliteProvisionParams {
         private final int mResultCode;
         private final int mProvisioningTimeSec;
         private final boolean mIsProvisionRequest;
@@ -1832,8 +1984,7 @@ public class SatelliteStats {
              * {@link SatelliteProvision} atom
              */
             public SatelliteProvisionParams build() {
-                return new SatelliteStats()
-                        .new SatelliteProvisionParams(Builder.this);
+                return new SatelliteProvisionParams(Builder.this);
             }
         }
 
@@ -1855,7 +2006,7 @@ public class SatelliteStats {
      * A data class to contain whole component of {@link SatelliteSosMessageRecommender} atom.
      * Refer to {@link #onSatelliteSosMessageRecommender(SatelliteSosMessageRecommenderParams)}.
      */
-    public class SatelliteSosMessageRecommenderParams {
+    public static class SatelliteSosMessageRecommenderParams {
         private final boolean mIsDisplaySosMessageSent;
         private final int mCountOfTimerStarted;
         private final boolean mIsImsRegistered;
@@ -1868,6 +2019,10 @@ public class SatelliteStats {
         private final boolean mIsNtnOnlyCarrier;
         private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
         private final @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
+        private final String mPlmn;
+        private final boolean mIsInCarrierRoamingNtnMode;
+        private final int mCarrierRoamingSatelliteEmergencyMessagingProvider;
+        private final int mEmergencyNumberSourceUsedInHandoverIntent;
 
         private SatelliteSosMessageRecommenderParams(Builder builder) {
             this.mIsDisplaySosMessageSent = builder.mIsDisplaySosMessageSent;
@@ -1883,6 +2038,12 @@ public class SatelliteStats {
             this.mIsNtnOnlyCarrier = builder.mIsNtnOnlyCarrier;
             this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
             this.mSessionConnectionMode = builder.mSessionConnectionMode;
+            this.mPlmn = builder.mPlmn;
+            this.mIsInCarrierRoamingNtnMode = builder.mIsInCarrierRoamingNtnMode;
+            this.mCarrierRoamingSatelliteEmergencyMessagingProvider =
+                builder.mCarrierRoamingSatelliteEmergencyMessagingProvider;
+            this.mEmergencyNumberSourceUsedInHandoverIntent =
+                builder.mEmergencyNumberSourceUsedInHandoverIntent;
         }
 
         public boolean isDisplaySosMessageSent() {
@@ -1933,6 +2094,22 @@ public class SatelliteStats {
             return mSessionConnectionMode;
         }
 
+        public String getPlmn() {
+            return mPlmn;
+        }
+
+        public boolean getIsInCarrierRoamingNtnMode() {
+            return mIsInCarrierRoamingNtnMode;
+        }
+
+        public int getCarrierRoamingSatelliteEmergencyMessagingProvider() {
+            return mCarrierRoamingSatelliteEmergencyMessagingProvider;
+        }
+
+        public int getEmergencyNumberSourceUsedInHandoverIntent() {
+            return mEmergencyNumberSourceUsedInHandoverIntent;
+        }
+
         /**
          * A builder class to create {@link SatelliteSosMessageRecommender} data structure class
          */
@@ -1951,6 +2128,12 @@ public class SatelliteStats {
                     SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
             private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode =
                     SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
+            private String mPlmn = "UNKNOWN";
+            private boolean mIsInCarrierRoamingNtnMode = false;
+            private int mCarrierRoamingSatelliteEmergencyMessagingProvider =
+                SatelliteManager.CARRIER_ROAMING_SATELLITE_EMERGENCY_MESSAGING_PROVIDER_UNKNOWN;
+            private int mEmergencyNumberSourceUsedInHandoverIntent =
+                SatelliteConstants.EMERGENCY_NUMBER_SOURCE_UNKNOWN;
 
             /**
              * Sets resultCode value of {@link SatelliteSosMessageRecommender} atom
@@ -2063,12 +2246,49 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets satellite plmn value of {@link SatelliteSosMessageRecommender} atom
+             * then returns Builder class
+             */
+            public Builder setPlmn(String plmn) {
+                this.mPlmn = plmn;
+                return this;
+            }
+
+            /**
+             * Sets isInCarrierRoamingNtnMode value of {@link SatelliteSosMessageRecommender} atom
+             * then returns Builder class
+             */
+            public Builder setIsInCarrierRoamingNtnMode(boolean isInCarrierRoamingNtnMode) {
+                this.mIsInCarrierRoamingNtnMode = isInCarrierRoamingNtnMode;
+                return this;
+            }
+
+            /**
+             * Sets carrierRoamingSatelliteEmergencyMessagingProvider value of
+             * {@link SatelliteSosMessageRecommender} atom
+             * then returns Builder class
+             */
+            public Builder setCarrierRoamingSatelliteEmergencyMessagingProvider(int provider) {
+                this.mCarrierRoamingSatelliteEmergencyMessagingProvider = provider;
+                return this;
+            }
+
+            /**
+             * Sets emergencyNumberSourceUsedInHandoverIntent value of
+             * {@link SatelliteSosMessageRecommender} atom
+             * then returns Builder class
+             */
+            public Builder setEmergencyNumberSourceUsedInHandoverIntent(int source) {
+                this.mEmergencyNumberSourceUsedInHandoverIntent = source;
+                return this;
+            }
+
+            /**
              * Returns SosMessageRecommenderParams, which contains whole component of
              * {@link SatelliteSosMessageRecommenderParams} atom
              */
             public SatelliteSosMessageRecommenderParams build() {
-                return new SatelliteStats()
-                        .new SatelliteSosMessageRecommenderParams(Builder.this);
+                return new SatelliteSosMessageRecommenderParams(Builder.this);
             }
         }
 
@@ -2088,6 +2308,12 @@ public class SatelliteStats {
                     + ", isNtnOnlyCarrier=" + mIsNtnOnlyCarrier
                     + ", supportedConnectionMode=" + mSupportedConnectionMode
                     + ", sessionConnectionMode=" + mSessionConnectionMode
+                    + ", plmn=" + mPlmn
+                    + ", isInCarrierRoamingNtnMode=" + mIsInCarrierRoamingNtnMode
+                    + ", carrierRoamingSatelliteEmergencyMessagingProvider ="
+                    + mCarrierRoamingSatelliteEmergencyMessagingProvider
+                    + ", mEmergencyNumberSourceUsedInHandoverIntent ="
+                    + mEmergencyNumberSourceUsedInHandoverIntent
                     + ")";
         }
     }
@@ -2097,7 +2323,7 @@ public class SatelliteStats {
      * Refer to {@link #onCarrierRoamingSatelliteSessionMetrics(
      * CarrierRoamingSatelliteSessionParams)}.
      */
-    public class CarrierRoamingSatelliteSessionParams {
+    public static class CarrierRoamingSatelliteSessionParams {
         private final int mCarrierId;
         private final boolean mIsNtnRoamingInHomeCountry;
         private final int mTotalSatelliteModeTimeSec;
@@ -2134,6 +2360,24 @@ public class SatelliteStats {
         private final long[] mPerAppSatelliteDataConsumedBytes;
         private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
         private final @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
+        private final String mPlmn;
+        private final boolean mIsWifiEnabled;
+        private final boolean mIsWfcEnabled;
+        private final boolean mIsWfcRegistered;
+        private final int mScreenOnTimeSec;
+        private final int mBatteryLevelDropPercent;
+        private final boolean mWasChargingDuringSession;
+        private final int mBatteryDesignCapacityMah;
+        private final long mEnergyConsumedNwh;
+        private final @SatelliteConstants.SatelliteEligibilitySource int mEligibilitySource;
+        private final boolean mIsWifiConnected;
+        private final int mCountOfNonEmergencyDialerDialogDisplayed;
+        private final int mCountOfEmergencyDialerButtonDisplayed;
+        private final int mCountOfSatelliteNotificationDisplayed;
+        private final long mTotalRxDataBytes;
+        private final long mTotalTxDataBytes;
+        private final long[] mPerAppRxDataBytes;
+        private final long[] mPerAppTxDataBytes;
 
         private CarrierRoamingSatelliteSessionParams(Builder builder) {
             this.mCarrierId = builder.mCarrierId;
@@ -2157,6 +2401,8 @@ public class SatelliteStats {
             this.mServiceDataPolicy = builder.mServiceDataPolicy;
             this.mSatelliteDataConsumedBytes =
                     builder.mSatelliteDataConsumedBytes;
+            this.mTotalRxDataBytes = builder.mTotalRxDataBytes;
+            this.mTotalTxDataBytes = builder.mTotalTxDataBytes;
             this.mIsMultiSim = builder.mIsMultiSim;
             this.mIsNbIotNtn = builder.mIsNbIotNtn;
             this.mCountOfDataConnections = builder.mCountOfDataConnections;
@@ -2172,8 +2418,27 @@ public class SatelliteStats {
             this.mSatelliteSupportedApps = builder.mSatelliteSupportedApps;
             this.mSatelliteSupportedUids = builder.mSatelliteSupportedUids;
             this.mPerAppSatelliteDataConsumedBytes = builder.mPerAppSatelliteDataConsumedBytes;
+            this.mPerAppRxDataBytes = builder.mPerAppRxDataBytes;
+            this.mPerAppTxDataBytes = builder.mPerAppTxDataBytes;
             this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
             this.mSessionConnectionMode = builder.mSessionConnectionMode;
+            this.mPlmn = builder.mPlmn;
+            this.mIsWifiEnabled = builder.mIsWifiEnabled;
+            this.mIsWfcEnabled = builder.mIsWfcEnabled;
+            this.mIsWfcRegistered = builder.mIsWfcRegistered;
+            this.mScreenOnTimeSec = builder.mScreenOnTimeSec;
+            this.mBatteryLevelDropPercent = builder.mBatteryLevelDropPercent;
+            this.mWasChargingDuringSession = builder.mWasChargingDuringSession;
+            this.mBatteryDesignCapacityMah = builder.mBatteryDesignCapacityMah;
+            this.mEnergyConsumedNwh = builder.mEnergyConsumedNwh;
+            this.mEligibilitySource = builder.mEligibilitySource;
+            this.mIsWifiConnected = builder.mIsWifiConnected;
+            this.mCountOfNonEmergencyDialerDialogDisplayed =
+                builder.mCountOfNonEmergencyDialerDialogDisplayed;
+            this.mCountOfEmergencyDialerButtonDisplayed =
+                builder.mCountOfEmergencyDialerButtonDisplayed;
+            this.mCountOfSatelliteNotificationDisplayed =
+                builder.mCountOfSatelliteNotificationDisplayed;
         }
 
         public int getCarrierId() {
@@ -2252,6 +2517,14 @@ public class SatelliteStats {
             return mSatelliteDataConsumedBytes;
         }
 
+        public long getTotalRxDataBytes() {
+            return mTotalRxDataBytes;
+        }
+
+        public long getTotalTxDataBytes() {
+            return mTotalTxDataBytes;
+        }
+
         public boolean isMultiSim() {
             return mIsMultiSim;
         }
@@ -2312,12 +2585,102 @@ public class SatelliteStats {
             return mPerAppSatelliteDataConsumedBytes;
         }
 
+        public long[] getPerAppRxDataBytes() {
+            return mPerAppRxDataBytes;
+        }
+
+        public long[] getPerAppTxDataBytes() {
+            return mPerAppTxDataBytes;
+        }
+
         public int getSupportedConnectionMode() {
             return mSupportedConnectionMode;
         }
 
         public int getSessionConnectionMode() {
             return mSessionConnectionMode;
+        }
+
+        public String getPlmn() {
+            return mPlmn;
+        }
+
+        public boolean isWifiEnabled() {
+            return mIsWifiEnabled;
+        }
+
+        public boolean isWfcEnabled() {
+            return mIsWfcEnabled;
+        }
+
+        public boolean isWfcRegistered() {
+            return mIsWfcRegistered;
+        }
+
+        /**
+         * Returns the screen on time period for the session.
+         */
+        public int getScreenOnTimeSec() {
+            return mScreenOnTimeSec;
+        }
+
+        /**
+         * Returns the battery drop level while the satellite session was enabled.
+         * @return the battery drop percentage (0 or a positive integer), or -1 if the measurement
+         * was invalid (e.g., failed to retrieve start or end battery level).
+         */
+        public int getBatteryLevelDropPercent() {
+            return mBatteryLevelDropPercent;
+        }
+
+        /**
+         * Returns {@code true} if the device was charged at any point during the satellite session.
+         */
+        public boolean wasChargingDuringSession() {
+            return mWasChargingDuringSession;
+        }
+
+        /**
+         * Returns the factory-rated design capacity of the battery in milliampere-hours (mAh).
+         */
+        public int getBatteryDesignCapacityMah() {
+            return mBatteryDesignCapacityMah;
+        }
+
+        /**
+         * Returns the absolute energy consumed during the satellite session in nanowatt-hours.
+         */
+        public long getEnergyConsumedNwh() {
+            return mEnergyConsumedNwh;
+        }
+
+        /**
+         * Returns the eligibility source for carrier roaming satellite source.
+         */
+        public @SatelliteConstants.SatelliteEligibilitySource int getEligibilitySource() {
+            return mEligibilitySource;
+        }
+
+        /**
+         * Returns whether wifi was connected during the session.
+         */
+        public boolean isWifiConnected() {
+            return mIsWifiConnected;
+        }
+
+        /** Returns number of times non-emergency dialer dialog is displayed. */
+        public int getCountOfNonEmergencyDialerDialogDisplayed() {
+            return mCountOfNonEmergencyDialerDialogDisplayed;
+        }
+
+        /** Returns number of times emergency dialer button is displayed. */
+        public int getCountOfEmergencyDialerButtonDisplayed() {
+            return mCountOfEmergencyDialerButtonDisplayed;
+        }
+
+        /** Returns number of times satellite notification is displayed. */
+        public int getCountOfSatelliteNotificationDisplayed() {
+            return mCountOfSatelliteNotificationDisplayed;
         }
 
         /**
@@ -2364,6 +2727,25 @@ public class SatelliteStats {
                     SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
             private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode =
                     SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
+            private String mPlmn = "UNKNOWN";
+            private boolean mIsWifiEnabled = false;
+            private boolean mIsWfcEnabled = false;
+            private boolean mIsWfcRegistered = false;
+            private int mScreenOnTimeSec = 0;
+            private int mBatteryLevelDropPercent = 0;
+            private boolean mWasChargingDuringSession = false;
+            private int mBatteryDesignCapacityMah = 0;
+            private long mEnergyConsumedNwh = 0;
+            private @SatelliteConstants.SatelliteEligibilitySource int mEligibilitySource =
+                    SatelliteConstants.SATELLITE_ELIGIBILITY_SOURCE_UNKNOWN;
+            private boolean mIsWifiConnected = false;
+            private int mCountOfNonEmergencyDialerDialogDisplayed = 0;
+            private int mCountOfEmergencyDialerButtonDisplayed = 0;
+            private int mCountOfSatelliteNotificationDisplayed = 0;
+            private long mTotalRxDataBytes = 0L;
+            private long mTotalTxDataBytes = 0L;
+            private long[] mPerAppRxDataBytes = new long[]{0L};
+            private long[] mPerAppTxDataBytes = new long[]{0L};
 
 
             /**
@@ -2543,21 +2925,30 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets totalRxDataBytes value of {@link CarrierRoamingSatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setTotalRxDataBytes(long totalRxDataBytes) {
+                this.mTotalRxDataBytes = totalRxDataBytes;
+                return this;
+            }
+
+            /**
+             * Sets totalTxDataBytes value of {@link CarrierRoamingSatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setTotalTxDataBytes(long totalTxDataBytes) {
+                this.mTotalTxDataBytes = totalTxDataBytes;
+                return this;
+            }
+
+            /**
              * Sets isMultiSim value of {@link CarrierRoamingSatelliteSession} atom, which indicates
              * whether multi sim are activated or not, then returns Builder class
              */
             public Builder setIsMultiSim(boolean isMultiSim) {
                 this.mIsMultiSim = isMultiSim;
                 return this;
-            }
-
-            /**
-             * Returns CarrierRoamingSatelliteSessionParams, which contains whole component of
-             * {@link CarrierRoamingSatelliteSession} atom
-             */
-            public CarrierRoamingSatelliteSessionParams build() {
-                return new SatelliteStats()
-                        .new CarrierRoamingSatelliteSessionParams(Builder.this);
             }
 
             /**
@@ -2697,6 +3088,15 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets satellite plmn value of {@link CarrierRoamingSatelliteSession} atom,
+             * which indicates the session connect type
+             */
+            public Builder setPlmn(String plmn) {
+                this.mPlmn = plmn;
+                return this;
+            }
+
+            /**
              * Sets perAppSatelliteDataConsumedBytes value of {@link CarrierRoamingSatelliteSession}
              * atom then returns Builder class
              */
@@ -2704,6 +3104,140 @@ public class SatelliteStats {
                     long[] perAppSatelliteDataConsumedBytes) {
                 this.mPerAppSatelliteDataConsumedBytes = perAppSatelliteDataConsumedBytes;
                 return this;
+            }
+
+            /**
+             * Sets perAppRxDataBytes value of {@link CarrierRoamingSatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setPerAppRxDataBytes(long[] perAppRxDataBytes) {
+                this.mPerAppRxDataBytes = perAppRxDataBytes;
+                return this;
+            }
+
+            /**
+             * Sets perAppTxDataBytes value of {@link CarrierRoamingSatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setPerAppTxDataBytes(long[] perAppTxDataBytes) {
+                this.mPerAppTxDataBytes = perAppTxDataBytes;
+                return this;
+            }
+
+            /**
+             * Sets isWifiEnabled value of {@link CarrierRoamingSatelliteSession} atom, which
+             * indicates if wifi is enabled during the session
+             */
+            public Builder setIsWifiEnabled(boolean isWifiEnabled) {
+                this.mIsWifiEnabled = isWifiEnabled;
+                return this;
+            }
+
+            /**
+             * Sets isWfcEnabled value of {@link CarrierRoamingSatelliteSession} atom, which
+             * indicates if wifi calling is enabled during the session
+             */
+            public Builder setIsWfcEnabled(boolean isWfcEnabled) {
+                this.mIsWfcEnabled = isWfcEnabled;
+                return this;
+            }
+
+            /**
+             * Sets isWfcRegistered value of {@link CarrierRoamingSatelliteSession} atom, which
+             * indicates if wifi calling is registered during the session
+             */
+            public Builder setIsWfcRegistered(boolean isWfcRegistered) {
+                this.mIsWfcRegistered = isWfcRegistered;
+                return this;
+            }
+
+            /**
+             * Sets screenOnTimeSec value of {@link CarrierRoamingSatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setScreenOnTimeSec(int screenOnTimeSec) {
+                this.mScreenOnTimeSec = screenOnTimeSec;
+                return this;
+            }
+
+            /**
+             * Sets batteryLevelDropPercent value of {@link CarrierRoamingSatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setBatteryLevelDropPercent(int batteryLevelDropPercent) {
+                this.mBatteryLevelDropPercent = batteryLevelDropPercent;
+                return this;
+            }
+
+            /**
+             * Sets whether the charger was connected during satellite session was enabled in the
+             * {@link CarrierRoamingSatelliteSession} atom then returns Builder class
+             */
+            public Builder setWasChargingDuringSession(boolean wasChargingDuringSession) {
+                this.mWasChargingDuringSession = wasChargingDuringSession;
+                return this;
+            }
+
+            /**
+             * Sets batteryDesignCapacityMah value of {@link CarrierRoamingSatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setBatteryDesignCapacityMah(int batteryDesignCapacityMah) {
+                this.mBatteryDesignCapacityMah = batteryDesignCapacityMah;
+                return this;
+            }
+
+            /**
+             * Sets energyConsumedNwh value of {@link CarrierRoamingSatelliteSession} atom
+             * then returns Builder class
+             */
+            public Builder setEnergyConsumedNwh(long energyConsumedNwh) {
+                this.mEnergyConsumedNwh = energyConsumedNwh;
+                return this;
+            }
+
+            /**
+             * Sets the eligibility source value of {@link CarrierRoamingSatelliteSession}
+             * atom then returns Builder class.
+             */
+            public Builder setEligibilitySource(
+                    @SatelliteConstants.SatelliteEligibilitySource int eligibilitySource) {
+                this.mEligibilitySource = eligibilitySource;
+                return this;
+            }
+
+            /**
+             * Sets whether wifi was connected during the session.
+             */
+            public Builder setIsWifiConnected(boolean isWifiConnected) {
+                this.mIsWifiConnected = isWifiConnected;
+                return this;
+            }
+
+            /** Sets count of non-emergency dialer dialog displayed. */
+            public Builder setCountOfNonEmergencyDialerDialogDisplayed(int count) {
+                this.mCountOfNonEmergencyDialerDialogDisplayed = count;
+                return this;
+            }
+
+            /** Sets count of emergency dialer button displayed. */
+            public Builder setCountOfEmergencyDialerButtonDisplayed(int count) {
+                this.mCountOfEmergencyDialerButtonDisplayed = count;
+                return this;
+            }
+
+            /** Sets count of satellite system notification displayed. */
+            public Builder setCountOfSatelliteNotificationDisplayed(int count) {
+                this.mCountOfSatelliteNotificationDisplayed = count;
+                return this;
+            }
+
+            /**
+             * Returns CarrierRoamingSatelliteSessionParams, which contains whole component of
+             * {@link CarrierRoamingSatelliteSession} atom
+             */
+            public CarrierRoamingSatelliteSessionParams build() {
+                return new CarrierRoamingSatelliteSessionParams(Builder.this);
             }
         }
 
@@ -2730,6 +3264,8 @@ public class SatelliteStats {
                     + ", supportedSatelliteServices=" + Arrays.toString(mSupportedSatelliteServices)
                     + ", serviceDataPolicy=" + mServiceDataPolicy
                     + ", SatelliteDataConsumedBytes=" + mSatelliteDataConsumedBytes
+                    + ", TotalRxDataBytes=" + mTotalRxDataBytes
+                    + ", TotalTxDataBytes=" + mTotalTxDataBytes
                     + ", isMultiSim=" + mIsMultiSim
                     + ", isNbIotNtn=" + mIsNbIotNtn
                     + ", countOfDataConnections=" + mCountOfDataConnections
@@ -2746,8 +3282,27 @@ public class SatelliteStats {
                     + ", satelliteSupportedUids=" + Arrays.toString(mSatelliteSupportedUids)
                     + ", perAppSatelliteDataConsumedBytes=" + Arrays.toString(
                     mPerAppSatelliteDataConsumedBytes)
+                    + ", perAppRxDataBytes=" + Arrays.toString(mPerAppRxDataBytes)
+                    + ", perAppTxDataBytes=" + Arrays.toString(mPerAppTxDataBytes)
                     + ", supportedConnectionMode=" + mSupportedConnectionMode
                     + ", sessionConnectionMode=" + mSessionConnectionMode
+                    + ", plmn=" + mPlmn
+                    + ", mIsWifiEnabled=" + mIsWifiEnabled
+                    + ", mIsWfcEnabled=" + mIsWfcEnabled
+                    + ", mIsWfcRegistered=" + mIsWfcRegistered
+                    + ", ScreenOntimeSec=" + mScreenOnTimeSec
+                    + ", BatteryLevelDropPercent=" + mBatteryLevelDropPercent
+                    + ", WasChargingDuringSession=" + mWasChargingDuringSession
+                    + ", BatteryDesignCapacityMah=" + mBatteryDesignCapacityMah
+                    + ", EnergyConsumedNwh=" + mEnergyConsumedNwh
+                    + ", eligibilitySource=" + mEligibilitySource
+                    + ", isWifiConnected=" + mIsWifiConnected
+                    + ", countOfNonEmergencyDialerDialogDisplayed="
+                    + mCountOfNonEmergencyDialerDialogDisplayed
+                    + ", countOfEmergencyDialerButtonDisplayed="
+                    + mCountOfEmergencyDialerButtonDisplayed
+                    + ", countOfSatelliteNotificationDisplayed="
+                    + mCountOfSatelliteNotificationDisplayed
                     + ")";
         }
     }
@@ -2757,23 +3312,26 @@ public class SatelliteStats {
      * atom. Refer to {@link #onCarrierRoamingSatelliteControllerStatsMetrics(
      * CarrierRoamingSatelliteControllerStatsParams)}.
      */
-    public class CarrierRoamingSatelliteControllerStatsParams {
+    public static class CarrierRoamingSatelliteControllerStatsParams {
         private final int mConfigDataSource;
         private final int mCountOfEntitlementStatusQueryRequest;
         private final int mCountOfSatelliteConfigUpdateRequest;
         private final int mCountOfSatelliteNotificationDisplayed;
-        private static int sSatelliteSessionGapMinSec;
-        private static int sSatelliteSessionGapAvgSec;
-        private static int sSatelliteSessionGapMaxSec;
-        private static int sCarrierId;
-        private static boolean sIsDeviceEntitled;
-        private static boolean sIsMultiSim;
+        private final int mSatelliteSessionGapMinSec;
+        private final int mSatelliteSessionGapAvgSec;
+        private final int mSatelliteSessionGapMaxSec;
+        private final int mCarrierId;
+        private final boolean mIsDeviceEntitled;
+        private final boolean mIsMultiSim;
         private final int mCountOfSatelliteSessions;
-        private static boolean sIsNbIotNtn;
-        private static @SatelliteConstants.SatelliteGlobalConnectType int sSupportedConnectionMode;
+        private final boolean mIsNbIotNtn;
+        private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
         private final int mCountOfSessionConnectionModeAutomatic;
         private final int mCountOfSessionConnectionModeManual;
         private final int mServiceDataPolicy;
+        private final int mSessionDurationSec;
+        private final boolean mIsSatelliteAttachSupported;
+        private final @SatelliteConstants.SatelliteEligibilitySource int mEligibilitySource;
 
         private CarrierRoamingSatelliteControllerStatsParams(Builder builder) {
             this.mConfigDataSource = builder.mConfigDataSource;
@@ -2787,47 +3345,22 @@ public class SatelliteStats {
                     builder.mCountOfSessionConnectionModeAutomatic;
             this.mCountOfSessionConnectionModeManual =
                     builder.mCountOfSessionConnectionModeManual;
-
-            // Update session gap params only when they are explicitly provided
-            if (builder.mSatelliteSessionGapMinSec.isPresent()) {
-                sSatelliteSessionGapMinSec = builder.mSatelliteSessionGapMinSec.get();
-            }
-            if (builder.mSatelliteSessionGapAvgSec.isPresent()) {
-                sSatelliteSessionGapAvgSec = builder.mSatelliteSessionGapAvgSec.get();
-            }
-            if (builder.mSatelliteSessionGapMaxSec.isPresent()) {
-                sSatelliteSessionGapMaxSec = builder.mSatelliteSessionGapMaxSec.get();
-            }
-
-            // Carrier ID value should be updated only when it is meaningful.
-            if (builder.mCarrierId.isPresent()) {
-                sCarrierId = builder.mCarrierId.get();
-            }
-
-            // isDeviceEntitled value should be updated only when it is meaningful.
-            if (builder.mIsDeviceEntitled.isPresent()) {
-                sIsDeviceEntitled = builder.mIsDeviceEntitled.get();
-            }
-
-            // isMulti value should be updated only when it is meaningful.
-            if (builder.mIsMultiSim.isPresent()) {
-                sIsMultiSim = builder.mIsMultiSim.get();
-            }
-
+            this.mSatelliteSessionGapMinSec = builder.mSatelliteSessionGapMinSec.orElse(
+                    SATELLITE_SESSION_GAP_INVALID_SEC);
+            this.mSatelliteSessionGapAvgSec = builder.mSatelliteSessionGapAvgSec.orElse(
+                    SATELLITE_SESSION_GAP_INVALID_SEC);
+            this.mSatelliteSessionGapMaxSec = builder.mSatelliteSessionGapMaxSec.orElse(
+                    SATELLITE_SESSION_GAP_INVALID_SEC);
+            this.mCarrierId = builder.mCarrierId;
+            this.mIsDeviceEntitled = builder.mIsDeviceEntitled;
+            this.mIsMultiSim = builder.mIsMultiSim;
             this.mCountOfSatelliteSessions = builder.mCountOfSatelliteSessions;
-
-            // isNbIotNtn value should be updated only when it is meaningful.
-            if (builder.mIsNbIotNtn.isPresent()) {
-                sIsNbIotNtn = builder.mIsNbIotNtn.get();
-            }
-
-            // supportedConnectionMode value should be updated only when it is meaningful.
-            if (builder.mSupportedConnectionMode.isPresent()) {
-                sSupportedConnectionMode = builder.mSupportedConnectionMode.get();
-            }
-
+            this.mIsNbIotNtn = builder.mIsNbIotNtn;
+            this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
             this.mServiceDataPolicy = builder.mServiceDataPolicy;
-
+            this.mSessionDurationSec = builder.mSessionDurationSec;
+            this.mIsSatelliteAttachSupported = builder.mIsSatelliteAttachSupported;
+            this.mEligibilitySource = builder.mEligibilitySource;
         }
 
         public int getConfigDataSource() {
@@ -2847,27 +3380,27 @@ public class SatelliteStats {
         }
 
         public int getSatelliteSessionGapMinSec() {
-            return sSatelliteSessionGapMinSec;
+            return mSatelliteSessionGapMinSec;
         }
 
         public int getSatelliteSessionGapAvgSec() {
-            return sSatelliteSessionGapAvgSec;
+            return mSatelliteSessionGapAvgSec;
         }
 
         public int getSatelliteSessionGapMaxSec() {
-            return sSatelliteSessionGapMaxSec;
+            return mSatelliteSessionGapMaxSec;
         }
 
         public int getCarrierId() {
-            return sCarrierId;
+            return mCarrierId;
         }
 
         public boolean isDeviceEntitled() {
-            return sIsDeviceEntitled;
+            return mIsDeviceEntitled;
         }
 
         public boolean isMultiSim() {
-            return sIsMultiSim;
+            return mIsMultiSim;
         }
 
         public int getCountOfSatelliteSessions() {
@@ -2875,11 +3408,11 @@ public class SatelliteStats {
         }
 
         public boolean isNbIotNtn() {
-            return sIsNbIotNtn;
+            return mIsNbIotNtn;
         }
 
         public int getSupportedConnectionMode() {
-            return sSupportedConnectionMode;
+            return mSupportedConnectionMode;
         }
 
         public int getCountOfSessionConnectionModeAutomatic() {
@@ -2894,6 +3427,19 @@ public class SatelliteStats {
             return mServiceDataPolicy;
         }
 
+        public int getSessionDurationSec() {
+            return mSessionDurationSec;
+        }
+
+        /** Returns whether the device is able to scan satellite network. */
+        public boolean isSatelliteAttachSupported() {
+            return mIsSatelliteAttachSupported;
+        }
+
+        /** Returns the eligibility condition for corresponding carrier ID. */
+        public @SatelliteConstants.SatelliteEligibilitySource int getEligibilitySource() {
+            return mEligibilitySource;
+        }
         /**
          * A builder class to create {@link CarrierRoamingSatelliteControllerStatsParams}
          * data structure class
@@ -2906,16 +3452,21 @@ public class SatelliteStats {
             private Optional<Integer> mSatelliteSessionGapMinSec = Optional.empty();
             private Optional<Integer> mSatelliteSessionGapAvgSec = Optional.empty();
             private Optional<Integer> mSatelliteSessionGapMaxSec = Optional.empty();
-            private Optional<Integer> mCarrierId = Optional.empty();
-            private Optional<Boolean> mIsDeviceEntitled = Optional.empty();
-            private Optional<Boolean> mIsMultiSim = Optional.empty();
+            private int mCarrierId;
+            private boolean mIsDeviceEntitled;
+            private boolean mIsMultiSim;
             private int mCountOfSatelliteSessions = 0;
-            private Optional<Boolean> mIsNbIotNtn = Optional.empty();
-            private Optional<Integer> mSupportedConnectionMode = Optional.empty();
+            private boolean mIsNbIotNtn;
+            private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode =
+                    SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
             private int mCountOfSessionConnectionModeAutomatic = 0;
             private int mCountOfSessionConnectionModeManual = 0;
             private int mServiceDataPolicy =
                     SatelliteConstants.SATELLITE_ENTITLEMENT_SERVICE_POLICY_UNKNOWN;
+            private int mSessionDurationSec = 0;
+            private boolean mIsSatelliteAttachSupported;
+            private @SatelliteConstants.SatelliteEligibilitySource int mEligibilitySource =
+                    SatelliteConstants.SATELLITE_ELIGIBILITY_SOURCE_UNKNOWN;
 
             /**
              * Sets configDataSource value of {@link CarrierRoamingSatelliteControllerStats} atom
@@ -2985,19 +3536,19 @@ public class SatelliteStats {
 
             /** Sets the currently active NB-IoT NTN carrier ID. */
             public Builder setCarrierId(int carrierId) {
-                this.mCarrierId = Optional.of(carrierId);
+                this.mCarrierId = carrierId;
                 return this;
             }
 
             /** Sets whether the device is currently entitled or not. */
             public Builder setIsDeviceEntitled(boolean isDeviceEntitled) {
-                this.mIsDeviceEntitled = Optional.of(isDeviceEntitled);
+                this.mIsDeviceEntitled = isDeviceEntitled;
                 return this;
             }
 
             /** Sets whether the device is in DSDS state or not. */
             public Builder setIsMultiSim(boolean isMultiSim) {
-                this.mIsMultiSim = Optional.of(isMultiSim);
+                this.mIsMultiSim = isMultiSim;
                 return this;
             }
 
@@ -3036,13 +3587,19 @@ public class SatelliteStats {
 
             /** Sets whether the device is in NB-NoT-NTN state or not. */
             public Builder setIsNbIotNtn(boolean isNbIotNtn) {
-                this.mIsNbIotNtn = Optional.of(isNbIotNtn);
+                this.mIsNbIotNtn = isNbIotNtn;
                 return this;
             }
 
             /** Sets whether the global connect type is hybrid or auto or manual. */
             public Builder setSupportedConnectionMode(int supportedConnectionMode) {
-                this.mSupportedConnectionMode = Optional.of(supportedConnectionMode);
+                this.mSupportedConnectionMode = supportedConnectionMode;
+                return this;
+            }
+
+            /** Sets the session duration in seconds when each session ends. */
+            public Builder setSessionDurationSec(int sessionDurationSec) {
+                this.mSessionDurationSec = sessionDurationSec;
                 return this;
             }
 
@@ -3055,13 +3612,28 @@ public class SatelliteStats {
                 return this;
             }
 
+            /** Sets whether the device is able to scan satellite network or not. */
+            public Builder setSatelliteAttachSupported(boolean isSatelliteAttachSupported) {
+                this.mIsSatelliteAttachSupported = isSatelliteAttachSupported;
+                return this;
+            }
+
+            /**
+             * Sets the eligibility source value of {@link CarrierRoamingSatelliteControllerStats}
+             * atom then returns Builder class.
+             */
+            public Builder setEligibilitySource(
+                    @SatelliteConstants.SatelliteEligibilitySource int eligibilitySource) {
+                this.mEligibilitySource = eligibilitySource;
+                return this;
+            }
+
             /**
              * Returns CarrierRoamingSatelliteControllerStatsParams, which contains whole component
              * of {@link CarrierRoamingSatelliteControllerStats} atom
              */
             public CarrierRoamingSatelliteControllerStatsParams build() {
-                return new SatelliteStats()
-                        .new CarrierRoamingSatelliteControllerStatsParams(Builder.this);
+                return new CarrierRoamingSatelliteControllerStatsParams(Builder.this);
             }
         }
 
@@ -3078,30 +3650,34 @@ public class SatelliteStats {
                     == that.getCountOfSatelliteConfigUpdateRequest()
                     && mCountOfSatelliteNotificationDisplayed
                     == that.getCountOfSatelliteNotificationDisplayed()
-                    && sSatelliteSessionGapMinSec == that.getSatelliteSessionGapMinSec()
-                    && sSatelliteSessionGapAvgSec == that.getSatelliteSessionGapAvgSec()
-                    && sSatelliteSessionGapMaxSec == that.getSatelliteSessionGapMaxSec()
-                    && sCarrierId == that.getCarrierId()
-                    && sIsDeviceEntitled == that.isDeviceEntitled()
-                    && sIsMultiSim == that.isMultiSim()
+                    && mSatelliteSessionGapMinSec == that.getSatelliteSessionGapMinSec()
+                    && mSatelliteSessionGapAvgSec == that.getSatelliteSessionGapAvgSec()
+                    && mSatelliteSessionGapMaxSec == that.getSatelliteSessionGapMaxSec()
+                    && mCarrierId == that.getCarrierId()
+                    && mIsDeviceEntitled == that.isDeviceEntitled()
+                    && mIsMultiSim == that.isMultiSim()
                     && mCountOfSatelliteSessions == that.getCountOfSatelliteSessions()
-                    && sIsNbIotNtn == that.isNbIotNtn()
-                    && sSupportedConnectionMode == that.getSupportedConnectionMode()
+                    && mIsNbIotNtn == that.isNbIotNtn()
+                    && mSupportedConnectionMode == that.getSupportedConnectionMode()
                     && mCountOfSessionConnectionModeAutomatic == that
                     .getCountOfSessionConnectionModeAutomatic()
                     && mCountOfSessionConnectionModeManual == that
                     .getCountOfSessionConnectionModeManual()
-                    && mServiceDataPolicy == that.getServiceDataPolicy();
+                    && mServiceDataPolicy == that.getServiceDataPolicy()
+                    && mSessionDurationSec == that.getSessionDurationSec()
+                    && mIsSatelliteAttachSupported == that.isSatelliteAttachSupported()
+                    && mEligibilitySource == that.getEligibilitySource();
         }
 
         @Override
         public int hashCode() {
             return Objects.hash(mConfigDataSource, mCountOfEntitlementStatusQueryRequest,
                     mCountOfSatelliteConfigUpdateRequest, mCountOfSatelliteNotificationDisplayed,
-                    sSatelliteSessionGapMinSec, sSatelliteSessionGapAvgSec,
-                    sSatelliteSessionGapMaxSec, sCarrierId, sIsDeviceEntitled, sIsMultiSim,
-                    mCountOfSatelliteSessions, sIsNbIotNtn, sSupportedConnectionMode,
-                    mCountOfSessionConnectionModeAutomatic, mCountOfSessionConnectionModeManual);
+                    mSatelliteSessionGapMinSec, mSatelliteSessionGapAvgSec,
+                    mSatelliteSessionGapMaxSec, mCarrierId, mIsDeviceEntitled, mIsMultiSim,
+                    mCountOfSatelliteSessions, mIsNbIotNtn, mSupportedConnectionMode,
+                    mCountOfSessionConnectionModeAutomatic, mCountOfSessionConnectionModeManual,
+                    mSessionDurationSec, mIsSatelliteAttachSupported, mEligibilitySource);
         }
 
         @Override
@@ -3114,20 +3690,23 @@ public class SatelliteStats {
                     + mCountOfSatelliteConfigUpdateRequest
                     + ", countOfSatelliteNotificationDisplayed="
                     + mCountOfSatelliteNotificationDisplayed
-                    + ", satelliteSessionGapMinSec=" + sSatelliteSessionGapMinSec
-                    + ", satelliteSessionGapAvgSec=" + sSatelliteSessionGapAvgSec
-                    + ", satelliteSessionGapMaxSec=" + sSatelliteSessionGapMaxSec
-                    + ", carrierId=" + sCarrierId
-                    + ", isDeviceEntitled=" + sIsDeviceEntitled
-                    + ", isMultiSim=" + sIsMultiSim
+                    + ", satelliteSessionGapMinSec=" + mSatelliteSessionGapMinSec
+                    + ", satelliteSessionGapAvgSec=" + mSatelliteSessionGapAvgSec
+                    + ", satelliteSessionGapMaxSec=" + mSatelliteSessionGapMaxSec
+                    + ", carrierId=" + mCarrierId
+                    + ", isDeviceEntitled=" + mIsDeviceEntitled
+                    + ", isMultiSim=" + mIsMultiSim
                     + ", countOfSatelliteSession=" + mCountOfSatelliteSessions
-                    + ", isNbIotNtn=" + sIsNbIotNtn
-                    + ", supportedConnectionMode=" + sSupportedConnectionMode
+                    + ", isNbIotNtn=" + mIsNbIotNtn
+                    + ", supportedConnectionMode=" + mSupportedConnectionMode
                     + ", countOfSessionConnectionModeAutomatic="
                     + mCountOfSessionConnectionModeAutomatic
                     + ", countOfSessionConnectionModeManual="
                     + mCountOfSessionConnectionModeManual
                     + ", serviceDataPolicy=" + mServiceDataPolicy
+                    + ", totalSessionDurationSec" + mSessionDurationSec
+                    + ", satelliteAttachSupported=" + mIsSatelliteAttachSupported
+                    + ", eligibilitySource=" + mEligibilitySource
                     + ")";
         }
     }
@@ -3136,7 +3715,7 @@ public class SatelliteStats {
      * A data class to contain whole component of {@link SatelliteEntitlement} atom.
      * Refer to {@link #onSatelliteEntitlementMetrics(SatelliteEntitlementParams)}.
      */
-    public class SatelliteEntitlementParams {
+    public static class SatelliteEntitlementParams {
         private final int mCarrierId;
         private final int mResult;
         private final int mEntitlementStatus;
@@ -3147,6 +3726,7 @@ public class SatelliteStats {
         private final int mEntitlementDataPolicy;
         private final @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
         private final int mHttpStatusCode;
+        private final @SatelliteConstants.SatelliteEntitlementQueryTrigger int mTriggerEvent;
 
         private SatelliteEntitlementParams(Builder builder) {
             this.mCarrierId = builder.mCarrierId;
@@ -3159,6 +3739,7 @@ public class SatelliteStats {
             this.mEntitlementDataPolicy = builder.mEntitlementDataPolicy;
             this.mSupportedConnectionMode = builder.mSupportedConnectionMode;
             this.mHttpStatusCode = builder.mHttpStatusCode;
+            this.mTriggerEvent = builder.mTriggerEvent;
         }
 
         public int getCarrierId() {
@@ -3201,6 +3782,10 @@ public class SatelliteStats {
             return mHttpStatusCode;
         }
 
+        public int getTriggerEvent() {
+            return mTriggerEvent;
+        }
+
         /**
          * A builder class to create {@link SatelliteEntitlementParams} data structure class
          */
@@ -3217,6 +3802,8 @@ public class SatelliteStats {
             private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode =
                     SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
             private int mHttpStatusCode = 0;
+            private @SatelliteConstants.SatelliteEntitlementQueryTrigger int mTriggerEvent =
+                    SatelliteConstants.SATELLITE_ENTITLEMENT_QUERY_TRIGGER_UNKNOWN;
 
             /**
              * Sets carrierId value of {@link SatelliteEntitlement} atom
@@ -3310,12 +3897,20 @@ public class SatelliteStats {
             }
 
             /**
+             * Sets triggerEvent value of {@link SatelliteEntitlement} atom
+             * then returns Builder class.
+             */
+            public Builder setTriggerEvent(int triggerEvent) {
+                this.mTriggerEvent = triggerEvent;
+                return this;
+            }
+
+            /**
              * Returns SatelliteEntitlementParams, which contains whole component of
              * {@link SatelliteEntitlement} atom
              */
             public SatelliteEntitlementParams build() {
-                return new SatelliteStats()
-                        .new SatelliteEntitlementParams(Builder.this);
+                return new SatelliteEntitlementParams(Builder.this);
             }
         }
 
@@ -3332,6 +3927,7 @@ public class SatelliteStats {
                     + ", entitlementServicePolicy=" + mEntitlementDataPolicy
                     + ", supportedConnectionMode=" + mSupportedConnectionMode
                     + ", HttpStatusCode=" + mHttpStatusCode
+                    + ", TriggerEvent=" + mTriggerEvent
                     + ")";
         }
     }
@@ -3340,7 +3936,7 @@ public class SatelliteStats {
      * A data class to contain whole component of {@link SatelliteConfigUpdater} atom.
      * Refer to {@link #onSatelliteConfigUpdaterMetrics(SatelliteConfigUpdaterParams)}.
      */
-    public class SatelliteConfigUpdaterParams {
+    public static class SatelliteConfigUpdaterParams {
         private final int mConfigVersion;
         private final int mOemConfigResult;
         private final int mCarrierConfigResult;
@@ -3419,8 +4015,7 @@ public class SatelliteStats {
              * {@link SatelliteConfigUpdater} atom
              */
             public SatelliteConfigUpdaterParams build() {
-                return new SatelliteStats()
-                        .new SatelliteConfigUpdaterParams(Builder.this);
+                return new SatelliteConfigUpdaterParams(Builder.this);
             }
         }
 
@@ -3438,7 +4033,7 @@ public class SatelliteStats {
      * A data class to contain whole component of {@link SatelliteAccessControllerParams} atom.
      * Refer to {@link #onSatelliteAccessControllerMetrics(SatelliteAccessControllerParams)}.
      */
-    public class SatelliteAccessControllerParams {
+    public static class SatelliteAccessControllerParams {
         private final @SatelliteConstants.AccessControlType int mAccessControlType;
         private final long mLocationQueryTimeMillis;
         private final long mOnDeviceLookupTimeMillis;
@@ -3654,8 +4249,7 @@ public class SatelliteStats {
              * {@link SatelliteAccessController} atom
              */
             public SatelliteAccessControllerParams build() {
-                return new SatelliteStats()
-                        .new SatelliteAccessControllerParams(this);
+                return new SatelliteAccessControllerParams(this);
             }
         }
 
@@ -3777,6 +4371,11 @@ public class SatelliteStats {
         proto.maxInactivityDurationSec = param.getMaxInactivityDurationSec();
         proto.supportedConnectionMode = param.getSupportedConnectionMode();
         proto.sessionConnectionMode = param.getSessionConnectionMode();
+        proto.screenOnTimeSec = param.getScreenOnTimeSec();
+        proto.batteryLevelDropPercent = param.getBatteryLevelDropPercent();
+        proto.wasChargingDuringSession = param.wasChargingDuringSession();
+        proto.batteryDesignCapacityMah = param.getBatteryDesignCapacityMah();
+        proto.energyConsumedNwh = param.getEnergyConsumedNwh();
         if (DBG) logd("onSatelliteSessionMetrics" + param);
         mAtomsStorage.addSatelliteSessionStats(proto);
     }
@@ -3845,6 +4444,12 @@ public class SatelliteStats {
         proto.count = 1;
         proto.supportedConnectionMode = param.getSupportedConnectionMode();
         proto.sessionConnectionMode = param.getSessionConnectionMode();
+        proto.plmn = param.getPlmn();
+        proto.isInCarrierRoamingNtnMode = param.getIsInCarrierRoamingNtnMode();
+        proto.carrierRoamingSatelliteEmergencyMessagingProvider =
+            param.getCarrierRoamingSatelliteEmergencyMessagingProvider();
+        proto.emergencyNumberSourceUsedInHandoverIntent =
+            param.getEmergencyNumberSourceUsedInHandoverIntent();
         if (DBG) logd("onSatelliteSosMessageRecommender: " + param);
         mAtomsStorage.addSatelliteSosMessageRecommenderStats(proto);
     }
@@ -3872,6 +4477,8 @@ public class SatelliteStats {
         proto.supportedSatelliteServices = param.mSupportedSatelliteServices;
         proto.serviceDataPolicy = param.mServiceDataPolicy;
         proto.satelliteDataConsumedBytes = param.mSatelliteDataConsumedBytes;
+        proto.totalRxDataBytes = param.getTotalRxDataBytes();
+        proto.totalTxDataBytes = param.getTotalTxDataBytes();
         proto.isMultiSim = param.isMultiSim();
         proto.isNbIotNtn = param.isNbIotNtn();
         proto.countOfDataConnections = param.mCountOfDataConnections;
@@ -3887,15 +4494,51 @@ public class SatelliteStats {
         proto.satelliteSupportedApps = param.mSatelliteSupportedApps;
         proto.satelliteSupportedUids = param.mSatelliteSupportedUids;
         proto.perAppSatelliteDataConsumedBytes = param.mPerAppSatelliteDataConsumedBytes;
+        proto.perAppRxDataBytes = param.getPerAppRxDataBytes();
+        proto.perAppTxDataBytes = param.getPerAppTxDataBytes();
         proto.supportedConnectionMode = param.mSupportedConnectionMode;
         proto.sessionConnectionMode = param.getSessionConnectionMode();
+        proto.isWifiEnabled = param.isWifiEnabled();
+        proto.isWfcEnabled = param.isWfcEnabled();
+        proto.isWfcRegistered = param.isWfcRegistered();
+        proto.screenOnTimeSec = param.getScreenOnTimeSec();
+        proto.batteryLevelDropPercent = param.getBatteryLevelDropPercent();
+        proto.wasChargingDuringSession = param.wasChargingDuringSession();
+        proto.batteryDesignCapacityMah = param.getBatteryDesignCapacityMah();
+        proto.energyConsumedNwh = param.getEnergyConsumedNwh();
+        proto.eligibilitySource = param.getEligibilitySource();
+        proto.plmn = param.getPlmn();
+        proto.isWifiConnected = param.isWifiConnected();
+        proto.countOfNonEmergencyDialerDialogDisplayed =
+            param.getCountOfNonEmergencyDialerDialogDisplayed();
+        proto.countOfEmergencyDialerButtonDisplayed =
+            param.getCountOfEmergencyDialerButtonDisplayed();
+        proto.countOfSatelliteNotificationDisplayed =
+            param.getCountOfSatelliteNotificationDisplayed();
         if (DBG) logd("onCarrierRoamingSatelliteSessionMetrics: " + param);
         mAtomsStorage.addCarrierRoamingSatelliteSessionStats(proto);
     }
 
-    /**  Create a new atom for CarrierRoamingSatelliteSession metrics */
-    public synchronized  void onCarrierRoamingSatelliteControllerStatsMetrics(
+    /**  Create a new atom for CarrierRoamingSatelliteSession metrics
+     *
+     * <p>Note: When building the {@link CarrierRoamingSatelliteControllerStatsParams} to pass to
+     * this method, the following base dimensions should always be fetched and set, typically for
+     * the current subId:
+     * <ul>
+     *   <li>{@code CarrierId}
+     *   <li>{@code IsDeviceEntitled}
+     *   <li>{@code IsMultiSim}
+     *   <li>{@code IsNbIotNtn}
+     *   <li>{@code SupportedConnectionMode}
+     * </ul>
+     */
+    public synchronized void onCarrierRoamingSatelliteControllerStatsMetrics(
             CarrierRoamingSatelliteControllerStatsParams param) {
+        if (param.getCarrierId() == TelephonyManager.UNKNOWN_CARRIER_ID) {
+            logd("onCarrierRoamingSatelliteControllerStatsMetrics: carrier id is -1, ignore.");
+            return;
+        }
+
         CarrierRoamingSatelliteControllerStats proto = new CarrierRoamingSatelliteControllerStats();
         proto.configDataSource = param.mConfigDataSource;
         proto.countOfEntitlementStatusQueryRequest = param.mCountOfEntitlementStatusQueryRequest;
@@ -3913,7 +4556,10 @@ public class SatelliteStats {
         proto.countOfSessionConnectionModeAutomatic =
                 param.getCountOfSessionConnectionModeAutomatic();
         proto.countOfSessionConnectionModeManual = param.getCountOfSessionConnectionModeManual();
-        proto.serviceDataPolicy = param.mServiceDataPolicy;
+        proto.serviceDataPolicy = param.getServiceDataPolicy();
+        proto.totalSessionDurationSec = param.getSessionDurationSec();
+        proto.satelliteAttachSupported = param.isSatelliteAttachSupported();
+        proto.eligibilitySource = param.getEligibilitySource();
         if (DBG) logd("onCarrierRoamingSatelliteControllerStatsMetrics: " + param);
         mAtomsStorage.addCarrierRoamingSatelliteControllerStats(proto);
     }
@@ -3939,6 +4585,7 @@ public class SatelliteStats {
         proto.entitlementDataPolicy = param.getEntitlementDataPolicy();
         proto.supportedConnectionMode = param.getSupportedConnectionMode();
         proto.httpStatusCode = param.getHttpStatusCode();
+        proto.triggerEvent = param.getTriggerEvent();
         if (DBG) logd("onSatelliteEntitlementMetrics: " + param);
         mAtomsStorage.addSatelliteEntitlementStats(proto);
     }

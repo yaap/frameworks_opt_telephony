@@ -24,6 +24,8 @@ import android.telephony.SubscriptionManager;
 import android.telephony.UiccAccessRule;
 import android.telephony.ims.ImsMmTelManager;
 
+import com.android.internal.telephony.flags.Flags;
+
 import org.junit.Rule;
 import org.junit.Test;
 
@@ -97,6 +99,7 @@ public class SubscriptionInfoInternalTest {
                             SubscriptionDatabaseManagerTest.FAKE_CONTACT1)
                     .setNrAdvancedCallingEnabled(1)
                     .setNumberFromCarrier(SubscriptionDatabaseManagerTest.FAKE_PHONE_NUMBER1)
+                    .setNumberFromTs43(SubscriptionDatabaseManagerTest.FAKE_PHONE_NUMBER1)
                     .setNumberFromIms(SubscriptionDatabaseManagerTest.FAKE_PHONE_NUMBER1)
                     .setPortIndex(0)
                     .setUsageSetting(SubscriptionManager.USAGE_SETTING_DEFAULT)
@@ -139,6 +142,12 @@ public class SubscriptionInfoInternalTest {
                     .setSatellitePlmnsVoiceServicePolicy(
                             SubscriptionDatabaseManagerTest
                                     .FAKE_SATELLITE_ENTITLEMENT_VOICE_SERVICE_POLICY1)
+                    .setIsPrivateNetwork(SubscriptionDatabaseManagerTest
+                            .FAKE_IS_PRIVATE_NETWORK_ENABLED)
+                    .setStreamingAppMaxDownlinkKbps(SubscriptionDatabaseManagerTest
+                            .FAKE_STREAMING_DOWNLINK1)
+                    .setStreamingAppMaxUplinkKbps(SubscriptionDatabaseManagerTest
+                            .FAKE_STREAMING_UPLINK1)
                     .build();
 
     private final SubscriptionInfoInternal mSubInfoNull =
@@ -173,6 +182,7 @@ public class SubscriptionInfoInternalTest {
 
     @Test
     public void testSubscriptionInfoInternalSetAndGet() {
+        mSetFlagsRule.enableFlags(Flags.FLAG_ENABLE_IS_PRIVATE_NETWORK_API);
         assertThat(mSubInfo.getSubscriptionId()).isEqualTo(1);
         assertThat(mSubInfo.getIccId()).isEqualTo(SubscriptionDatabaseManagerTest.FAKE_ICCID1);
         assertThat(mSubInfo.getSimSlotIndex()).isEqualTo(0);
@@ -244,6 +254,8 @@ public class SubscriptionInfoInternalTest {
         assertThat(mSubInfo.getNrAdvancedCallingEnabled()).isEqualTo(1);
         assertThat(mSubInfo.getNumberFromCarrier()).isEqualTo(
                 SubscriptionDatabaseManagerTest.FAKE_PHONE_NUMBER1);
+        assertThat(mSubInfo.getNumberFromTs43()).isEqualTo(
+                SubscriptionDatabaseManagerTest.FAKE_PHONE_NUMBER1);
         assertThat(mSubInfo.getNumberFromIms()).isEqualTo(
                 SubscriptionDatabaseManagerTest.FAKE_PHONE_NUMBER1);
         assertThat(mSubInfo.getPortIndex()).isEqualTo(
@@ -287,6 +299,12 @@ public class SubscriptionInfoInternalTest {
         assertThat(mSubInfo.getSatellitePlmnsVoiceServicePolicy())
                 .isEqualTo(SubscriptionDatabaseManagerTest
                         .FAKE_SATELLITE_ENTITLEMENT_VOICE_SERVICE_POLICY1);
+        assertThat(mSubInfo.getIsPrivateNetwork())
+                .isEqualTo(SubscriptionDatabaseManagerTest.FAKE_IS_PRIVATE_NETWORK_ENABLED);
+        assertThat(mSubInfo.getStreamingAppMaxDownlinkKbps())
+                .isEqualTo(SubscriptionDatabaseManagerTest.FAKE_STREAMING_DOWNLINK1);
+        assertThat(mSubInfo.getStreamingAppMaxUplinkKbps())
+                .isEqualTo(SubscriptionDatabaseManagerTest.FAKE_STREAMING_UPLINK1);
     }
 
     @Test
@@ -298,6 +316,7 @@ public class SubscriptionInfoInternalTest {
 
     @Test
     public void testConvertToSubscriptionInfo() {
+        mSetFlagsRule.enableFlags(Flags.FLAG_ENABLE_IS_PRIVATE_NETWORK_API);
         SubscriptionInfo subInfo = mSubInfo.toSubscriptionInfo();
 
         assertThat(subInfo.getSubscriptionId()).isEqualTo(1);
@@ -353,6 +372,7 @@ public class SubscriptionInfoInternalTest {
         assertThat(subInfo.getServiceCapabilities()).isEqualTo(
                 Set.of(SubscriptionManager.SERVICE_CAPABILITY_DATA));
         assertThat(mSubInfo.getTransferStatus()).isEqualTo(1);
+        assertThat(subInfo.isPrivateNetwork()).isTrue();
     }
 
     @Test
@@ -374,6 +394,7 @@ public class SubscriptionInfoInternalTest {
         assertThat(subInfoNull.getGroupUuid()).isNull();
         assertThat(subInfoNull.getCountryIso()).isEqualTo("");
         assertThat(subInfoNull.getGroupOwner()).isEqualTo("");
+        assertThat(subInfoNull.isPrivateNetwork()).isFalse();
     }
 
     @Test

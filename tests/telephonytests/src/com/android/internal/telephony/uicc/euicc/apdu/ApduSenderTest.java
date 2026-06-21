@@ -35,7 +35,6 @@ import static org.mockito.Mockito.verify;
 
 import android.os.Handler;
 import android.os.Looper;
-import android.platform.test.flag.junit.SetFlagsRule;
 import android.preference.PreferenceManager;
 import android.telephony.IccOpenLogicalChannelResponse;
 import android.testing.AndroidTestingRunner;
@@ -45,13 +44,11 @@ import com.android.internal.telephony.CommandException;
 import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.TelephonyTest;
 import com.android.internal.telephony.euicc.EuiccSession;
-import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.uicc.IccIoResult;
 import com.android.internal.telephony.uicc.IccUtils;
 
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InOrder;
@@ -60,7 +57,6 @@ import org.mockito.Mockito;
 @RunWith(AndroidTestingRunner.class)
 @TestableLooper.RunWithLooper
 public class ApduSenderTest extends TelephonyTest {
-    @Rule public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
 
     private static class ResponseCaptor extends ApduSenderResultCallback {
         public byte[] response;
@@ -110,7 +106,6 @@ public class ApduSenderTest extends TelephonyTest {
     public void setUp() throws Exception {
         super.setUp(getClass().getSimpleName());
 
-        mSetFlagsRule.enableFlags(Flags.FLAG_OPTIMIZATION_APDU_SENDER);
         mContextFixture.putBooleanResource(
                 com.android.internal.R.bool.euicc_optimize_apdu_sender, true);
 

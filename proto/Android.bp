@@ -26,6 +26,7 @@ java_library_static {
         ],
     },
     srcs: ["src/**/*.proto"],
+    exclude_srcs: ["src/**/telephony_config_update.proto"],
     sdk_version: "system_current",
     jarjar_rules: "jarjar-rules.txt",
     // Pin java_version until jarjar is certified to support later versions. http://b/72703434
@@ -39,4 +40,5 @@ java_library_static {
     },
     srcs: ["src/**/telephony_config_update.proto"],
     host_supported: true,
+    jarjar_rules: "jarjar-rules.txt",
 }

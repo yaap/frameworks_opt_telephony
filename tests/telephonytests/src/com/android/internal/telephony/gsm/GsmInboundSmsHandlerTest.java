@@ -17,6 +17,7 @@
 package com.android.internal.telephony.gsm;
 
 import static com.android.internal.telephony.TelephonyTestUtils.waitForMs;
+import static com.google.common.truth.Truth.assertThat;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -53,11 +54,16 @@ import android.os.AsyncResult;
 import android.os.Bundle;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.platform.test.annotations.DisableFlags;
+import android.platform.test.annotations.EnableFlags;
+import android.platform.test.flag.junit.SetFlagsRule;
 import android.provider.Telephony;
 import android.telephony.SubscriptionManager;
 import android.test.mock.MockContentResolver;
 import android.testing.AndroidTestingRunner;
 import android.testing.TestableLooper;
+import android.view.textclassifier.TextClassifier;
+import android.view.textclassifier.TextLinks;
 
 import androidx.test.filters.MediumTest;
 
@@ -76,6 +82,7 @@ import com.android.internal.util.StateMachine;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
@@ -91,6 +98,9 @@ import java.util.List;
 @RunWith(AndroidTestingRunner.class)
 @TestableLooper.RunWithLooper
 public class GsmInboundSmsHandlerTest extends TelephonyTest {
+    @Rule
+    public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
+
     // Mocked classes
     private SmsStorageMonitor mSmsStorageMonitor;
     private android.telephony.SmsMessage mSmsMessage;
@@ -174,7 +184,6 @@ public class GsmInboundSmsHandlerTest extends TelephonyTest {
         ContentResolver resolver = mContext.getContentResolver();
         mContentResolver = Mockito.spy(resolver);
 
-        when(mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()).thenReturn(true);
         doReturn(true).when(mTelephonyManager).getSmsReceiveCapableForPhone(anyInt(), anyBoolean());
         doReturn(true).when(mSmsStorageMonitor).isStorageAvailable();
 
@@ -407,19 +416,11 @@ public class GsmInboundSmsHandlerTest extends TelephonyTest {
         // New message notification should be shown.
         NotificationManager notificationManager =
                 (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()) {
-            verify(notificationManager).notifyAsUser(
-                    eq(InboundSmsHandler.NOTIFICATION_TAG),
-                    eq(InboundSmsHandler.NOTIFICATION_ID_NEW_MESSAGE),
-                    any(Notification.class),
-                    eq(MOCKED_MAIN_USER));
-        } else {
-            verify(notificationManager).notify(
-                    eq(InboundSmsHandler.NOTIFICATION_TAG),
-                    eq(InboundSmsHandler.NOTIFICATION_ID_NEW_MESSAGE),
-                    any(Notification.class));
-
-        }
+        verify(notificationManager).notifyAsUser(
+                eq(InboundSmsHandler.NOTIFICATION_TAG),
+                eq(InboundSmsHandler.NOTIFICATION_ID_NEW_MESSAGE),
+                any(Notification.class),
+                eq(MOCKED_MAIN_USER));
     }
 
     @Test
@@ -446,19 +447,11 @@ public class GsmInboundSmsHandlerTest extends TelephonyTest {
         // No new message notification should be shown.
         NotificationManager notificationManager =
                 (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()) {
-            verify(notificationManager, never()).notifyAsUser(
-                    eq(InboundSmsHandler.NOTIFICATION_TAG),
-                    eq(InboundSmsHandler.NOTIFICATION_ID_NEW_MESSAGE),
-                    any(Notification.class),
-                    eq(MOCKED_MAIN_USER));
-        } else {
-            verify(notificationManager, never()).notify(
-                    eq(InboundSmsHandler.NOTIFICATION_TAG),
-                    eq(InboundSmsHandler.NOTIFICATION_ID_NEW_MESSAGE),
-                    any(Notification.class));
-
-        }
+        verify(notificationManager, never()).notifyAsUser(
+                eq(InboundSmsHandler.NOTIFICATION_TAG),
+                eq(InboundSmsHandler.NOTIFICATION_ID_NEW_MESSAGE),
+                any(Notification.class),
+                eq(MOCKED_MAIN_USER));
     }
 
     @Test
@@ -1109,16 +1102,8 @@ public class GsmInboundSmsHandlerTest extends TelephonyTest {
         SmsBroadcastUndelivered.initialize(
                 mContext, mGsmInboundSmsHandler, mCdmaInboundSmsHandler, mFeatureFlags);
 
-        if (mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()) {
-            verify(mContext).registerReceiverAsUser(any(BroadcastReceiver.class),
-                    any(UserHandle.class), any(IntentFilter.class), any(), any());
-        } else {
-            // verify that a broadcast receiver is registered for current user (user == null) based
-            // on implementation in ContextFixture. registerReceiver may be called more than once
-            // (for example by GsmInboundSmsHandler if TEST_MODE is true)
-            verify(mContext, atLeastOnce()).registerReceiver(any(BroadcastReceiver.class),
-                    any(IntentFilter.class));
-        }
+        verify(mContext).registerReceiverAsUser(any(BroadcastReceiver.class),
+                any(UserHandle.class), any(IntentFilter.class), any(), any());
 
         // wait for ScanRawTableThread
         waitForMs(100);
@@ -1352,6 +1337,47 @@ public class GsmInboundSmsHandlerTest extends TelephonyTest {
 
         // There should not happen the invocation for below method, nor exception
         verify(mContext, never()).startActivityAsUser(any(Intent.class), any(UserHandle.class));
+    }
+
+    @Test
+    @EnableFlags(android.view.flags.Flags.FLAG_REDACT_WEB_OTP_SMS_API)
+    @DisableFlags(android.view.flags.Flags.FLAG_REDACT_OTP_APP_COMPAT_API)
+    public void testGetIncludedTextClassifierTypes_enableWebOtpRedaction_containsWebOtpType() {
+        transitionFromStartupToIdle();
+        assertThat(InboundSmsHandler.getIncludedTextClassifierTypes())
+            .containsExactly(TextClassifier.TYPE_SMS_RETRIEVER_OTP,
+                             TextClassifier.TYPE_SMS_WEB_OTP);
+    }
+
+    @Test
+    @EnableFlags({
+        android.view.flags.Flags.FLAG_REDACT_WEB_OTP_SMS_API,
+        android.view.flags.Flags.FLAG_REDACT_OTP_APP_COMPAT_API})
+    public void testGetAdditionalOtpTrustedPackages() {
+        transitionFromStartupToIdle();
+
+        Bundle smsRetrieverOtpExtras = new Bundle();
+        smsRetrieverOtpExtras.putString(
+            TextClassifier.EXTRA_SMS_RETRIEVER_HASH_MATCHED_PACKAGE,
+            "sms_retriever_package");
+
+        ArrayList<String> webOtpTrustedPackages = new ArrayList<>();
+        webOtpTrustedPackages.add("web_otp_package");
+        Bundle webOtpExtras = new Bundle();
+        webOtpExtras.putStringArrayList(
+            TextClassifier.EXTRA_OTP_TRUSTED_PACKAGES,
+            webOtpTrustedPackages);
+
+        assertThat(InboundSmsHandler.getOtpTrustedPackagesFromTextLinks(
+            new TextLinks.Builder("")
+                .addLink(0, 0,
+                    Collections.singletonMap(TextClassifier.TYPE_SMS_RETRIEVER_OTP, 1.0f),
+                    smsRetrieverOtpExtras)
+                .addLink(0, 0,
+                    Collections.singletonMap(TextClassifier.TYPE_SMS_WEB_OTP, 1.0f),
+                    webOtpExtras)
+                .build().getLinks()))
+            .containsExactly("sms_retriever_package", "web_otp_package");
     }
 }
 

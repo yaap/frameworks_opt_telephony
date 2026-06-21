@@ -293,6 +293,22 @@ public class DemoSimulator extends StateMachine {
     }
 
     /**
+     * Allow modem to be suspended while satellite mode is on.
+     *
+     * @param enabled  {@code true} to suspend modem while satellite mode is on
+     *                             and {@code false} to resume
+     * @param errorCallback The callback to receive the error code result of the operation.
+     */
+    public void requestSatelliteSuspended(boolean enabled,
+            @NonNull IIntegerConsumer errorCallback) {
+        try {
+            errorCallback.accept(SatelliteResult.SATELLITE_RESULT_SUCCESS);
+        } catch (RemoteException e) {
+            loge("requestSatelliteSuspended: RemoteException " + e);
+        }
+    }
+
+    /**
      * This function is used by {@link SatelliteSessionController} to notify {@link DemoSimulator}
      * that satellite mode is ON.
      */

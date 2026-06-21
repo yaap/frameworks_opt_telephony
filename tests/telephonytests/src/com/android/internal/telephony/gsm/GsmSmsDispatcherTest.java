@@ -294,6 +294,28 @@ public class GsmSmsDispatcherTest extends TelephonyTest {
     }
 
     @Test
+    public void testSendRawPdu_skipStkShortCodeCheck() throws Exception {
+        setupMockPackagePermissionChecks();
+        mContextFixture.removeCallingOrSelfPermission(ContextFixture.PERMISSION_ENABLE_ALL);
+
+        doReturn(true).when(mFeatureFlags).skipStkShortCodeCheck();
+
+        PendingIntent pendingIntent = PendingIntent.getBroadcast(TestApplication.getAppContext(), 0,
+                new Intent(TEST_INTENT), PendingIntent.FLAG_IMMUTABLE);
+        byte[] pdu = new byte[]{0x01, 0x02};
+
+        mGsmSmsDispatcher.sendRawPdu("com.android.test", mCallingUserId, "1234", "121", pdu,
+                pendingIntent, null, Process.INVALID_UID);
+        processAllMessages();
+
+        // checkDestination should return true immediately without calling SmsUsageMonitor
+        verify(mSmsUsageMonitor, never()).checkDestination(any(), any());
+        verify(mSmsUsageMonitor, never()).getPremiumSmsPermission(any());
+        verify(mSimulatedCommandsVerifier, times(1)).sendSMS(anyString(), anyString(),
+                any(Message.class));
+    }
+
+    @Test
     public void testSendRawPduWithEventStopSending() throws Exception {
         setupMockPackagePermissionChecks();
         mContextFixture.removeCallingOrSelfPermission(ContextFixture.PERMISSION_ENABLE_ALL);

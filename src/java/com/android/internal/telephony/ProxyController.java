@@ -143,9 +143,9 @@ public class ProxyController {
         mPhones = PhoneFactory.getPhones();
         mPhoneSwitcher = PhoneSwitcher.getInstance();
 
-        mUiccPhoneBookController = new UiccPhoneBookController();
-        mPhoneSubInfoController = new PhoneSubInfoController(mContext);
-        mSmsController = new SmsController(mContext, featureFlags);
+        mUiccPhoneBookController = UiccPhoneBookController.init(featureFlags);
+        mPhoneSubInfoController = PhoneSubInfoController.init(mContext);
+        mSmsController = SmsController.init(mContext, featureFlags);
         mSetRadioAccessFamilyStatus = new int[mPhones.length];
         mNewRadioAccessFamily = new int[mPhones.length];
         mOldRadioAccessFamily = new int[mPhones.length];

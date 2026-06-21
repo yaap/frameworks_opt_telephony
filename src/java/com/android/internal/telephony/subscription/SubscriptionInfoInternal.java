@@ -43,6 +43,7 @@ import android.telephony.SubscriptionManager.ProfileClass;
 import android.telephony.SubscriptionManager.SimDisplayNameSource;
 import android.telephony.SubscriptionManager.SubscriptionType;
 import android.telephony.SubscriptionManager.UsageSetting;
+import android.telephony.SubscriptionPlan;
 import android.telephony.TelephonyManager;
 import android.telephony.UiccAccessRule;
 import android.telephony.ims.ImsMmTelManager;
@@ -416,6 +417,12 @@ public class SubscriptionInfoInternal {
     private final String mNumberFromIms;
 
     /**
+     * The phone number retrieved from TS43.
+     */
+    @NonNull
+    private final String mNumberFromTs43;
+
+    /**
      * The port index of the Uicc card.
      */
     private final int mPortIndex;
@@ -444,7 +451,7 @@ public class SubscriptionInfoInternal {
 
     /**
      * Whether satellite attach for carrier is enabled or disabled by user.
-     * By default, its enabled. It is intended to use integer to fit the database format.
+     * By default, it is unset (-1). It is intended to use integer to fit the database format.
      */
     private final int mIsSatelliteAttachEnabledForCarrier;
 
@@ -535,6 +542,32 @@ public class SubscriptionInfoInternal {
     @NonNull private final String mSatellitePlmnsVoiceServicePolicy;
 
     /**
+     * Whether the subscription is for private network. It is intended to use integer to fit the
+     * database format.
+     */
+    private final int mIsPrivateNetwork;
+
+    /**
+     * The maximum downlink data rate in Kilobits per second (Kbps) for streaming applications
+     * defined in GSMA TS.43 9.1.3.
+     * <p>
+     * This value represents the data rate that the carrier has allocated for streaming
+     * applications. It can be used by streaming apps to select an appropriate media quality
+     * that matches the available bandwidth, helping to avoid buffering.
+     */
+    private final long mStreamingAppMaxDownlinkKbps;
+
+    /**
+     * The maximum uplink data rate in Kilobits per second (Kbps) for streaming applications
+     * defined in GSMA TS.43 9.1.3.
+     * <p>
+     * This value represents the data rate that the carrier has allocated for streaming
+     * applications to upload data. It can be used by streaming apps to select an appropriate
+     * media quality for outgoing streams, helping to avoid buffering or connection issues.
+     */
+    private final long mStreamingAppMaxUplinkKbps;
+
+    /**
      * Constructor from builder.
      *
      * @param builder Builder of {@link SubscriptionInfoInternal}.
@@ -597,6 +630,7 @@ public class SubscriptionInfoInternal {
         this.mIsNrAdvancedCallingEnabled = builder.mIsNrAdvancedCallingEnabled;
         this.mNumberFromCarrier = builder.mNumberFromCarrier;
         this.mNumberFromIms = builder.mNumberFromIms;
+        this.mNumberFromTs43 = builder.mNumberFromTs43;
         this.mPortIndex = builder.mPortIndex;
         this.mUsageSetting = builder.mUsageSetting;
         this.mLastUsedTPMessageReference = builder.mLastUsedTPMessageReference;
@@ -621,6 +655,9 @@ public class SubscriptionInfoInternal {
         this.mSatelliteEntitlementServicesForPlmn = builder.mSatelliteEntitlementServicesForPlmn;
         this.mSatellitePlmnsDataServicePolicy = builder.mSatellitePlmnsDataServicePolicy;
         this.mSatellitePlmnsVoiceServicePolicy = builder.mSatellitePlmnsVoiceServicePolicy;
+        this.mIsPrivateNetwork = builder.mIsPrivateNetwork;
+        this.mStreamingAppMaxDownlinkKbps = builder.mStreamingAppMaxDownlinkKbps;
+        this.mStreamingAppMaxUplinkKbps = builder.mStreamingAppMaxUplinkKbps;
     }
 
     /**
@@ -1184,6 +1221,14 @@ public class SubscriptionInfoInternal {
     }
 
     /**
+     * @return Get the phone number retrieved from TS43.
+     */
+    @NonNull
+    public String getNumberFromTs43() {
+        return mNumberFromTs43;
+    }
+
+    /**
      * @return The port index of the SIM card which contains the subscription.
      */
     public int getPortIndex() {
@@ -1223,7 +1268,8 @@ public class SubscriptionInfoInternal {
     }
 
     /**
-     * @return {@code 1} if satellite attach for carrier is enabled by user.
+     * @return {@code 1} if satellite attach for carrier is enabled by user,
+     * {@code 0} if disabled, and {@code -1} if unset.
      */
     public int getSatelliteAttachEnabledForCarrier() {
         return mIsSatelliteAttachEnabledForCarrier;
@@ -1383,6 +1429,29 @@ public class SubscriptionInfoInternal {
         return mSatellitePlmnsVoiceServicePolicy;
     }
 
+    /**
+     * @return {@code 1} if the subscription is for private network.
+     */
+    public int getIsPrivateNetwork() {
+        return mIsPrivateNetwork;
+    }
+
+    /**
+     * @return The maximum downlink data rate in Kbps for streaming applications defined in
+     * GSMA TS.43 9.1.3.
+     */
+    public long getStreamingAppMaxDownlinkKbps() {
+        return mStreamingAppMaxDownlinkKbps;
+    }
+
+    /**
+     * @return The maximum uplink data rate in Kbps for streaming applications defined in GSMA
+     * TS.43 9.1.3.
+     */
+    public long getStreamingAppMaxUplinkKbps() {
+        return mStreamingAppMaxUplinkKbps;
+    }
+
     /** @return converted {@link SubscriptionInfo}. */
     @NonNull
     public SubscriptionInfo toSubscriptionInfo() {
@@ -1423,6 +1492,9 @@ public class SubscriptionInfoInternal {
                         SubscriptionManager.getServiceCapabilitiesSet(mServiceCapabilities))
                 .setTransferStatus(mTransferStatus)
                 .setSatelliteESOSSupported(mIsSatelliteESOSSupported == 1)
+                .setIsPrivateNetwork(mIsPrivateNetwork == 1)
+                .setStreamingAppMaxDownlinkKbps(mStreamingAppMaxDownlinkKbps)
+                .setStreamingAppMaxUplinkKbps(mStreamingAppMaxUplinkKbps)
                 .build();
     }
 
@@ -1477,6 +1549,7 @@ public class SubscriptionInfoInternal {
                 + " deviceToDeviceStatusSharingContacts=" + mDeviceToDeviceStatusSharingContacts
                 + " numberFromCarrier=" + Rlog.pii(TelephonyUtils.IS_DEBUGGABLE, mNumberFromCarrier)
                 + " numberFromIms=" + Rlog.pii(TelephonyUtils.IS_DEBUGGABLE, mNumberFromIms)
+                + " numberFromTs43=" + Rlog.pii(TelephonyUtils.IS_DEBUGGABLE, mNumberFromTs43)
                 + " userId=" + mUserId
                 + " isSatelliteEnabled=" + mIsSatelliteEnabled
                 + " satellite_attach_enabled_for_carrier=" + mIsSatelliteAttachEnabledForCarrier
@@ -1494,6 +1567,9 @@ public class SubscriptionInfoInternal {
                 + " mSatelliteEntitlementServicesForPlmn=" + mSatelliteEntitlementServicesForPlmn
                 + " mSatellitePlmnsDataServicePolicy=" + mSatellitePlmnsDataServicePolicy
                 + " mSatellitePlmnsVoiceServicePolicy=" + mSatellitePlmnsVoiceServicePolicy
+                + " isPrivateNetwork=" + mIsPrivateNetwork
+                + " streamingAppMaxDownlinkKbps=" + mStreamingAppMaxDownlinkKbps
+                + " streamingAppMaxUplinkKbps=" + mStreamingAppMaxUplinkKbps
                 + "]";
     }
 
@@ -1551,6 +1627,7 @@ public class SubscriptionInfoInternal {
                 that.mAllowedNetworkTypesForReasons) && mDeviceToDeviceStatusSharingContacts.equals(
                 that.mDeviceToDeviceStatusSharingContacts) && mNumberFromCarrier.equals(
                 that.mNumberFromCarrier) && mNumberFromIms.equals(that.mNumberFromIms)
+                && mNumberFromTs43.equals(that.mNumberFromTs43)
                 && mIsSatelliteAttachEnabledForCarrier == that.mIsSatelliteAttachEnabledForCarrier
                 && mIsOnlyNonTerrestrialNetwork == that.mIsOnlyNonTerrestrialNetwork
                 && mServiceCapabilities == that.mServiceCapabilities
@@ -1567,7 +1644,10 @@ public class SubscriptionInfoInternal {
                 && mSatelliteEntitlementServicesForPlmn.equals(
                 that.mSatelliteEntitlementServicesForPlmn)
                 && mSatellitePlmnsDataServicePolicy.equals(that.mSatellitePlmnsDataServicePolicy)
-                && mSatellitePlmnsVoiceServicePolicy.equals(that.mSatellitePlmnsVoiceServicePolicy);
+                && mSatellitePlmnsVoiceServicePolicy.equals(that.mSatellitePlmnsVoiceServicePolicy)
+                && mIsPrivateNetwork == that.mIsPrivateNetwork
+                && mStreamingAppMaxDownlinkKbps == that.mStreamingAppMaxDownlinkKbps
+                && mStreamingAppMaxUplinkKbps == that.mStreamingAppMaxUplinkKbps;
     }
 
     @Override
@@ -1595,15 +1675,16 @@ public class SubscriptionInfoInternal {
                 mIsCrossSimCallingEnabled, mAllowedNetworkTypesForReasons,
                 mDeviceToDeviceStatusSharingPreference, mIsVoImsOptInEnabled,
                 mDeviceToDeviceStatusSharingContacts, mIsNrAdvancedCallingEnabled,
-                mNumberFromCarrier,
-                mNumberFromIms, mPortIndex, mUsageSetting, mLastUsedTPMessageReference, mUserId,
+                mNumberFromCarrier, mNumberFromIms, mNumberFromTs43,
+                mPortIndex, mUsageSetting, mLastUsedTPMessageReference, mUserId,
                 mIsSatelliteEnabled, mCardId, mIsGroupDisabled,
                 mIsSatelliteAttachEnabledForCarrier, mIsOnlyNonTerrestrialNetwork,
                 mServiceCapabilities, mTransferStatus, mIsSatelliteEntitlementStatus,
                 mSatelliteEntitlementPlmns, mIsSatelliteESOSSupported,
                 mIsSatelliteProvisionedForNonIpDatagram, mSatelliteEntitlementBarredPlmnsList,
                 mSatelliteEntitlementDataPlanForPlmn, mSatelliteEntitlementServicesForPlmn,
-                mSatellitePlmnsDataServicePolicy, mSatellitePlmnsVoiceServicePolicy);
+                mSatellitePlmnsDataServicePolicy, mSatellitePlmnsVoiceServicePolicy,
+                mIsPrivateNetwork, mStreamingAppMaxDownlinkKbps, mStreamingAppMaxUplinkKbps);
         result = 31 * result + Arrays.hashCode(mNativeAccessRules);
         result = 31 * result + Arrays.hashCode(mCarrierConfigAccessRules);
         result = 31 * result + Arrays.hashCode(mRcsConfig);
@@ -1941,6 +2022,12 @@ public class SubscriptionInfoInternal {
         private String mNumberFromIms = "";
 
         /**
+         * The phone number retrieved from TS43.
+         */
+        @NonNull
+        private String mNumberFromTs43 = "";
+
+        /**
          * the port index of the Uicc card.
          */
         private int mPortIndex = TelephonyManager.INVALID_PORT_INDEX;
@@ -1968,8 +2055,9 @@ public class SubscriptionInfoInternal {
 
         /**
          * Whether satellite attach for carrier is enabled by user.
+         * The value -1 indicates an unset state, which falls back to the device's default config.
          */
-        private int mIsSatelliteAttachEnabledForCarrier = 1;
+        private int mIsSatelliteAttachEnabledForCarrier = -1;
 
         /**
          * Whether this subscription is used for communicating with non-terrestrial network or not.
@@ -2055,6 +2143,22 @@ public class SubscriptionInfoInternal {
         @NonNull
         private String mSatellitePlmnsVoiceServicePolicy = "";
 
+        /**
+         * Whether the subscription is for private network.
+         */
+        private int mIsPrivateNetwork = 0;
+
+        /**
+         * The maximum downlink data rate in Kbps for streaming applications defined in GSMA
+         * TS.43 9.1.3.
+         */
+        private long mStreamingAppMaxDownlinkKbps = SubscriptionPlan.BITRATE_UNKNOWN;
+
+        /**
+         * The maximum uplink data rate in Kbps for streaming applications defined in GSMA TS.43
+         * 9.1.3.
+         */
+        private long mStreamingAppMaxUplinkKbps = SubscriptionPlan.BITRATE_UNKNOWN;
 
         /**
          * Default constructor.
@@ -2124,6 +2228,7 @@ public class SubscriptionInfoInternal {
             mIsNrAdvancedCallingEnabled = info.mIsNrAdvancedCallingEnabled;
             mNumberFromCarrier = info.mNumberFromCarrier;
             mNumberFromIms = info.mNumberFromIms;
+            mNumberFromTs43 = info.mNumberFromTs43;
             mPortIndex = info.mPortIndex;
             mUsageSetting = info.mUsageSetting;
             mLastUsedTPMessageReference = info.getLastUsedTPMessageReference();
@@ -2145,6 +2250,9 @@ public class SubscriptionInfoInternal {
             mSatelliteEntitlementServicesForPlmn = info.mSatelliteEntitlementServicesForPlmn;
             mSatellitePlmnsDataServicePolicy = info.mSatellitePlmnsDataServicePolicy;
             mSatellitePlmnsVoiceServicePolicy = info.mSatellitePlmnsVoiceServicePolicy;
+            mIsPrivateNetwork = info.mIsPrivateNetwork;
+            mStreamingAppMaxDownlinkKbps = info.mStreamingAppMaxDownlinkKbps;
+            mStreamingAppMaxUplinkKbps = info.mStreamingAppMaxUplinkKbps;
         }
 
         /**
@@ -2953,6 +3061,19 @@ public class SubscriptionInfoInternal {
         }
 
         /**
+         * Set the phone number retrieved from TS43.
+         *
+         * @param numberFromTs43 The phone number retrieved from TS43.
+         * @return The builder.
+         */
+        @NonNull
+        public Builder setNumberFromTs43(@NonNull String numberFromTs43) {
+            Objects.requireNonNull(numberFromTs43);
+            mNumberFromTs43 = numberFromTs43;
+            return this;
+        }
+
+        /**
          * Set the port index of the Uicc card.
          *
          * @param portIndex The port index of the Uicc card.
@@ -3014,8 +3135,9 @@ public class SubscriptionInfoInternal {
 
         /**
          * Set whether satellite attach for carrier is enabled or disabled by user.
+         *
          * @param isSatelliteAttachEnabledForCarrier {@code 1} if satellite attach for carrier is
-         * enabled.
+         * enabled, {@code 0} if disabled, and {@code -1} if unset.
          * @return The builder.
          */
         @NonNull
@@ -3142,6 +3264,32 @@ public class SubscriptionInfoInternal {
         }
 
         /**
+         * Set the maximum downlink data rate in Kbps for streaming applications defined in GSMA
+         * TS.43 9.1.3.
+         *
+         * @param maxDownlinkDataRate The maximum downlink data rate in Kbps.
+         * @return The builder.
+         */
+        @NonNull
+        public Builder setStreamingAppMaxDownlinkKbps(long maxDownlinkDataRate) {
+            mStreamingAppMaxDownlinkKbps = maxDownlinkDataRate;
+            return this;
+        }
+
+        /**
+         * Set the maximum uplink data rate in Kbps for streaming applications defined in GSMA
+         * TS.43 9.1.3.
+         *
+         * @param maxUplinkDataRate The maximum uplink data rate in Kbps.
+         * @return The builder.
+         */
+        @NonNull
+        public Builder setStreamingAppMaxUplinkKbps(long maxUplinkDataRate) {
+            mStreamingAppMaxUplinkKbps = maxUplinkDataRate;
+            return this;
+        }
+
+        /**
          * Build the {@link SubscriptionInfoInternal}.
          *
          * @return The {@link SubscriptionInfoInternal} instance.
@@ -3215,6 +3363,18 @@ public class SubscriptionInfoInternal {
         public Builder setSatellitePlmnsVoiceServicePolicy(
                 @NonNull String satellitePlmnsVoiceServicePolicy) {
             mSatellitePlmnsVoiceServicePolicy = satellitePlmnsVoiceServicePolicy;
+            return this;
+        }
+
+        /**
+         * Set whether the subscription is for private network.
+         *
+         * @param isPrivateNetwork {@code 1} if the subscription is for private network.
+         * @return The builder.
+         */
+        @NonNull
+        public Builder setIsPrivateNetwork(int isPrivateNetwork) {
+            mIsPrivateNetwork = isPrivateNetwork;
             return this;
         }
     }

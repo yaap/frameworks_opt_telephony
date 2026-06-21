@@ -61,6 +61,7 @@ public class CommandParamsFactory extends Handler {
     private String mRequestedLanguage;
     private boolean mNoAlphaUsrCnf = false;
     private boolean mStkSmsSendViaTelephony = false;
+    private boolean mSupportSendUssd = false;
 
     // constants
     static final int MSG_ID_LOAD_ICON_DONE = 1;
@@ -134,6 +135,12 @@ public class CommandParamsFactory extends Handler {
                     com.android.internal.R.bool.config_stk_sms_send_support);
         } catch (NotFoundException e) {
             mStkSmsSendViaTelephony = false;
+        }
+        try {
+            mSupportSendUssd = mContext.getResources().getBoolean(
+                    com.android.internal.R.bool.config_stk_send_ussd_by_telephony);
+        } catch (NotFoundException e) {
+            mSupportSendUssd = false;
         }
     }
 
@@ -232,8 +239,10 @@ public class CommandParamsFactory extends Handler {
                 case REFRESH:
                 case RUN_AT:
                 case SEND_SS:
+                    cmdPending = processEventNotify(cmdDet, ctlvs);
+                    break;
                 case SEND_USSD:
-                    cmdPending = Flags.supportStkCommandUssdAndCall()
+                    cmdPending = (mSupportSendUssd && Flags.supportStkCommandUssdAndCall())
                             ? processSendUssd(cmdDet, ctlvs)
                             : processEventNotify(cmdDet, ctlvs);
                     break;
@@ -868,6 +877,14 @@ public class CommandParamsFactory extends Handler {
         DisplayTextParams displayTextParams = new DisplayTextParams(cmdDet, textMsg);
         ComprehensionTlv ctlvTpdu = searchForTag(ComprehensionTlvTag.SMS_TPDU,
                 ctlvs);
+
+        String smscAddress = null;
+        if (Flags.stkSmscAddressExtraction()) {
+            ComprehensionTlv ctlvSmsc = searchForTag(ComprehensionTlvTag.ADDRESS, ctlvs);
+            if (ctlvSmsc != null) {
+                smscAddress = ValueParser.retrieveAddress(ctlvSmsc);
+            }
+        }
         // Retrieves smsMessage from the SMS TPDU COMPREHENSION-TLV object
         SmsMessage smsMessage = ValueParser.retrieveTpduAsSmsMessage(ctlvTpdu);
         if (smsMessage != null) {
@@ -877,7 +894,20 @@ public class CommandParamsFactory extends Handler {
             TextMessage destAddr = new TextMessage();
             // Obtains the destination Address.
             destAddr.text = smsMessage.getRecipientAddress();
-            mCmdParams = new SendSMSParams(cmdDet, smsText, destAddr, displayTextParams);
+
+            byte[] rawValue = ctlvTpdu.getRawValue();
+            int valueIndex = ctlvTpdu.getValueIndex();
+            int length = ctlvTpdu.getLength();
+            byte[] rawTpdu = new byte[length];
+            try {
+                System.arraycopy(rawValue, valueIndex, rawTpdu, 0, length);
+            } catch (IndexOutOfBoundsException e) {
+                CatLog.d(this, "processSMSEventNotify: Error copying rawTpdu: " + e);
+                rawTpdu = null;
+            }
+
+            mCmdParams = new SendSMSParams(cmdDet, smsText, destAddr, displayTextParams,
+                    smscAddress, rawTpdu);
             return false;
         }
         return true;

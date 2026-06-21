@@ -21,6 +21,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.preference.PreferenceManager;
+import android.provider.Settings;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 
@@ -70,7 +71,7 @@ public class VoicemailNotificationSettingsUtil {
                 NotificationChannelController.CHANNEL_ID_VOICE_MAIL, context);
         // Note: NEVER look at the shared preferences; this was migrated to the notification channel
         // in Android P.
-        return (channel != null) ? channel.getSound() : null;
+        return (channel != null) ? channel.getSound() : Settings.System.DEFAULT_NOTIFICATION_URI;
     }
 
     /**

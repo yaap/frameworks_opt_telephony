@@ -101,7 +101,7 @@ public class PhoneFactory {
     static private NotificationChannelController sNotificationChannelController;
     static private CellularNetworkValidator sCellularNetworkValidator;
 
-    static private final HashMap<String, LocalLog>sLocalLogs = new HashMap<String, LocalLog>();
+    static private HashMap<String, LocalLog>sLocalLogs = new HashMap<String, LocalLog>();
     private static MetricsCollector sMetricsCollector;
     private static RadioInterfaceCapabilityController sRadioHalCapabilities;
     private static @NonNull FeatureFlags sFeatureFlags = new FeatureFlagsImpl();
@@ -194,8 +194,8 @@ public class PhoneFactory {
                 sUiccController = UiccController.make(context, featureFlags);
 
                 Rlog.i(LOG_TAG, "Creating SubscriptionManagerService");
-                sSubscriptionManagerService = new SubscriptionManagerService(context,
-                        Looper.myLooper(), featureFlags);
+                sSubscriptionManagerService =
+                        SubscriptionManagerService.init(context, Looper.myLooper(), featureFlags);
 
                 TelephonyComponentFactory.getInstance().inject(MultiSimSettingController.class.
                         getName()).initMultiSimSettingController(context, featureFlags);
@@ -225,11 +225,9 @@ public class PhoneFactory {
                 }
                 Rlog.i(LOG_TAG, "defaultSmsApplication: " + packageName);
 
-                if (sFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()) {
-                    // Explicitly call this, even if the user has no default Sms application, to
-                    // ensure that the System apps have the appropriate permissions.
-                    SmsApplication.grantPermissionsToSystemApps(context);
-                }
+                // Explicitly call this, even if the user has no default Sms application, to
+                // ensure that the System apps have the appropriate permissions.
+                SmsApplication.grantPermissionsToSystemApps(context);
 
                 // Set up monitor to watch for changes to SMS packages
                 SmsApplication.initSmsPackageMonitor(context);
@@ -250,10 +248,8 @@ public class PhoneFactory {
                 }
 
                 sPhoneConfigurationManager = PhoneConfigurationManager.init(sContext, featureFlags);
-                if (featureFlags.simultaneousCallingIndications()) {
-                    sSimultaneousCallingTracker =
-                            SimultaneousCallingTracker.init(sContext, featureFlags);
-                }
+                sSimultaneousCallingTracker =
+                    SimultaneousCallingTracker.init(sContext);
 
                 sCellularNetworkValidator = CellularNetworkValidator.make(sContext, sFeatureFlags);
 

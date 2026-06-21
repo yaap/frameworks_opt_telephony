@@ -61,7 +61,7 @@ public class GsmCdmaCall extends Call {
      * @param rejectReason
      */
     @Override
-    public void hangup(@android.telecom.Call.RejectReason int rejectReason)
+    public void hangup(/*@android.telecom.Call.RejectReason*/ int rejectReason)
             throws CallStateException {
         mOwner.hangup(this);
     }

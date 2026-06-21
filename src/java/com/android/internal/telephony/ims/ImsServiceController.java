@@ -50,7 +50,6 @@ import com.android.ims.ImsFeatureContainer;
 import com.android.ims.internal.IImsFeatureStatusCallback;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.ExponentialBackoff;
-import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.util.TelephonyUtils;
 import com.android.internal.telephony.util.WorkerThread;
 
@@ -60,6 +59,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 /**
@@ -127,33 +128,42 @@ public class ImsServiceController {
                 mBackoff.stop();
                 mIsBound = true;
                 mIsBinding = false;
+                mLocalLog.log("onServiceConnectedInternal");
+                Log.d(LOG_TAG, "ImsService(" + name
+                        + "): onServiceConnectedInternal with binder: " + service);
+                setServiceController(service);
+                notifyImsServiceReady();
+            }
+        }
+
+        protected void updateCapabilityAndServiceFeature() {
+            synchronized (mLock) {
                 try {
-                    mLocalLog.log("onServiceConnectedInternal");
-                    Log.d(LOG_TAG, "ImsService(" + name
-                            + "): onServiceConnectedInternal with binder: " + service);
-                    setServiceController(service);
-                    notifyImsServiceReady();
                     retrieveStaticImsServiceCapabilities();
                     // create all associated features in the ImsService
                     for (ImsFeatureConfiguration.FeatureSlotPair i : mImsFeatures) {
-                        long caps = modifyCapabiltiesForSlot(mImsFeatures, i.slotId,
+                        long caps = modifyCapabilitiesForSlot(mImsFeatures, i.slotId,
                                 mServiceCapabilities);
                         addImsServiceFeature(i, caps, mSlotIdToSubIdMap.get(i.slotId));
                     }
                 } catch (RemoteException e) {
-                    mIsBound = false;
-                    mIsBinding = false;
-                    // RemoteException means that the process holding the binder died or something
-                    // unexpected happened... try a full rebind.
-                    cleanupConnection();
-                    unbindService();
-                    startDelayedRebindToService();
-                    mLocalLog.log("onConnected exception=" + e.getMessage() + ", retry in "
-                            + mBackoff.getCurrentDelay() + " mS");
-                    Log.e(LOG_TAG, "ImsService(" + name + ") RemoteException:"
-                            + e.getMessage());
+                    cleanAndRestart(e);
                 }
             }
+        }
+
+        private void cleanAndRestart(RemoteException e) {
+            mIsBound = false;
+            mIsBinding = false;
+            // RemoteException means that the process holding the binder died or something
+            // unexpected happened... try a full rebind.
+            cleanupConnection();
+            unbindService();
+            startDelayedRebindToService();
+            mLocalLog.log("onConnected exception=" + e.getMessage() + ", retry in "
+                    + mBackoff.getCurrentDelay() + " mS");
+            Log.e(LOG_TAG, "ImsService RemoteException:"
+                    + e.getMessage());
         }
 
         private void onServiceDisconnectedInternal(ComponentName name) {
@@ -271,9 +281,8 @@ public class ImsServiceController {
     private static final boolean USE_WORKER_THREAD = false;
     private final HandlerThread mHandlerThread;
 
-    private final Handler mHandler;
+    protected final Handler mHandler;
     private final LegacyPermissionManager mPermissionManager;
-    private final FeatureFlags mFeatureFlags;
     private ImsFeatureBinderRepository mRepo;
     private ImsServiceControllerCallbacks mCallbacks;
     private ExponentialBackoff mBackoff;
@@ -288,13 +297,14 @@ public class ImsServiceController {
     private final ImsEnablementTracker mImsEnablementTracker;
     // The Capabilities bitmask of the connected ImsService (see ImsService#ImsServiceCapability).
     private long mServiceCapabilities;
-    private ImsServiceConnection mImsServiceConnection;
+    protected ImsServiceConnection mImsServiceConnection;
     // Only added or removed, never accessed on purpose.
     private Set<ImsFeatureStatusCallback> mFeatureStatusCallbacks = new HashSet<>();
     private final LocalLog mLocalLog = new LocalLog(8);
 
     protected final Object mLock = new Object();
     protected final Context mContext;
+    protected final ExecutorService mExecutor;
 
     private ImsService.Listener mFeatureChangedListener = new ImsService.Listener() {
         @Override
@@ -363,8 +373,7 @@ public class ImsServiceController {
     };
 
     public ImsServiceController(Context context, ComponentName componentName,
-            ImsServiceControllerCallbacks callbacks, ImsFeatureBinderRepository repo,
-            FeatureFlags featureFlags) {
+            ImsServiceControllerCallbacks callbacks, ImsFeatureBinderRepository repo) {
         mContext = context;
         mComponentName = componentName;
         mCallbacks = callbacks;
@@ -389,7 +398,6 @@ public class ImsServiceController {
                 Context.LEGACY_PERMISSION_SERVICE);
         mRepo = repo;
         mImsEnablementTracker = new ImsEnablementTracker(looper, componentName);
-        mFeatureFlags = featureFlags;
         mPackageManager = mContext.getPackageManager();
         if (mPackageManager != null) {
             mChangedPackages = mPackageManager.getChangedPackages(mLastSequenceNumber);
@@ -397,6 +405,7 @@ public class ImsServiceController {
                 mLastSequenceNumber = mChangedPackages.getSequenceNumber();
             }
         }
+        mExecutor = Executors.newSingleThreadExecutor();
     }
 
     @VisibleForTesting
@@ -404,7 +413,7 @@ public class ImsServiceController {
     // testing, use a handler supplied by the testing system.
     public ImsServiceController(Context context, ComponentName componentName,
             ImsServiceControllerCallbacks callbacks, Handler handler, RebindRetry rebindRetry,
-            ImsFeatureBinderRepository repo, FeatureFlags featureFlags) {
+            ImsFeatureBinderRepository repo, ExecutorService executor) {
         mContext = context;
         mComponentName = componentName;
         mCallbacks = callbacks;
@@ -417,9 +426,9 @@ public class ImsServiceController {
                 mRestartImsServiceRunnable);
         mPermissionManager = null;
         mRepo = repo;
-        mFeatureFlags = featureFlags;
         mImsEnablementTracker = new ImsEnablementTracker(handler.getLooper(), componentName);
         mHandlerThread = null;
+        mExecutor = executor;
     }
 
     /**
@@ -561,7 +570,7 @@ public class ImsServiceController {
                         new HashSet<>(mImsFeatures);
                 newFeatures.removeAll(oldImsFeatures);
                 for (ImsFeatureConfiguration.FeatureSlotPair i : newFeatures) {
-                    long caps = modifyCapabiltiesForSlot(mImsFeatures, i.slotId,
+                    long caps = modifyCapabilitiesForSlot(mImsFeatures, i.slotId,
                             mServiceCapabilities);
                     addImsServiceFeature(i, caps, mSlotIdToSubIdMap.get(i.slotId));
                 }
@@ -590,7 +599,7 @@ public class ImsServiceController {
                             removeImsServiceFeature(i, true);
                         }
                         for (ImsFeatureConfiguration.FeatureSlotPair i : removeAddFeatures) {
-                            long caps = modifyCapabiltiesForSlot(mImsFeatures, i.slotId,
+                            long caps = modifyCapabilitiesForSlot(mImsFeatures, i.slotId,
                                     mServiceCapabilities);
                             addImsServiceFeature(i, caps, subId);
                         }
@@ -598,7 +607,7 @@ public class ImsServiceController {
                     }
                 }
                 for (ImsFeatureConfiguration.FeatureSlotPair p : unchangedFeatures) {
-                    long caps = modifyCapabiltiesForSlot(mImsFeatures, p.slotId,
+                    long caps = modifyCapabilitiesForSlot(mImsFeatures, p.slotId,
                             mServiceCapabilities);
                     mRepo.notifyFeatureCapabilitiesChanged(p.slotId, p.featureType, caps);
                 }
@@ -696,13 +705,42 @@ public class ImsServiceController {
     /**
      * notify the ImsService that the ImsService is ready for feature creation.
      */
-    protected void notifyImsServiceReady() throws RemoteException {
+    protected void notifyImsServiceReady() {
+        final IImsServiceController serviceController;
         synchronized (mLock) {
-            if (isServiceControllerAvailable()) {
+            serviceController = mIImsServiceController;
+        }
+        if (serviceController != null) {
+            final ImsService.Listener listener = mFeatureChangedListener;
+            mExecutor.execute(() -> {
                 Log.d(LOG_TAG, "notifyImsServiceReady");
-                mIImsServiceController.setListener(mFeatureChangedListener);
-                mIImsServiceController.notifyImsServiceReadyForFeatureCreation();
-            }
+                try {
+                    serviceController.setListener(listener);
+                    serviceController.notifyImsServiceReadyForFeatureCreation();
+                    Log.d(LOG_TAG, "notifyImsServiceReady(Async) is done.");
+                    mHandler.post(() -> {
+                        if (mImsServiceConnection != null) {
+                            mImsServiceConnection.updateCapabilityAndServiceFeature();
+                        } else {
+                            Log.e(LOG_TAG, "ImsServiceConnection is not available");
+                        }
+                    });
+                } catch (RemoteException e) {
+                    Log.d(LOG_TAG, "notifyImsServiceReady exception");
+                    mHandler.post(() -> {
+                        if (mImsServiceConnection != null) {
+                            mImsServiceConnection.cleanAndRestart(e);
+                        } else {
+                            Log.e(LOG_TAG, "ImsServiceConnection is not available");
+                        }
+                    });
+                }
+            });
+        } else {
+            // Call updateCapabilityAndServiceFeature() to keep the existed call flow
+            // not required to check ImsServiceConnection as null
+            Log.w(LOG_TAG, "ServiceController is not available, skip notifyImsServiceReady");
+            mHandler.post(() -> mImsServiceConnection.updateCapabilityAndServiceFeature());
         }
     }
 
@@ -766,7 +804,7 @@ public class ImsServiceController {
      * - CAPABILITY_SIP_DELEGATE_CREATION should only be set in the case that this ImsService is
      * handling both MMTEL and RCS features for this slot.
      */
-    private long modifyCapabiltiesForSlot(
+    private long modifyCapabilitiesForSlot(
             Set<ImsFeatureConfiguration.FeatureSlotPair> features, int slotId, long serviceCaps) {
         long caps = serviceCaps;
         List<Integer> featureTypes = getFeaturesForSlot(slotId, features);

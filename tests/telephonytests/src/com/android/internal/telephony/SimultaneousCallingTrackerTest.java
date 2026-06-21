@@ -133,7 +133,6 @@ public class SimultaneousCallingTrackerTest extends TelephonyTest {
         doReturn(mSubInfo).when(mSubscriptionManagerService)
                 .getSubscriptionInfo(any(Integer.class));
         doReturn(RIL.RADIO_HAL_VERSION_2_2).when(mMockRadioConfigProxy).getVersion();
-        doReturn(true).when(mFeatureFlags).simultaneousCallingIndications();
         mMockRegistryManager = mContext.getSystemService(TelephonyRegistryManager.class);
     }
 
@@ -161,7 +160,7 @@ public class SimultaneousCallingTrackerTest extends TelephonyTest {
         }
         replaceInstance(PhoneFactory.class, "sPhones", null, mPhones);
         mPcm = PhoneConfigurationManager.init(mContext, mFeatureFlags);
-        mSct = SimultaneousCallingTracker.init(mContext, mFeatureFlags);
+        mSct = SimultaneousCallingTracker.init(mContext);
         replaceInstance(PhoneConfigurationManager.class, "mMi", mPcm, mMi);
         processAllMessages();
     }
@@ -232,7 +231,6 @@ public class SimultaneousCallingTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testDifferentUserAssociations_SimultaneousCallingDisabled() throws Exception {
-        doReturn(true).when(mFeatureFlags).simultaneousCallingIndications();
 
         //Assign each phone to a different user which should disable simultaneous calling:
         doReturn(new UserHandle(123)).when(mPhone).getUserHandle();
@@ -258,8 +256,6 @@ public class SimultaneousCallingTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testCellularDSDANotSupported_SimultaneousCallingDisabled() throws Exception {
-        doReturn(true).when(mFeatureFlags).simultaneousCallingIndications();
-
         init(2);
         setAndVerifyStaticCapability(STATIC_DSDA_CAPABILITY);
 
@@ -281,7 +277,6 @@ public class SimultaneousCallingTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testCellularDSDASupported_SimultaneousCallingEnabled() throws Exception {
-        doReturn(true).when(mFeatureFlags).simultaneousCallingIndications();
 
         init(2);
         setAndVerifyStaticCapability(STATIC_DSDA_CAPABILITY);
@@ -304,7 +299,6 @@ public class SimultaneousCallingTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testSingleSimSwitch_SimultaneousCallingDisabled() throws Exception {
-        doReturn(true).when(mFeatureFlags).simultaneousCallingIndications();
 
         init(2);
         setAndVerifyStaticCapability(STATIC_DSDA_CAPABILITY);
@@ -345,7 +339,6 @@ public class SimultaneousCallingTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testImsDSDANotSupported_SimultaneousCallingDisabled() throws Exception {
-        doReturn(true).when(mFeatureFlags).simultaneousCallingIndications();
         doReturn(true).when(mPhone).isImsRegistered();
         doReturn(true).when(mPhone1).isImsRegistered();
         doReturn(false).when(mPhone)
@@ -375,7 +368,6 @@ public class SimultaneousCallingTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testImsVDSDAEnabledTransportTypeWLAN_SimultaneousCallingEnabled() throws Exception {
-        doReturn(true).when(mFeatureFlags).simultaneousCallingIndications();
         doReturn(true).when(mPhone).isImsRegistered();
         doReturn(true).when(mPhone1).isImsRegistered();
         doReturn(AccessNetworkConstants.TRANSPORT_TYPE_WLAN).when(mImsPhone).getTransportType();
@@ -403,7 +395,6 @@ public class SimultaneousCallingTrackerTest extends TelephonyTest {
     @SmallTest
     public void testImsVDSDADisabledTransportTypeWLAN_SimultaneousCallingEnabled()
             throws Exception {
-        doReturn(true).when(mFeatureFlags).simultaneousCallingIndications();
         doReturn(true).when(mPhone).isImsRegistered();
         doReturn(true).when(mPhone1).isImsRegistered();
         doReturn(true).when(mPhone)
@@ -435,7 +426,6 @@ public class SimultaneousCallingTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testThreeSimCase_SimultaneousCallingEnabled() throws Exception {
-        doReturn(true).when(mFeatureFlags).simultaneousCallingIndications();
         doReturn(false).when(mPhone).isImsRegistered();
         doReturn(true).when(mPhone1).isImsRegistered();
         doReturn(true).when(mPhone2).isImsRegistered();

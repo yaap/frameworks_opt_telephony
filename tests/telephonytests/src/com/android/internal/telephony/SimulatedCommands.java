@@ -16,6 +16,9 @@
 
 package com.android.internal.telephony;
 
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_IS_VONR_ENABLED;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_N1_MODE_ENABLED;
+
 import android.compat.annotation.UnsupportedAppUsage;
 import android.hardware.radio.RadioError;
 import android.hardware.radio.V1_2.VoiceRegStateResult;
@@ -56,6 +59,7 @@ import android.telephony.data.DataProfile;
 import android.telephony.data.NetworkSliceInfo;
 import android.telephony.data.TrafficDescriptor;
 import android.telephony.emergency.EmergencyNumber;
+import android.util.SparseIntArray;
 
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.cdma.CdmaSmsBroadcastConfigInfo;
@@ -173,7 +177,9 @@ public class SimulatedCommands extends BaseCommands
 
     private int[] mImsRegistrationInfo = new int[5];
 
-    private boolean mVonrEnabled = false;
+    private SparseIntArray mRilRequestErrorCodeArray = new SparseIntArray();
+    private boolean mVonrEnabled = true;
+    private boolean mN1ModeEnabled = true;
 
     //***** Constructor
     public
@@ -2199,12 +2205,58 @@ public class SimulatedCommands extends BaseCommands
         return mImsRegistrationInfo;
     }
 
+    /**
+     * Sets a specific error code to be returned for a given RIL request.
+     *
+     * This method is used to simulate RIL command failures. When a RIL request with the
+     * specified ID is invoked, it will fail with
+     * a {@link com.android.internal.telephony.CommandException} containing
+     * the provided error code.
+     *
+     * @param requestId The ID of the RIL request to simulate an error for (e.g., a
+     *                  {@code RIL_REQUEST_*} constant from {@code RILConstants}).
+     * @param errorCode The error code to return for the specified request ID (e.g., a
+     *                  {@code TARE_ERROR_*} constant from
+     *                  {@link com.android.internal.telephony.CommandException}).
+     */
+    public void setRilRequestErrorCode(int requestId, int errorCode) {
+        mRilRequestErrorCodeArray.put(requestId, errorCode);
+    }
+
     @Override
-    public void isVoNrEnabled(Message message, WorkSource workSource) {
-        resultSuccess(message, (Object) mVonrEnabled);
+    public void isVoNrEnabled(Message result, WorkSource workSource) {
+        int error = getAndClearError(RIL_REQUEST_IS_VONR_ENABLED);
+
+        if (error == RadioError.NONE) {
+            resultSuccess(result, Boolean.valueOf(mVonrEnabled));
+        } else {
+            resultFail(result, null, CommandException.fromRilErrno(error));
+        }
     }
 
     public void setVonrEnabled(boolean vonrEnable) {
         mVonrEnabled = vonrEnable;
+    }
+
+    @Override
+    public void setN1ModeEnabled(boolean enable, Message result) {
+        int error = getAndClearError(RIL_REQUEST_SET_N1_MODE_ENABLED);
+
+        if (error == RadioError.NONE) {
+            mN1ModeEnabled = enable;
+            resultSuccess(result, null);
+        } else {
+            resultFail(result, null, CommandException.fromRilErrno(error));
+        }
+    }
+
+    public boolean isN1ModeEnabled() {
+        return mN1ModeEnabled;
+    }
+
+    private int getAndClearError(int requestId) {
+        int error = mRilRequestErrorCodeArray.get(requestId, RadioError.NONE);
+        mRilRequestErrorCodeArray.delete(requestId);
+        return error;
     }
 }

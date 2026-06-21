@@ -307,8 +307,12 @@ public class ImsPhone extends ImsPhoneBase {
     // The helper class to receive and store the MmTel registration status updated.
     private ImsRegistrationCallbackHelper mImsMmTelRegistrationHelper;
 
+    // The helper class to receive and store the MmTel emergency registration status updated.
+    private ImsRegistrationCallbackHelper mImsMmTelEmergencyRegistrationHelper;
+
     // The roaming state if currently in service, or the last roaming state when was in service.
     private boolean mLastKnownRoamingState = false;
+    private boolean mLastKnownIsUsingNtnState = false;
 
     private boolean mIsInImsEcm = false;
 
@@ -513,6 +517,8 @@ public class ImsPhone extends ImsPhoneBase {
 
         mImsMmTelRegistrationHelper = new ImsRegistrationCallbackHelper(mMmTelRegistrationUpdate,
                 context.getMainExecutor());
+        mImsMmTelEmergencyRegistrationHelper = new ImsRegistrationCallbackHelper(
+                mMmTelEmergencyRegistrationUpdate, context.getMainExecutor());
 
         PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         mWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, LOG_TAG);
@@ -1000,8 +1006,14 @@ public class ImsPhone extends ImsPhoneBase {
         String newDialString = PhoneNumberUtils.stripSeparators(dialString);
 
         // If not emergency number, handle in-call MMI first if applicable
-        if (!dialArgs.isEmergency && handleInCallMmiCommands(newDialString)) {
-            return null;
+        if (!dialArgs.isEmergency) {
+            if (mFeatureFlags.ignoreIncallMmiForEmergency() && mCT.isInEmergencyCall()) {
+                logd("dialInternal: ignore InCall MMI command during emergency call");
+                return null;
+            }
+            if (handleInCallMmiCommands(newDialString)) {
+                return null;
+            }
         }
 
         ImsDialArgs.Builder imsDialArgsBuilder;
@@ -2451,8 +2463,10 @@ public class ImsPhone extends ImsPhoneBase {
             return;
         }
         boolean newRoamingState = ss.getRoaming();
+        boolean newIsUsingNtnState = ss.isUsingNonTerrestrialNetwork();
         // Do not recalculate if there is no change to state.
-        if (mLastKnownRoamingState == newRoamingState) {
+        if (mLastKnownRoamingState == newRoamingState
+                && mLastKnownIsUsingNtnState == newIsUsingNtnState) {
             return;
         }
         boolean isInService = (ss.getState() == ServiceState.STATE_IN_SERVICE
@@ -2483,8 +2497,18 @@ public class ImsPhone extends ImsPhoneBase {
             if (configManager != null && CarrierConfigManager.isConfigForIdentifiedCarrier(
                     configManager.getConfigForSubId(getSubId()))) {
                 ImsManager imsManager = mImsManagerFactory.create(mContext, mPhoneId);
-                imsManager.setWfcMode(imsManager.getWfcMode(newRoamingState), newRoamingState);
+                boolean shouldOverrideWfcRoamingModeWhileUsingNtn =
+                        imsManager.shouldOverrideWfcRoamingModeWhileUsingNTN();
+                logd("updateRoamingState overrideWfcRoamingModeWhileUsingNtn= "
+                        + shouldOverrideWfcRoamingModeWhileUsingNtn);
+                if (!shouldOverrideWfcRoamingModeWhileUsingNtn) {
+                    // If carrier wants to override wfc roaming preference
+                    // when device is connected to NTN, then do not store wfc roaming mode
+                    // in siminfo DB else store it.
+                    imsManager.setWfcMode(imsManager.getWfcMode(newRoamingState), newRoamingState);
+                }
                 mLastKnownRoamingState = newRoamingState;
+                mLastKnownIsUsingNtnState = newIsUsingNtnState;
             }
         } else {
             if (DBG) logd("updateRoamingState postponed: " + newRoamingState);
@@ -2521,11 +2545,20 @@ public class ImsPhone extends ImsPhoneBase {
     }
 
     /**
+     * @return the {@link RegistrationManager.RegistrationCallback} to be used for emergency
+     * registration associated with this {@link ImsPhone}.
+     */
+    public RegistrationManager.RegistrationCallback getImsMmTelEmergencyRegistrationCallback() {
+        return mImsMmTelEmergencyRegistrationHelper.getCallback();
+    }
+
+    /**
      * Reset the IMS registration state.
      */
     public void resetImsRegistrationState() {
         if (DBG) logd("resetImsRegistrationState");
         mImsMmTelRegistrationHelper.reset();
+        mImsMmTelEmergencyRegistrationHelper.reset();
         int subId = getSubId();
         if (SubscriptionManager.isValidSubscriptionId(subId)) {
             updateImsRegistrationInfo(REGISTRATION_STATE_NOT_REGISTERED,
@@ -2547,8 +2580,7 @@ public class ImsPhone extends ImsPhoneBase {
             setServiceState(ServiceState.STATE_IN_SERVICE);
             getDefaultPhone().setImsRegistrationState(true);
             mImsStats.onImsRegistered(attributes);
-            mImsNrSaModeHandler.onImsRegistered(
-                    attributes.getRegistrationTechnology(), attributes.getFeatureTags());
+            mImsNrSaModeHandler.onImsRegistered(attributes.getRegistrationTechnology());
             updateImsRegistrationInfo(REGISTRATION_STATE_REGISTERED,
                     attributes.getRegistrationTechnology(), SUGGESTED_ACTION_NONE,
                     imsTransportType);
@@ -2616,12 +2648,6 @@ public class ImsPhone extends ImsPhoneBase {
                 updateImsRegistrationInfo(REGISTRATION_STATE_NOT_REGISTERED,
                         imsRadioTech, suggestedModemAction, TRANSPORT_TYPE_INVALID);
 
-                if (mFeatureFlags.clearCachedImsPhoneNumberWhenDeviceLostImsRegistration()) {
-                    // Clear the phone number from P-Associated-Uri
-                    setCurrentSubscriberUris(null);
-                    clearPhoneNumberForSourceIms();
-                }
-
                 AsyncResult ar;
                 ar = new AsyncResult(null, new ImsRegistrationRadioTechInfo(mPhoneId,
                         REGISTRATION_TECH_NONE, REGISTRATION_STATE_NOT_REGISTERED),
@@ -2646,6 +2672,38 @@ public class ImsPhone extends ImsPhoneBase {
         }
     };
 
+    private ImsRegistrationCallbackHelper.ImsRegistrationUpdate mMmTelEmergencyRegistrationUpdate =
+            new ImsRegistrationCallbackHelper.ImsRegistrationUpdate() {
+                @Override
+                public void handleImsRegistered(@NonNull ImsRegistrationAttributes attributes) {
+                    mImsNrSaModeHandler.onImsEmergencyRegistered(
+                            attributes.getRegistrationTechnology());
+                }
+
+                @Override
+                public void handleImsRegistering(int imsRadioTech) {
+                }
+
+                @Override
+                public void handleImsUnregistered(ImsReasonInfo imsReasonInfo,
+                        @RegistrationManager.SuggestedAction int suggestedAction,
+                        @ImsRegistrationImplBase.ImsRegistrationTech int imsRadioTech) {
+                    mImsNrSaModeHandler.onImsEmergencyUnregistered(imsRadioTech);
+                }
+
+                @Override
+                public void handleImsUnregistered(ImsReasonInfo imsReasonInfo,
+                        @RegistrationManager.SuggestedAction int suggestedAction,
+                        @ImsRegistrationImplBase.ImsRegistrationTech int imsRadioTech,
+                        int throttlingTimeSec) {
+                    mImsNrSaModeHandler.onImsEmergencyUnregistered(imsRadioTech);
+                }
+
+                @Override
+                public void handleImsSubscriberAssociatedUriChanged(Uri[] uris) {
+                }
+            };
+
     /** Processes IMS unregistration, updates state, and performs suggested actions. */
     @VisibleForTesting
     public void processImsUnregistered(ImsReasonInfo imsReasonInfo,
@@ -2665,6 +2723,8 @@ public class ImsPhone extends ImsPhoneBase {
         getDefaultPhone().setImsRegistrationState(false);
         mImsStats.onImsUnregistered(imsReasonInfo);
         mImsNrSaModeHandler.onImsUnregistered(imsRadioTech);
+        // Reset the previous P-Associated-URI parsing status for the new IMS registration.
+        mSubscriptionManagerService.clearImsNumberUpdateStatus(getSubId());
         mImsRegistrationTech = REGISTRATION_TECH_NONE;
         int suggestedModemAction = SUGGESTED_ACTION_NONE;
         if (imsReasonInfo.getCode() == ImsReasonInfo.CODE_REGISTRATION_ERROR) {
@@ -2681,12 +2741,6 @@ public class ImsPhone extends ImsPhoneBase {
 
         updateImsRegistrationInfo(REGISTRATION_STATE_NOT_REGISTERED,
                 imsRadioTech, suggestedModemAction, TRANSPORT_TYPE_INVALID, throttlingTimeSec);
-
-        if (mFeatureFlags.clearCachedImsPhoneNumberWhenDeviceLostImsRegistration()) {
-            // Clear the phone number from P-Associated-Uri
-            setCurrentSubscriberUris(null);
-            clearPhoneNumberForSourceIms();
-        }
 
         AsyncResult ar;
         ar = new AsyncResult(null, new ImsRegistrationRadioTechInfo(mPhoneId,
@@ -2718,6 +2772,8 @@ public class ImsPhone extends ImsPhoneBase {
             // IMS callbacks are sent back to telephony after SIM state changed.
             return;
         }
+        // Reset the previous P-Associated-URI parsing status for the new IMS registration.
+        mSubscriptionManagerService.clearImsNumberUpdateStatus(getSubId());
         SubscriptionInfoInternal subInfo = mSubscriptionManagerService
                 .getSubscriptionInfoInternal(subId);
         if (subInfo == null) {
@@ -2739,44 +2795,45 @@ public class ImsPhone extends ImsPhoneBase {
                     } else if (result.isValidPhoneNumber()) {
                         mSubscriptionManagerService.setNumberFromIms(subId,
                                 result.getParsedPhoneNumber());
+                        mSubscriptionManagerService.setImsNumberUpdateStatus(subId, true);
                         logd("setPhoneNumberForSourceIms: update IMS phone number");
                         return;
                     } else {
                         loge("setPhoneNumberForSourceIms: PhoneNumberManager return error "
                                 + result.getErrorCode());
-                        // try to run existing implementation.
                     }
                 } catch (IllegalArgumentException e) {
                     loge("setPhoneNumberForSourceIms: failed to parse phone number, " + e);
-                    // Fall through to the existing implementation
                 }
             } else {
                 logi("setPhoneNumberForSourceIms: can't access PhoneNumberManager");
             }
-        }
-
-        // When flag enablePhoneNumberParsingApi is not enabled, PhoneNumberManager is unavailable
-        // or parsePhoneNumber() return error, existing implementation is performed.
-        String phoneNumber = extractPhoneNumberFromAssociatedUris(uris, /*isGlobalFormat*/true);
-        if (phoneNumber != null) {
-            phoneNumber = PhoneNumberUtils.formatNumberToE164(phoneNumber, subCountryIso);
-            if (phoneNumber == null) {
-                loge("format to E164 failed");
-                return;
-            }
-            mSubscriptionManagerService.setNumberFromIms(subId, phoneNumber);
-        } else if (isAllowNonGlobalNumberFormat()) {
-            // If carrier config has true for KEY_IGNORE_GLOBAL_PHONE_NUMBER_FORMAT_BOOL and
-            // P-Associated-Uri does not have global number,
-            // try to find phone number excluding '+' one more time.
-            phoneNumber = extractPhoneNumberFromAssociatedUris(uris, /*isGlobalFormat*/false);
-            if (phoneNumber == null) {
-                loge("extract phone number without '+' failed");
-                return;
-            }
-            mSubscriptionManagerService.setNumberFromIms(subId, phoneNumber);
         } else {
-            logd("extract phone number failed");
+            // When flag enablePhoneNumberParsingApi is not enabled,
+            // existing implementation is performed.
+            String phoneNumber = extractPhoneNumberFromAssociatedUris(uris, /*isGlobalFormat*/true);
+            if (phoneNumber != null) {
+                phoneNumber = PhoneNumberUtils.formatNumberToE164(phoneNumber, subCountryIso);
+                if (phoneNumber == null) {
+                    loge("format to E164 failed");
+                    return;
+                }
+                mSubscriptionManagerService.setNumberFromIms(subId, phoneNumber);
+                mSubscriptionManagerService.setImsNumberUpdateStatus(subId, true);
+            } else if (isAllowNonGlobalNumberFormat()) {
+                // If carrier config has true for KEY_IGNORE_GLOBAL_PHONE_NUMBER_FORMAT_BOOL and
+                // P-Associated-Uri does not have global number,
+                // try to find phone number excluding '+' one more time.
+                phoneNumber = extractPhoneNumberFromAssociatedUris(uris, /*isGlobalFormat*/false);
+                if (phoneNumber == null) {
+                    loge("extract phone number without '+' failed");
+                    return;
+                }
+                mSubscriptionManagerService.setNumberFromIms(subId, phoneNumber);
+                mSubscriptionManagerService.setImsNumberUpdateStatus(subId, true);
+            } else {
+                logd("extract phone number failed");
+            }
         }
     }
 
@@ -3113,7 +3170,10 @@ public class ImsPhone extends ImsPhoneBase {
         pw.println("  mSilentRedialRegistrants = " + mSilentRedialRegistrants);
         pw.println("  mImsMmTelRegistrationState = "
                 + mImsMmTelRegistrationHelper.getImsRegistrationState());
+        pw.println("  mImsMmTelEmergencyRegistrationState = "
+                + mImsMmTelEmergencyRegistrationHelper.getImsRegistrationState());
         pw.println("  mLastKnownRoamingState = " + mLastKnownRoamingState);
+        pw.println(" mLastKnownIsUsingNtn = " + mLastKnownIsUsingNtnState);
         pw.println("  mSsnRegistrants = " + mSsnRegistrants);
         pw.println(" Registration Log:");
         pw.increaseIndent();

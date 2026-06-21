@@ -72,18 +72,13 @@ public class SimultaneousCallingTracker {
     protected static final int EVENT_DEVICE_CONFIG_CHANGED        = 104;
     protected static final int EVENT_IMS_REGISTRATION_CHANGED     = 105;
 
-    /** Feature flags */
-    @NonNull
-    private final FeatureFlags mFeatureFlags;
-
     /**
      * Init method to instantiate the object
      * Should only be called once.
      */
-    public static SimultaneousCallingTracker init(Context context,
-            @NonNull FeatureFlags featureFlags) {
+    public static SimultaneousCallingTracker init(Context context) {
         if (sInstance == null) {
-            sInstance = new SimultaneousCallingTracker(context, featureFlags);
+            sInstance = new SimultaneousCallingTracker(context);
         } else {
             Log.wtf(LOG_TAG, "init() called multiple times!  sInstance = " + sInstance);
         }
@@ -94,9 +89,8 @@ public class SimultaneousCallingTracker {
      * Constructor.
      * @param context context needed to send broadcast.
      */
-    private SimultaneousCallingTracker(Context context, @NonNull FeatureFlags featureFlags) {
+    private SimultaneousCallingTracker(Context context) {
         mContext = context;
-        mFeatureFlags = featureFlags;
         mHandler = new ConfigManagerHandler();
         mPhoneConfigurationManager = PhoneConfigurationManager.getInstance();
         mPhoneConfigurationManager.addListener(mPhoneConfigurationManagerListener);
@@ -125,7 +119,6 @@ public class SimultaneousCallingTracker {
     private final class ConfigManagerHandler extends Handler {
         @Override
         public void handleMessage(Message msg) {
-            if (!mFeatureFlags.simultaneousCallingIndications()) { return; }
             Log.v(LOG_TAG, "Received EVENT " + msg.what);
             switch (msg.what) {
                 case EVENT_PHONE_CAPABILITY_CHANGED -> {
@@ -183,9 +176,7 @@ public class SimultaneousCallingTracker {
      * @param listener A listener.
      */
     public void addListener(Listener listener) {
-        if (mFeatureFlags.simultaneousCallingIndications()) {
-            mListeners.add(listener);
-        }
+        mListeners.add(listener);
     }
 
     /**
@@ -194,9 +185,7 @@ public class SimultaneousCallingTracker {
      * @param listener A listener.
      */
     public final void removeListener(Listener listener) {
-        if (mFeatureFlags.simultaneousCallingIndications()) {
-            mListeners.remove(listener);
-        }
+        mListeners.remove(listener);
     }
 
     /**

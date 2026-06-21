@@ -1,15 +1,7 @@
 package: "com.android.internal.telephony.flags"
 container: "system"
 
-# OWNER=jayachandranc TARGET=24Q3
-flag {
-    name: "esim_bootstrap_provisioning_flag"
-    namespace: "telephony"
-    description: "This flag controls eSIM Bootstrap provisioning feature support."
-    bug:"298567545"
-}
-
-# OWNER=arunvoddu TARGET=24Q4
+# OWNER=arunvoddu TARGET=24Q4 USED_BY_APP=true
 flag {
     name: "carrier_restriction_status"
     is_exported: true
@@ -27,21 +19,13 @@ flag {
     bug:"318348580"
 }
 
-# OWNER=arunvoddu TARGET=24Q4
+# OWNER=arunvoddu TARGET=24Q4 USED_BY_APP=true
 flag {
     name: "set_carrier_restriction_status"
     namespace: "telephony"
     description: "This flag controls the visibility of the setCarrierRestrictionStatus API in carrierRestrictionRules class."
     bug:"342411308"
     is_exported: true
-}
-
-# OWNER=mewan TARGET=24Q4
-flag {
-    name: "optimization_apdu_sender"
-    namespace: "telephony"
-    description: "This flag controls optimization of apdu sender class."
-    bug:"335257880"
 }
 
 # OWNER=jhyoon TARGET=25Q2
@@ -62,29 +46,6 @@ flag {
     is_exported: true
 }
 
-# OWNER=arunvoddu TARGET=25Q3
-flag {
-    name: "sim_phonebook_cache_fix"
-    namespace: "telephony"
-    description: "This flag reset the cache if the sim phonebook is empty"
-    bug:"404094844"
-}
-
-# OWNER=arunvoddu TARGET=25Q4
-flag {
-    name: "send_imsi_key_for_duplicate_sim"
-    namespace: "telephony"
-    description: "This will make sure to send the IMSIKey to Modem in case SIM2 operator is same as SIM1"
-    bug:"400888891"
-}
-
-# OWNER=arunvoddu TARGET=25Q4
-flag {
-    name: "cat_service_creation_fix"
-    namespace: "telephony"
-    description: "Flag fix is to create the catService object with valid SIM Application"
-    bug:"417398404"
-}
 
 # OWNER=juhokim TARGET=26Q2
 flag {
@@ -115,5 +76,43 @@ flag {
     bug:"408143665"
     metadata {
         purpose: PURPOSE_FEATURE
+    }
+}
+
+# OWNER=muralidharm TARGET=26Q1
+flag {
+    name: "slot_port_switch_failure_fix"
+    namespace: "telephony"
+    description: "This flag is to control the slot port switch failure fix during switching between different MEP modes."
+    bug:"394709785"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=rgreenwalt TARGET=26Q2
+flag {
+    name: "new_sim_auth_permission"
+    namespace: "telephony"
+    description: "Add new permission to secure SIM auth"
+    bug:"343796688"
+}
+
+# OWNER=nharold TARGET=26Q3
+flag {
+    name: "downloadable_subscription_include_carrier_identifier_internal"
+    namespace: "telephony"
+    description: "Add the CarrierIdentifier to the DownloadableSubscription"
+    bug:"477378293"
+}
+
+# OWNER=gargakash TARGET=26Q3
+flag {
+    name: "fix_pin_storage_deadlock"
+    namespace: "telephony"
+    description: "Fixes deadlock between PinStorage and UiccController by narrowing synchronization scope"
+    bug: "464075332"
+    metadata {
+        purpose: PURPOSE_BUGFIX
     }
 }

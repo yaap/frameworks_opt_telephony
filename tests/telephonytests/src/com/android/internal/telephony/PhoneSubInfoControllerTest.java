@@ -1254,7 +1254,6 @@ public class PhoneSubInfoControllerTest extends TelephonyTest {
         preDefinedPcscfs[0] = "127.0.0.1";
         preDefinedPcscfs[1] = "192.168.0.1";
         preDefinedPcscfs[2] = "::1";
-        doReturn(true).when(mFeatureFlags).supportIsimRecord();
         doReturn(mIsimUiccRecords).when(mPhone).getIsimRecords();
         doReturn(preDefinedPcscfs).when(mIsimUiccRecords).getIsimPcscf();
 
@@ -1274,7 +1273,6 @@ public class PhoneSubInfoControllerTest extends TelephonyTest {
         preDefinedPcscfs[0] = null;
         preDefinedPcscfs[1] = "";
         preDefinedPcscfs[2] = "::1";
-        doReturn(true).when(mFeatureFlags).supportIsimRecord();
         doReturn(mIsimUiccRecords).when(mPhone).getIsimRecords();
         doReturn(preDefinedPcscfs).when(mIsimUiccRecords).getIsimPcscf();
 
@@ -1288,7 +1286,6 @@ public class PhoneSubInfoControllerTest extends TelephonyTest {
     @Test
     @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
     public void getImsPcscfAddresses_IsimNotLoadedError() {
-        doReturn(true).when(mFeatureFlags).supportIsimRecord();
         doReturn(null).when(mPhone).getIsimRecords();
 
         try {
@@ -1302,8 +1299,6 @@ public class PhoneSubInfoControllerTest extends TelephonyTest {
 
     @Test
     public void getImsPcscfAddresses_InValidSubIdCheck() {
-        doReturn(true).when(mFeatureFlags).supportIsimRecord();
-
         try {
             mPhoneSubInfoControllerUT.getImsPcscfAddresses(-1, TAG);
             fail();
@@ -1316,7 +1311,6 @@ public class PhoneSubInfoControllerTest extends TelephonyTest {
     @Test
     public void getImsPcscfAddresses_NoReadPrivilegedPermission() {
         mContextFixture.removeCallingOrSelfPermission(ContextFixture.PERMISSION_ENABLE_ALL);
-        doReturn(true).when(mFeatureFlags).supportIsimRecord();
 
         try {
             mPhoneSubInfoControllerUT.getImsPcscfAddresses(0, TAG);
@@ -1327,22 +1321,6 @@ public class PhoneSubInfoControllerTest extends TelephonyTest {
         }
 
         mContextFixture.addCallingOrSelfPermission(READ_PRIVILEGED_PHONE_STATE);
-    }
-
-    @Test
-    public void getImsPcscfAddresses_FlagDisabled() {
-        String[] preDefinedPcscfs = new String[3];
-        preDefinedPcscfs[0] = "127.0.0.1";
-        preDefinedPcscfs[1] = "192.168.0.1";
-        preDefinedPcscfs[2] = "::1";
-        doReturn(false).when(mFeatureFlags).supportIsimRecord();
-        doReturn(mIsimUiccRecords).when(mPhone).getIsimRecords();
-        doReturn(preDefinedPcscfs).when(mIsimUiccRecords).getIsimPcscf();
-
-        List<String> pcscfAddresses = mPhoneSubInfoControllerUT.getImsPcscfAddresses(0, TAG);
-
-        assertNotNull(pcscfAddresses);
-        assertEquals(0, pcscfAddresses.size());
     }
 
     @Test

@@ -22,6 +22,7 @@ import android.hardware.radio.RadioError;
 import android.hardware.radio.RadioResponseInfo;
 import android.hardware.radio.network.IRadioNetworkResponse;
 import android.os.AsyncResult;
+import android.os.RemoteException;
 import android.telephony.BarringInfo;
 import android.telephony.CellInfo;
 import android.telephony.EmergencyRegistrationResult;
@@ -553,6 +554,7 @@ public class NetworkResponse extends IRadioNetworkResponse.Stub {
 
     /**
      * @param responseInfo Response info struct containing response type, serial no. and error
+     * @deprecated Use {@link #setSatelliteNetworkInfoResponse(RadioResponseInfo)} instead.
      */
     public void setSatellitePlmnResponse(RadioResponseInfo responseInfo) {
         RadioResponse.responseVoid(HAL_SERVICE_NETWORK, mRil, responseInfo);
@@ -579,6 +581,39 @@ public class NetworkResponse extends IRadioNetworkResponse.Stub {
             }
             mRil.processResponseDone(rr, responseInfo, isEnabled);
         }
+    }
+
+    /**
+     * @param info Response info struct containing response type, serial no. and error
+     */
+    public void setSatelliteNetworkInfoResponse(RadioResponseInfo info) throws RemoteException {
+        RadioResponse.responseVoid(HAL_SERVICE_NETWORK, mRil, info);
+    }
+
+    /**
+     * @param info Response info struct containing response type, serial no. and error
+     */
+    public void enablePrioritizedNetworkScanResponse(RadioResponseInfo info)
+            throws RemoteException {
+        RadioResponse.responseVoid(HAL_SERVICE_NETWORK, mRil, info);
+    }
+
+    /**
+     * @param info Response info struct containing response type, serial no. and error
+     */
+    public void disablePrioritizedNetworkScanResponse(RadioResponseInfo info)
+            throws RemoteException {
+        RadioResponse.responseVoid(HAL_SERVICE_NETWORK, mRil, info);
+    }
+
+    /**
+     * @param responseInfo Response info struct containing response type, serial no. and error.
+     * @param alertCategories Array of AlertCategories supported by the modem.
+     */
+    public void getSupportedNetworkAlertCategoriesResponse(RadioResponseInfo responseInfo,
+            /* @AlertCategories */ int[] alertCategories) {
+        RadioResponse.responseIntArrayList(HAL_SERVICE_NETWORK, mRil, responseInfo,
+                RILUtils.primitiveArrayToArrayList(alertCategories));
     }
 
     @Override

@@ -20,6 +20,8 @@ import static com.android.internal.telephony.TelephonyStatsLog.CARRIER_ROAMING_S
 import static com.android.internal.telephony.TelephonyStatsLog.CARRIER_ROAMING_SATELLITE_SESSION;
 import static com.android.internal.telephony.TelephonyStatsLog.CELLULAR_DATA_SERVICE_SWITCH;
 import static com.android.internal.telephony.TelephonyStatsLog.CELLULAR_SERVICE_STATE;
+import static com.android.internal.telephony.TelephonyStatsLog.DEVICE_TELEPHONY_PROPERTIES;
+import static com.android.internal.telephony.TelephonyStatsLog.MESSAGING_READ_RESTRICTION_REPORTED;
 import static com.android.internal.telephony.TelephonyStatsLog.OUTGOING_SHORT_CODE_SMS;
 import static com.android.internal.telephony.TelephonyStatsLog.SATELLITE_CONFIG_UPDATER;
 import static com.android.internal.telephony.TelephonyStatsLog.SATELLITE_ENTITLEMENT;
@@ -33,6 +35,7 @@ import static com.android.internal.telephony.util.TelephonyUtils.IS_DEBUGGABLE;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.eq;
@@ -42,19 +45,25 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import android.app.StatsManager;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.SystemProperties;
 import android.telephony.TelephonyManager;
+import android.telephony.TelephonyProtoEnums;
 import android.util.StatsEvent;
 
 import androidx.test.filters.SmallTest;
 
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
+import com.android.internal.telephony.TelephonyStatsLog;
 import com.android.internal.telephony.TelephonyTest;
 import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.nano.PersistAtomsProto.CarrierRoamingSatelliteControllerStats;
 import com.android.internal.telephony.nano.PersistAtomsProto.CarrierRoamingSatelliteSession;
 import com.android.internal.telephony.nano.PersistAtomsProto.CellularDataServiceSwitch;
 import com.android.internal.telephony.nano.PersistAtomsProto.CellularServiceState;
+import com.android.internal.telephony.nano.PersistAtomsProto.MessagingReadRestrictionEvent;
 import com.android.internal.telephony.nano.PersistAtomsProto.OtpEvaluationEvent;
 import com.android.internal.telephony.nano.PersistAtomsProto.OtpRedactionEvent;
 import com.android.internal.telephony.nano.PersistAtomsProto.OutgoingShortCodeSms;
@@ -417,6 +426,11 @@ public class MetricsCollectorTest extends TelephonyTest {
         mContextFixture.putIntResource(
                 com.android.internal.R.integer.config_metrics_pull_cooldown_millis,
                 (int) POWER_CORRELATED_MIN_COOLDOWN_MILLIS);
+
+        mMetricsCollector =
+                new MetricsCollector(mContext, mPersistAtomsStorage,
+                        mDeviceStateHelper, mVonrHelper, mDefaultNetworkMonitor, mFeatureFlags);
+
         List<StatsEvent> actualAtoms = new ArrayList<>();
 
         int result = mMetricsCollector.onPullAtom(CELLULAR_SERVICE_STATE, actualAtoms);
@@ -729,6 +743,193 @@ public class MetricsCollectorTest extends TelephonyTest {
     }
 
     @Test
+    public void onPullAtom_messagingReadRestrictionEvent_empty() {
+        doReturn(new MessagingReadRestrictionEvent[0]).when(mPersistAtomsStorage)
+                .getMessagingReadRestrictionEventStats(anyLong());
+        List<StatsEvent> actualAtoms = new ArrayList<>();
+
+        int result = mMetricsCollector.onPullAtom(MESSAGING_READ_RESTRICTION_REPORTED,
+                actualAtoms);
+
+        assertThat(actualAtoms).hasSize(0);
+        assertThat(result).isEqualTo(StatsManager.PULL_SUCCESS);
+    }
+
+    @Test
+    public void onPullAtom_messagingReadRestrictionEvent_tooFrequent() {
+        doReturn(null).when(mPersistAtomsStorage).getMessagingReadRestrictionEventStats(
+                anyLong());
+        List<StatsEvent> actualAtoms = new ArrayList<>();
+
+        int result = mMetricsCollector.onPullAtom(MESSAGING_READ_RESTRICTION_REPORTED,
+                actualAtoms);
+
+        assertThat(actualAtoms).hasSize(0);
+        assertThat(result).isEqualTo(StatsManager.PULL_SKIP);
+        verify(mPersistAtomsStorage, times(1))
+                .getMessagingReadRestrictionEventStats(eq(MIN_COOLDOWN_MILLIS));
+        verifyNoMoreInteractions(mPersistAtomsStorage);
+    }
+
+    @Test
+    public void onPullAtom_messagingReadRestrictionEvent_multipleAtoms() {
+        MessagingReadRestrictionEvent messagingReadRestrictionEvent =
+                new MessagingReadRestrictionEvent();
+        doReturn(new MessagingReadRestrictionEvent[] {messagingReadRestrictionEvent,
+                messagingReadRestrictionEvent, messagingReadRestrictionEvent})
+                .when(mPersistAtomsStorage)
+                .getMessagingReadRestrictionEventStats(anyLong());
+        List<StatsEvent> actualAtoms = new ArrayList<>();
+
+        int result = mMetricsCollector.onPullAtom(MESSAGING_READ_RESTRICTION_REPORTED,
+                actualAtoms);
+
+        assertThat(actualAtoms).hasSize(3);
+        assertThat(result).isEqualTo(StatsManager.PULL_SUCCESS);
+    }
+
+    @Test
+    @SmallTest
+    public void onPullAtom_deviceTelephonyProperties_allFeaturesDisabled() {
+        mPhones = new Phone[] {mPhone};
+        doReturn(1).when(mPhone).getSubId();
+        doReturn(mDataSettingsManager).when(mPhone).getDataSettingsManager();
+        doReturn(false).when(mDataSettingsManager).isMobileDataPolicyEnabled(
+                TelephonyManager.MOBILE_DATA_POLICY_AUTO_DATA_SWITCH);
+        doReturn(false).when(mPhone).isManagedProfile();
+        doReturn(new UiccSlot[] {mPhysicalSlot}).when(mUiccController).getUiccSlots();
+        doReturn(false).when(mPhysicalSlot).isMultipleEnabledProfileSupported();
+        doReturn(0).when(mPersistAtomsStorage).getAutoDataSwitchToggleCount();
+        doReturn(false).when(mPackageManager).hasSystemFeature(anyString());
+
+        List<StatsEvent> actualAtoms = new ArrayList<>();
+
+        int result = mMetricsCollector.onPullAtom(DEVICE_TELEPHONY_PROPERTIES, actualAtoms);
+
+        assertThat(result).isEqualTo(StatsManager.PULL_SUCCESS);
+        assertThat(actualAtoms).hasSize(1);
+
+        int vendorApiLevel = SystemProperties.getInt("ro.vendor.api_level",
+                Build.VERSION.DEVICE_INITIAL_SDK_INT);
+        int boardApiLevel = SystemProperties.getInt("ro.board_api_level",
+                Build.VERSION.DEVICE_INITIAL_SDK_INT);
+
+        StatsEvent expectedAtom = TelephonyStatsLog.buildStatsEvent(
+                DEVICE_TELEPHONY_PROPERTIES, true, false, 0, false, 0,
+                vendorApiLevel, boardApiLevel, 0L);
+
+        assertStatsEventEquals(expectedAtom, actualAtoms.get(0));
+    }
+
+    @Test
+    @SmallTest
+    public void onPullAtom_deviceTelephonyProperties_allFeaturesEnabled() {
+        mPhones = new Phone[] {mPhone};
+        doReturn(1).when(mPhone).getSubId();
+        doReturn(mDataSettingsManager).when(mPhone).getDataSettingsManager();
+        doReturn(true).when(mDataSettingsManager).isMobileDataPolicyEnabled(
+                TelephonyManager.MOBILE_DATA_POLICY_AUTO_DATA_SWITCH);
+        doReturn(true).when(mPhone).isManagedProfile();
+        doReturn(new UiccSlot[] {mPhysicalSlot, mEsimSlot}).when(mUiccController).getUiccSlots();
+        doReturn(true).when(mPhysicalSlot).isMultipleEnabledProfileSupported();
+        doReturn(true).when(mEsimSlot).isMultipleEnabledProfileSupported();
+        doReturn(10).when(mPersistAtomsStorage).getAutoDataSwitchToggleCount();
+        doReturn(true).when(mPackageManager).hasSystemFeature(anyString());
+
+        List<StatsEvent> actualAtoms = new ArrayList<>();
+
+        int result = mMetricsCollector.onPullAtom(DEVICE_TELEPHONY_PROPERTIES, actualAtoms);
+
+        assertThat(result).isEqualTo(StatsManager.PULL_SUCCESS);
+        assertThat(actualAtoms).hasSize(1);
+
+        int vendorApiLevel = SystemProperties.getInt("ro.vendor.api_level",
+                Build.VERSION.DEVICE_INITIAL_SDK_INT);
+        int boardApiLevel = SystemProperties.getInt("ro.board_api_level",
+                Build.VERSION.DEVICE_INITIAL_SDK_INT);
+
+        long expectedBitmask =
+                (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_CALLING - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_DATA - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_MESSAGING - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_RADIO_ACCESS - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_SUBSCRIPTION - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_TELEPHONY - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_IMS - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_EUICC - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_EUICC_MEP - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_SATELLITE - 1));
+
+        StatsEvent expectedAtom = TelephonyStatsLog.buildStatsEvent(
+                DEVICE_TELEPHONY_PROPERTIES, true, true, 10, true, 2,
+                vendorApiLevel, boardApiLevel, expectedBitmask);
+
+        assertStatsEventEquals(expectedAtom, actualAtoms.get(0));
+    }
+
+    @Test
+    @SmallTest
+    public void onPullAtom_deviceTelephonyProperties_mixedFeatures() {
+        mPhones = new Phone[] {mPhone};
+        doReturn(1).when(mPhone).getSubId();
+        doReturn(mDataSettingsManager).when(mPhone).getDataSettingsManager();
+        doReturn(false).when(mDataSettingsManager).isMobileDataPolicyEnabled(
+                TelephonyManager.MOBILE_DATA_POLICY_AUTO_DATA_SWITCH);
+        doReturn(true).when(mPhone).isManagedProfile();
+        doReturn(new UiccSlot[] {mPhysicalSlot}).when(mUiccController).getUiccSlots();
+        doReturn(true).when(mPhysicalSlot).isMultipleEnabledProfileSupported();
+        doReturn(7).when(mPersistAtomsStorage).getAutoDataSwitchToggleCount();
+
+        // Mock specific features
+        doReturn(true).when(mPackageManager).hasSystemFeature(
+                PackageManager.FEATURE_TELEPHONY_CALLING);
+        doReturn(false).when(mPackageManager).hasSystemFeature(
+                PackageManager.FEATURE_TELEPHONY_DATA);
+        doReturn(true).when(mPackageManager).hasSystemFeature(
+                PackageManager.FEATURE_TELEPHONY_MESSAGING);
+        doReturn(false).when(mPackageManager).hasSystemFeature(
+                PackageManager.FEATURE_TELEPHONY_RADIO_ACCESS);
+        doReturn(true).when(mPackageManager).hasSystemFeature(
+                PackageManager.FEATURE_TELEPHONY_SUBSCRIPTION);
+        doReturn(false).when(mPackageManager).hasSystemFeature(
+                PackageManager.FEATURE_TELEPHONY);
+        doReturn(true).when(mPackageManager).hasSystemFeature(
+                PackageManager.FEATURE_TELEPHONY_IMS);
+        doReturn(false).when(mPackageManager).hasSystemFeature(
+                PackageManager.FEATURE_TELEPHONY_EUICC);
+        doReturn(true).when(mPackageManager).hasSystemFeature(
+                PackageManager.FEATURE_TELEPHONY_EUICC_MEP);
+        doReturn(false).when(mPackageManager).hasSystemFeature(
+                PackageManager.FEATURE_TELEPHONY_SATELLITE);
+
+        List<StatsEvent> actualAtoms = new ArrayList<>();
+
+        int result = mMetricsCollector.onPullAtom(DEVICE_TELEPHONY_PROPERTIES, actualAtoms);
+
+        assertThat(result).isEqualTo(StatsManager.PULL_SUCCESS);
+        assertThat(actualAtoms).hasSize(1);
+
+        int vendorApiLevel = SystemProperties.getInt("ro.vendor.api_level",
+                Build.VERSION.DEVICE_INITIAL_SDK_INT);
+        int boardApiLevel = SystemProperties.getInt("ro.board_api_level",
+                Build.VERSION.DEVICE_INITIAL_SDK_INT);
+
+        long expectedBitmask =
+                (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_CALLING - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_MESSAGING - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_SUBSCRIPTION - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_IMS - 1))
+                | (1L << (TelephonyProtoEnums.DEVICE_TELEPHONY_FEATURES_EUICC_MEP - 1));
+
+        StatsEvent expectedAtom = TelephonyStatsLog.buildStatsEvent(
+                DEVICE_TELEPHONY_PROPERTIES, true, false, 7, true, 1,
+                vendorApiLevel, boardApiLevel, expectedBitmask);
+
+
+        assertStatsEventEquals(expectedAtom, actualAtoms.get(0));
+    }
+
+    @Test
     public void onPullAtom_otpRedactionEvent_multipleAtoms() {
         OtpRedactionEvent otpRedactionEvent = new OtpRedactionEvent();
         doReturn(new OtpRedactionEvent[] {otpRedactionEvent, otpRedactionEvent,
@@ -741,5 +942,29 @@ public class MetricsCollectorTest extends TelephonyTest {
 
         assertThat(actualAtoms).hasSize(4);
         assertThat(result).isEqualTo(StatsManager.PULL_SUCCESS);
+    }
+
+    private static void assertStatsEventEquals(StatsEvent expected, StatsEvent actual) {
+        try {
+            java.lang.reflect.Method getNumBytesMethod = StatsEvent.class.getMethod("getNumBytes");
+            int expectedNumBytes = (int) getNumBytesMethod.invoke(expected);
+            int actualNumBytes = (int) getNumBytesMethod.invoke(actual);
+            assertThat(actualNumBytes).isEqualTo(expectedNumBytes);
+
+            java.lang.reflect.Method getBytesMethod = StatsEvent.class.getMethod("getBytes");
+            byte[] expectedBytes = java.util.Arrays.copyOf(
+                    (byte[]) getBytesMethod.invoke(expected), expectedNumBytes);
+            byte[] actualBytes = java.util.Arrays.copyOf(
+                    (byte[]) getBytesMethod.invoke(actual), actualNumBytes);
+
+            // Zero out timestamp (8 bytes starting from index 3)
+            for (int i = 3; i <= 10; i++) {
+                expectedBytes[i] = 0;
+                actualBytes[i] = 0;
+            }
+            assertThat(actualBytes).isEqualTo(expectedBytes);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to verify StatsEvent via reflection", e);
+        }
     }
 }

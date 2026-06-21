@@ -49,6 +49,7 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_RADIO_
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SIM_STATUS;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SLICING_CONFIG;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SMSC_ADDRESS;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SUPPORTED_NETWORK_ALERT_CATEGORIES;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_UICC_APPLICATIONS_ENABLEMENT;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_HANGUP;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND;
@@ -105,6 +106,9 @@ import static org.mockito.Mockito.when;
 
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
+import android.telephony.NetworkSecurityEvent;
+import android.telephony.ServiceState;
+import android.telephony.NetworkSecurityEvent;
 import android.hardware.radio.V1_0.Carrier;
 import android.hardware.radio.V1_0.GsmSmsMessage;
 import android.hardware.radio.V1_0.ImsSmsMessage;
@@ -215,6 +219,7 @@ public class RILTest extends TelephonyTest {
     private Map<Integer, HalVersion> mHalVersionV16 = new HashMap<>();
     private Map<Integer, HalVersion> mHalVersionV20 = new HashMap<>();
     private Map<Integer, HalVersion> mHalVersionV21 = new HashMap<>();
+    private Map<Integer, HalVersion> mHalVersionV24 = new HashMap<>();
 
     private RIL mRILInstance;
     private RIL mRILUnderTest;
@@ -336,6 +341,7 @@ public class RILTest extends TelephonyTest {
                 mHalVersionV16.put(service, new HalVersion(1, 6));
                 mHalVersionV20.put(service, new HalVersion(2, 0));
                 mHalVersionV21.put(service, new HalVersion(2, 1));
+                mHalVersionV24.put(service, new HalVersion(2, 4));
             }
             replaceInstance(RIL.class, "mHalVersion", mRILUnderTest, mHalVersionV14);
         } catch (Exception e) {
@@ -1280,6 +1286,66 @@ public class RILTest extends TelephonyTest {
         verify(mNetworkProxy).getBarringInfo(mSerialNumberCaptor.capture());
         verifyRILResponse(
                 mRILUnderTest, mSerialNumberCaptor.getValue(), RIL_REQUEST_GET_BARRING_INFO);
+    }
+
+    @Test
+    public void testGetSupportedNetworkAlertCategories() throws Exception {
+        // Not supported on Radio HAL < 2.4
+        try {
+            replaceInstance(RIL.class, "mHalVersion", mRILUnderTest, mHalVersionV21);
+        } catch (Exception e) {
+            fail(e.toString());
+        }
+        // final CountDownLatch latchNotSupported = new CountDownLatch(1);
+        mRILUnderTest.getSupportedNetworkAlertCategories(obtainMessage());
+        verify(mNetworkProxy, never()).getSupportedNetworkAlertCategories(anyInt());
+
+        // Make radio version 2.4 to support the operation.
+        try {
+            replaceInstance(RIL.class, "mHalVersion", mRILUnderTest, mHalVersionV24);
+        } catch (Exception e) {
+            fail(e.toString());
+        }
+        mRILUnderTest.getSupportedNetworkAlertCategories(obtainMessage());
+
+        verify(mNetworkProxy).getSupportedNetworkAlertCategories(mSerialNumberCaptor.capture());
+        verifyRILResponse(
+                mRILUnderTest,
+                mSerialNumberCaptor.getValue(),
+                RIL_REQUEST_GET_SUPPORTED_NETWORK_ALERT_CATEGORIES);
+    }
+
+    @Test
+    public void testConvertHalNetworkSecurityEventList() {
+        android.hardware.radio.network.NetworkSecurityEvent[] halEvents =
+                new android.hardware.radio.network.NetworkSecurityEvent[1];
+        halEvents[0] = new android.hardware.radio.network.NetworkSecurityEvent();
+        halEvents[0].alertCategory = NetworkSecurityEvent.ALERT_CATEGORY_DOWNGRADE;
+        halEvents[0].alertStatus = NetworkSecurityEvent.ALERT_STATUS_DETECTED;
+        halEvents[0].reasonCodes = new int[]{
+                NetworkSecurityEvent.REASON_CODE_DOWNGRADE_FORCED_HANDOVER};
+        halEvents[0].cellId = 123L;
+        halEvents[0].physicalCellId = 456;
+        halEvents[0].arfcn = 789;
+        halEvents[0].plmn = "101112";
+        halEvents[0].rat = ServiceState.RIL_RADIO_TECHNOLOGY_LTE;
+        halEvents[0].isEmergency = false;
+
+        Set<NetworkSecurityEvent> events = RILUtils.convertHalNetworkSecurityEventList(halEvents);
+
+        assertEquals(1, events.size());
+        NetworkSecurityEvent event = events.iterator().next();
+        assertEquals(NetworkSecurityEvent.ALERT_CATEGORY_DOWNGRADE, event.getAlertCategory());
+        assertEquals(NetworkSecurityEvent.ALERT_STATUS_DETECTED, event.getAlertStatus());
+        Assert.assertArrayEquals(
+                new int[]{NetworkSecurityEvent.REASON_CODE_DOWNGRADE_FORCED_HANDOVER},
+                event.getReasonCodes());
+        assertEquals(123L, event.getCellId());
+        assertEquals(456, event.getPhysicalCellId());
+        assertEquals(789, event.getArfcn());
+        assertEquals("101112", event.getPlmn());
+        assertEquals(ServiceState.RIL_RADIO_TECHNOLOGY_LTE, event.getRat());
+        assertFalse(event.isEmergency());
     }
 
     private Message obtainMessage() {
@@ -2514,15 +2580,14 @@ public class RILTest extends TelephonyTest {
 
     @Test
     public void testAreUiccApplicationsEnabled_nullRadioProxy() throws Exception {
-        // Not supported on Radio 1.0.
-        doReturn(null).when(mRILUnderTest).getRadioProxy();
+        doReturn(null).when(mRILUnderTest).getRadioServiceProxy(eq(RadioSimProxy.class));
         Message message = obtainMessage();
         mRILUnderTest.areUiccApplicationsEnabled(message);
-        processAllMessages();
         verify(mSimProxy, never()).areUiccApplicationsEnabled(mSerialNumberCaptor.capture());
-        // Sending message is handled by getRadioProxy when proxy is null.
-        // areUiccApplicationsEnabled shouldn't explicitly send another callback.
-        assertNull(message.obj);
+        AsyncResult ar = (AsyncResult) message.obj;
+        Assert.assertNull(ar.result);
+        Assert.assertNotNull(ar.exception.getMessage());
+        Assert.assertEquals("RADIO_NOT_AVAILABLE", ar.exception.getMessage());
     }
 
     @Test

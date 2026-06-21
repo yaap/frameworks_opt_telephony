@@ -287,6 +287,16 @@ public class RadioConfigProxy {
     }
 
     /**
+     * Wrapper function for using IRadioConfig.rebootModem(int serial)
+     * @param serial Serial number of request
+     */
+    public void rebootModem(int serial) throws RemoteException {
+        if (isAidl()) {
+            getAidl().rebootModem(serial);
+        }
+    }
+
+    /**
      * Death Recipient for HIDL binder (if any) of RadioConfig.
      */
     private static class RadioConfigHidlServiceDeathRecipient implements HwBinder.DeathRecipient {

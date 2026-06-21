@@ -26,6 +26,7 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_PHONE_
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SIMULTANEOUS_CALLING_SUPPORT;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SIM_TYPE_INFO;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SLOT_STATUS;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_REBOOT_MODEM;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_LOGICAL_TO_PHYSICAL_SLOT_MAPPING;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_PREFERRED_DATA_MODEM;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SIM_TYPE;
@@ -274,6 +275,7 @@ public class RadioConfig extends Handler {
             if (serviceBound) logd("Unbinding to mock RadioConfig service");
 
             if (mMockModem != null) {
+                mMockModem.unbindMockModemService(MockModem.RADIOCONFIG_SERVICE);
                 mMockModem = null;
                 resetProxyAndRequestList("EVENT_AIDL_SERVICE_DEAD", null);
             }
@@ -732,6 +734,34 @@ public class RadioConfig extends Handler {
      */
     public int[] getDeviceNrCapabilities() {
         return mDeviceNrCapabilities;
+    }
+
+    /**
+     * Reboots the modem.
+     */
+    public void rebootModem(Message result) {
+        RadioConfigProxy proxy = getRadioConfigProxy(result);
+        if (proxy.isEmpty()) return;
+
+        // Check for HAL version 2.4
+        if (proxy.getVersion().compareTo(RIL.RADIO_HAL_VERSION_2_4) < 0) {
+            if (result != null) {
+                AsyncResult.forMessage(
+                        result, null, CommandException.fromRilErrno(REQUEST_NOT_SUPPORTED));
+                result.sendToTarget();
+            }
+            return;
+        }
+
+        RILRequest rr = obtainRequest(RIL_REQUEST_REBOOT_MODEM, result, mDefaultWorkSource);
+        if (DBG) {
+            logd(rr.serialString() + "> " + RILUtils.requestToString(rr.mRequest));
+        }
+        try {
+            proxy.rebootModem(rr.mSerial);
+        } catch (RemoteException | RuntimeException e) {
+            resetProxyAndRequestList("rebootModem", e);
+        }
     }
 
     private static void logd(String log) {

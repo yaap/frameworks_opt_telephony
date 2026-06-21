@@ -179,7 +179,11 @@ public class CatCmdMessage implements Parcelable {
                 break;
             case SEND_USSD:
                 if (Flags.supportStkCommandUssdAndCall()) {
-                    mTextMsg = ((SendUssdParams) cmdParams).mTextMsg;
+                    if (cmdParams instanceof SendUssdParams) {
+                        mTextMsg = ((SendUssdParams) cmdParams).mTextMsg;
+                    } else {
+                        mTextMsg = ((DisplayTextParams) cmdParams).mTextMsg;
+                    }
                 } else {
                     mTextMsg = ((DisplayTextParams) cmdParams).mTextMsg;
                 }

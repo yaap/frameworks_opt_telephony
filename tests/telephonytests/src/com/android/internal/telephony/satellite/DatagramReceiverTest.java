@@ -131,6 +131,7 @@ public class DatagramReceiverTest extends TelephonyTest {
                 mMockSessionMetricsStats);
 
         doReturn(true).when(mFeatureFlags).satelliteImproveMultiThreadDesign();
+        doReturn(SatelliteConstants.DEFAULT_PLMN).when(mPhone).getOperatorNumeric();
         mDatagramReceiverUT = new TestDatagramReceiver(mContext, Looper.myLooper(), mFeatureFlags,
                 mMockDatagramController);
         mTestDemoModeDatagramReceiver = new TestDatagramReceiver(mContext, Looper.myLooper(),
@@ -152,6 +153,7 @@ public class DatagramReceiverTest extends TelephonyTest {
                 .thenReturn(SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN);
         when(mMockSatelliteController.getSessionConnectTypeMetrics()).thenReturn(SatelliteConstants
                 .SESSION_NTN_CONNECT_TYPE_UNKNOWN);
+        when(mMockSatelliteController.getSatellitePhone()).thenReturn(mPhone);
         processAllMessages();
     }
 

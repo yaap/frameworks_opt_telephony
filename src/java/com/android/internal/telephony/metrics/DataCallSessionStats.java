@@ -80,8 +80,9 @@ public class DataCallSessionStats {
 
     /** Creates a new ongoing atom when data call is set up. */
     public synchronized void onSetupDataCall(@ApnType int apnTypeBitMask,
-            boolean isSatellite) {
-        mDataCallSession = getDefaultProto(apnTypeBitMask, isSatellite);
+            boolean isSatellite, int sliceCapability, int connectionCapability) {
+        mDataCallSession = getDefaultProto(apnTypeBitMask, isSatellite, sliceCapability,
+                connectionCapability);
         mStartTime = getTimeMillis();
         PhoneFactory.getMetricsCollector().registerOngoingDataCallStat(this);
     }
@@ -311,12 +312,15 @@ public class DataCallSessionStats {
         copy.isSatelliteTransport = call.isSatelliteTransport;
         copy.isProvisioningProfile = call.isProvisioningProfile;
         copy.isNbIotNtn = call.isNbIotNtn;
+        copy.sliceCapability = call.sliceCapability;
+        copy.plmn = call.plmn;
+        copy.connectionCapability = call.connectionCapability;
         return copy;
     }
 
     /** Creates a proto for a normal {@code DataCallSession} with default values. */
     private DataCallSession getDefaultProto(@ApnType int apnTypeBitmask,
-            boolean isSatellite) {
+            boolean isSatellite, int sliceCapability, int connectionCapability) {
         DataCallSession proto = new DataCallSession();
         proto.dimension = RANDOM.nextInt();
         proto.isMultiSim = SimSlotState.isMultiSim();
@@ -341,12 +345,16 @@ public class DataCallSessionStats {
         if (mSatelliteController != null) {
             proto.isNtn = mSatelliteController.isInSatelliteModeForCarrierRoaming(mPhone);
             proto.isNbIotNtn = mSatelliteController.isInCarrierRoamingNbIotNtn(mPhone);
+            proto.plmn = mSatelliteController.getSatellitePlmnForMetrics(mPhone);
         } else {
             proto.isNtn = false;
             proto.isNbIotNtn = false;
+            proto.plmn = "";
         }
         proto.isSatelliteTransport = isSatellite;
         proto.isProvisioningProfile = getIsProvisioningProfile();
+        proto.sliceCapability = sliceCapability;
+        proto.connectionCapability = connectionCapability;
         return proto;
     }
 

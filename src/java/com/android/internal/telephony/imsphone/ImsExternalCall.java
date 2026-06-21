@@ -54,7 +54,7 @@ public class ImsExternalCall extends Call {
     }
 
     @Override
-    public void hangup(@android.telecom.Call.RejectReason int rejectReason)
+    public void hangup(/*@android.telecom.Call.RejectReason*/ int rejectReason)
             throws CallStateException {
         // tumbleweed
     }

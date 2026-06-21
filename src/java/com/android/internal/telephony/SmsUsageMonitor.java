@@ -16,6 +16,7 @@
 
 package com.android.internal.telephony;
 
+import android.app.privatecompute.flags.Flags;
 import android.app.role.RoleManager;
 import android.compat.annotation.UnsupportedAppUsage;
 import android.content.ContentResolver;
@@ -598,6 +599,23 @@ public class SmsUsageMonitor {
         }).start();
     }
 
+    /**
+     * helper method that compares the uid1 to uid2.
+     * <p>
+     * returns true if the uid1 matches the uid2 including pcc uids.
+     */
+    private boolean isSameAppIncludingPccUid(int uid1, int uid2) {
+        int appUid1 = uid1;
+        if (Flags.enablePccFrameworkSupport() && Process.isPrivateComputeCoreUid(uid1)) {
+            appUid1 = mContext.getPackageManager().getAppUidForPrivateComputeCoreUid(uid1);
+        }
+        int appUid2 = uid2;
+        if (Flags.enablePccFrameworkSupport() && Process.isPrivateComputeCoreUid(uid2)) {
+            appUid2 = mContext.getPackageManager().getAppUidForPrivateComputeCoreUid(uid2);
+        }
+        return UserHandle.isSameApp(appUid1, appUid2);
+    }
+
     private void checkCallerIsSystemOrPhoneOrSameApp(String pkg) {
         int uid = Binder.getCallingUid();
         int appId = UserHandle.getAppId(uid);
@@ -612,7 +630,7 @@ public class SmsUsageMonitor {
             ApplicationInfo ai = mContext.getPackageManager().getApplicationInfoAsUser(
                     pkg, 0, UserHandle.getUserHandleForUid(uid));
 
-            if (UserHandle.getAppId(ai.uid) != UserHandle.getAppId(uid)) {
+            if (!isSameAppIncludingPccUid(ai.uid, uid)) {
                 throw new SecurityException(errorLog);
             }
         } catch (NameNotFoundException ex) {

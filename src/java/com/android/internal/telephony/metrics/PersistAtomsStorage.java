@@ -47,6 +47,7 @@ import com.android.internal.telephony.nano.PersistAtomsProto.IncomingSms;
 import com.android.internal.telephony.nano.PersistAtomsProto.NetworkRequestsV2;
 import com.android.internal.telephony.nano.PersistAtomsProto.OtpEvaluationEvent;
 import com.android.internal.telephony.nano.PersistAtomsProto.OtpRedactionEvent;
+import com.android.internal.telephony.nano.PersistAtomsProto.MessagingReadRestrictionEvent;
 import com.android.internal.telephony.nano.PersistAtomsProto.OutgoingShortCodeSms;
 import com.android.internal.telephony.nano.PersistAtomsProto.OutgoingSms;
 import com.android.internal.telephony.nano.PersistAtomsProto.PersistAtoms;
@@ -80,6 +81,7 @@ import java.nio.file.NoSuchFileException;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Objects;
 import java.util.stream.IntStream;
 
 /**
@@ -104,6 +106,9 @@ public class PersistAtomsStorage {
      * crash or power loss.
      */
     private static final int SAVE_TO_FILE_DELAY_FOR_GET_MILLIS = 500;
+
+    /** Satellite Session GAP value is not valid, thus does not report. */
+    static final int SATELLITE_SESSION_GAP_INVALID_SEC = -1;
 
     /** Maximum number of call sessions to store between pulls. */
     private final int mMaxNumVoiceCallSessions;
@@ -179,12 +184,14 @@ public class PersistAtomsStorage {
 
     /** Maximum number of Satellite relevant stats to store between pulls. */
     private final int mMaxNumSatelliteStats;
-    private final int mMaxNumCarrierRoamingSatelliteSessionStats = 1;
 
     /** Maximum number of data network validation to store during pulls. */
     private final int mMaxNumDataNetworkValidation;
 
     private final int mMaxNumOtpStats;
+
+    /** Maximum number of messaging read restriction events to store between pulls. */
+    private final int mMaxNumMessagingReadRestrictionEvent;
 
     /** Stores persist atoms and persist states of the puller. */
     @VisibleForTesting protected PersistAtoms mAtoms;
@@ -237,6 +244,7 @@ public class PersistAtomsStorage {
             mMaxNumSatelliteStats = 5;
             mMaxNumDataNetworkValidation = 5;
             mMaxNumOtpStats = 10;
+            mMaxNumMessagingReadRestrictionEvent = 10;
         } else {
             mMaxNumVoiceCallSessions = 50;
             mMaxNumSms = 25;
@@ -263,6 +271,7 @@ public class PersistAtomsStorage {
             mMaxNumSatelliteStats = 15;
             mMaxNumDataNetworkValidation = 15;
             mMaxNumOtpStats = 100;
+            mMaxNumMessagingReadRestrictionEvent = 100;
         }
 
         mAtoms = loadAtomsFromFile();
@@ -875,7 +884,7 @@ public class PersistAtomsStorage {
             CarrierRoamingSatelliteSession stats) {
         mAtoms.carrierRoamingSatelliteSession = insertAtRandomPlace(
                 mAtoms.carrierRoamingSatelliteSession, stats,
-                mMaxNumCarrierRoamingSatelliteSessionStats);
+                mMaxNumSatelliteStats);
         saveAtomsToFile(SAVE_TO_FILE_DELAY_FOR_UPDATE_MILLIS);
     }
 
@@ -890,22 +899,33 @@ public class PersistAtomsStorage {
                     stats.countOfSatelliteConfigUpdateRequest;
             existingStats.countOfSatelliteNotificationDisplayed +=
                     stats.countOfSatelliteNotificationDisplayed;
-            existingStats.satelliteSessionGapMinSec = stats.satelliteSessionGapMinSec;
-            existingStats.satelliteSessionGapAvgSec = stats.satelliteSessionGapAvgSec;
-            existingStats.satelliteSessionGapMaxSec = stats.satelliteSessionGapMaxSec;
+            if (stats.satelliteSessionGapMinSec != SATELLITE_SESSION_GAP_INVALID_SEC) {
+                existingStats.satelliteSessionGapMinSec = stats.satelliteSessionGapMinSec;
+            }
+            if (stats.satelliteSessionGapAvgSec != SATELLITE_SESSION_GAP_INVALID_SEC) {
+                existingStats.satelliteSessionGapAvgSec = stats.satelliteSessionGapAvgSec;
+            }
+            if (stats.satelliteSessionGapMaxSec != SATELLITE_SESSION_GAP_INVALID_SEC) {
+                existingStats.satelliteSessionGapMaxSec = stats.satelliteSessionGapMaxSec;
+            }
             // Does not update configDataSource, carrierId, isDeviceEntitled, due to  they are
             // dimension fields.
             existingStats.isDeviceEntitled = stats.isDeviceEntitled;
             existingStats.isMultiSim = stats.isMultiSim;
             existingStats.countOfSatelliteSessions += stats.countOfSatelliteSessions;
             existingStats.isNbIotNtn = stats.isNbIotNtn;
-            // Does not update supportedConnectionMode as it is dimension field
+            // Does not update supportedConnectionMode and plmn as they are dimension field
             existingStats.countOfSessionConnectionModeAutomatic +=
                     stats.countOfSessionConnectionModeAutomatic;
             existingStats.countOfSessionConnectionModeManual +=
                     stats.countOfSessionConnectionModeManual;
             existingStats.serviceDataPolicy = stats.serviceDataPolicy;
+            existingStats.totalSessionDurationSec += stats.totalSessionDurationSec;
+            existingStats.satelliteAttachSupported = stats.satelliteAttachSupported;
+            existingStats.eligibilitySource = stats.eligibilitySource;
         } else {
+            // A session gap of -1 is normal for a new entry where a session has not yet occurred.
+            // The backend is expected to interpret this value as "not available".
             mAtoms.carrierRoamingSatelliteControllerStats = insertAtRandomPlace(
                     mAtoms.carrierRoamingSatelliteControllerStats, stats, mMaxNumSatelliteStats);
         }
@@ -963,6 +983,24 @@ public class PersistAtomsStorage {
         }
         mAtoms.otpRedactionEvent = insertAtRandomPlace(mAtoms.otpRedactionEvent, stats,
                 mMaxNumOtpStats);
+        saveAtomsToFile(SAVE_TO_FILE_DELAY_FOR_UPDATE_MILLIS);
+    }
+
+    /** Adds a new {@link MessagingReadRestrictionEvent} to the storage. */
+    public synchronized void addMessagingReadRestrictionEvent(MessagingReadRestrictionEvent event) {
+        for (MessagingReadRestrictionEvent existingStats : mAtoms.messagingReadRestrictionEvent) {
+            if (event.callerUid == existingStats.callerUid
+                && event.contentProvider == existingStats.contentProvider
+                && event.eventType == existingStats.eventType
+                && event.readRestrictedMessagesAppOpMode
+                  == existingStats.readRestrictedMessagesAppOpMode) {
+                    existingStats.count++;
+                    saveAtomsToFile(SAVE_TO_FILE_DELAY_FOR_UPDATE_MILLIS);
+                    return;
+            }
+        }
+        mAtoms.messagingReadRestrictionEvent = insertAtRandomPlace(
+                mAtoms.messagingReadRestrictionEvent, event, mMaxNumMessagingReadRestrictionEvent);
         saveAtomsToFile(SAVE_TO_FILE_DELAY_FOR_UPDATE_MILLIS);
     }
 
@@ -1675,7 +1713,8 @@ public class PersistAtomsStorage {
                     mAtoms.carrierRoamingSatelliteControllerStats;
             mAtoms.carrierRoamingSatelliteControllerStats =
                     new CarrierRoamingSatelliteControllerStats[0];
-            SatelliteStats.getInstance().resetCarrierRoamingSatelliteControllerStats();
+            mHandler.post(() -> SatelliteStats.getInstance()
+                    .resetCarrierRoamingSatelliteControllerStats());
             saveAtomsToFile(SAVE_TO_FILE_DELAY_FOR_GET_MILLIS);
             return statsArray;
         } else {
@@ -1770,6 +1809,25 @@ public class PersistAtomsStorage {
             mAtoms.otpRedactionEventPullTimestampMillis = getWallTimeMillis();
             OtpRedactionEvent[] statsArray = mAtoms.otpRedactionEvent;
             mAtoms.otpRedactionEvent = new OtpRedactionEvent[0];
+            saveAtomsToFile(SAVE_TO_FILE_DELAY_FOR_GET_MILLIS);
+            return statsArray;
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * Returns and clears the {@link MessagingReadRestrictionEvent} stats if last pulled longer
+     * than {@code minIntervalMillis} ago, otherwise returns {@code null}.
+     */
+    @Nullable
+    public synchronized MessagingReadRestrictionEvent[] getMessagingReadRestrictionEventStats(
+            long minIntervalMillis) {
+        if (getWallTimeMillis() - mAtoms.messagingReadRestrictionEventPullTimestampMillis
+                > minIntervalMillis) {
+            mAtoms.messagingReadRestrictionEventPullTimestampMillis = getWallTimeMillis();
+            MessagingReadRestrictionEvent[] statsArray = mAtoms.messagingReadRestrictionEvent;
+            mAtoms.messagingReadRestrictionEvent = new MessagingReadRestrictionEvent[0];
             saveAtomsToFile(SAVE_TO_FILE_DELAY_FOR_GET_MILLIS);
             return statsArray;
         } else {
@@ -2096,7 +2154,8 @@ public class PersistAtomsStorage {
                     && state.isIwlanCrossSim == key.isIwlanCrossSim
                     && state.isNtn == key.isNtn
                     && state.isNbIotNtn == key.isNbIotNtn
-                    && state.isOpportunistic == key.isOpportunistic) {
+                    && state.isOpportunistic == key.isOpportunistic
+                    && Objects.equals(state.plmn, key.plmn)) {
                 return state;
             }
         }
@@ -2460,7 +2519,8 @@ public class PersistAtomsStorage {
                     && stats.isEmergency == key.isEmergency
                     && stats.maxInactivityDurationSec == key.maxInactivityDurationSec
                     && stats.supportedConnectionMode == key.supportedConnectionMode
-                    && stats.sessionConnectionMode == key.sessionConnectionMode) {
+                    && stats.sessionConnectionMode == key.sessionConnectionMode
+                    && Objects.equals(stats.plmn, key.plmn)) {
                 return stats;
             }
         }
@@ -2485,7 +2545,13 @@ public class PersistAtomsStorage {
                     && stats.isWifiConnected == key.isWifiConnected
                     && stats.carrierId == key.carrierId
                     && stats.supportedConnectionMode == key.supportedConnectionMode
-                    && stats.sessionConnectionMode == key.sessionConnectionMode) {
+                    && stats.sessionConnectionMode == key.sessionConnectionMode
+                    && Objects.equals(stats.plmn, key.plmn)
+                    && stats.isInCarrierRoamingNtnMode == key.isInCarrierRoamingNtnMode
+                    && stats.carrierRoamingSatelliteEmergencyMessagingProvider
+                    == key.carrierRoamingSatelliteEmergencyMessagingProvider
+                    && stats.emergencyNumberSourceUsedInHandoverIntent
+                    == key.emergencyNumberSourceUsedInHandoverIntent) {
                 return stats;
             }
         }

@@ -100,12 +100,18 @@ public class DisplayInfoController extends Handler {
         mPhone.getServiceStateTracker()
                 .registerForServiceStateChanged(this, EVENT_SERVICE_STATE_CHANGED, null);
         if (ccm != null) {
-            ccm.registerCarrierConfigChangeListener(Runnable::run,
+            CarrierConfigManager.CarrierConfigChangeListener listener =
                     (slotIndex, subId, carrierId, specificCarrierId) -> {
                         if (slotIndex == mPhone.getPhoneId()) {
                             obtainMessage(EVENT_CARRIER_CONFIG_CHANGED).sendToTarget();
                         }
-                    });
+                    };
+
+            if (mFeatureFlags.offloadStartupBinderCalls()) {
+                post(() -> ccm.registerCarrierConfigChangeListener(Runnable::run, listener));
+            } else {
+                ccm.registerCarrierConfigChangeListener(Runnable::run, listener);
+            }
         }
         mTelephonyDisplayInfo = new TelephonyDisplayInfo(
                 TelephonyManager.NETWORK_TYPE_UNKNOWN,

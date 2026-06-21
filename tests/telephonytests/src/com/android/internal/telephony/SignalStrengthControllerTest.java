@@ -942,6 +942,33 @@ public class SignalStrengthControllerTest extends TelephonyTest {
     }
 
     @Test
+    public void testNotifySignalStrengthSubIdChanged() {
+        SignalStrength ss = new SignalStrength(
+                new CellSignalStrengthCdma(),
+                new CellSignalStrengthGsm(-53, 0, SignalStrength.INVALID),
+                new CellSignalStrengthWcdma(),
+                new CellSignalStrengthTdscdma(),
+                new CellSignalStrengthLte(),
+                new CellSignalStrengthNr());
+
+        // Initial notification
+        sendSignalStrength(ss);
+        verify(mPhone).notifySignalStrength();
+
+        // Second notification with same SignalStrength and same subId should be suppressed
+        reset(mPhone);
+        when(mPhone.getSubId()).thenReturn(ACTIVE_SUB_ID);
+        sendSignalStrength(ss);
+        verify(mPhone, never()).notifySignalStrength();
+
+        // Third notification with same SignalStrength but different subId should NOT be suppressed
+        reset(mPhone);
+        when(mPhone.getSubId()).thenReturn(ACTIVE_SUB_ID + 1);
+        sendSignalStrength(ss);
+        verify(mPhone).notifySignalStrength();
+    }
+
+    @Test
     public void testSignalStrengthChangedCallback() {
         Handler mockRegistrant = Mockito.mock(Handler.class);
         int ssChangedEvent = 0;
@@ -1494,6 +1521,160 @@ public class SignalStrengthControllerTest extends TelephonyTest {
                 isNull());
 
         reset(mSimulatedCommandsVerifier);
+    }
+
+    @Test
+    public void testInvalidCarrierConfig_NTN_5G_NR_SSRSRP_thresholdIsTooSmall() {
+        // 4 threshold integers must be within the boundaries [-140, -44]
+        mBundle.putIntArray(CarrierConfigManager.KEY_NTN_5G_NR_SSRSRP_THRESHOLDS_INT_ARRAY,
+                new int[]{
+                        -141, /* SIGNAL_STRENGTH_POOR */
+                        -118, /* SIGNAL_STRENGTH_MODERATE */
+                        -108, /* SIGNAL_STRENGTH_GOOD */
+                        -98   /* SIGNAL_STRENGTH_GREAT */
+                });
+        sendCarrierConfigUpdate();
+    }
+
+    @Test
+    public void testInvalidCarrierConfig_NTN_5G_NR_SSRSRP_thresholdIsTooLarge() {
+        // 4 threshold integers must be within the boundaries [-140, -44]
+        mBundle.putIntArray(CarrierConfigManager.KEY_NTN_5G_NR_SSRSRP_THRESHOLDS_INT_ARRAY,
+                new int[]{
+                        -128, /* SIGNAL_STRENGTH_POOR */
+                        -118, /* SIGNAL_STRENGTH_MODERATE */
+                        -108, /* SIGNAL_STRENGTH_GOOD */
+                        -43   /* SIGNAL_STRENGTH_GREAT */
+                });
+        sendCarrierConfigUpdate();
+    }
+
+    @Test
+    public void testInvalidCarrierConfig_NTN_5G_NR_SSRSRQ_thresholdIsTooSmall() {
+        // 4 threshold integers must be within the boundaries [-43, 20]
+        mBundle.putIntArray(CarrierConfigManager.KEY_NTN_5G_NR_SSRSRQ_THRESHOLDS_INT_ARRAY,
+                new int[]{
+                        -44, /* SIGNAL_STRENGTH_POOR */
+                        -19, /* SIGNAL_STRENGTH_MODERATE */
+                        -7,  /* SIGNAL_STRENGTH_GOOD */
+                        6    /* SIGNAL_STRENGTH_GREAT */
+                });
+        sendCarrierConfigUpdate();
+    }
+
+    @Test
+    public void testInvalidCarrierConfig_NTN_5G_NR_SSRSRQ_thresholdIsTooLarge() {
+        // 4 threshold integers must be within the boundaries [-43, 20]
+        mBundle.putIntArray(CarrierConfigManager.KEY_NTN_5G_NR_SSRSRQ_THRESHOLDS_INT_ARRAY,
+                new int[]{
+                        -31, /* SIGNAL_STRENGTH_POOR */
+                        -19, /* SIGNAL_STRENGTH_MODERATE */
+                        -7,  /* SIGNAL_STRENGTH_GOOD */
+                        21   /* SIGNAL_STRENGTH_GREAT */
+                });
+        sendCarrierConfigUpdate();
+    }
+
+    @Test
+    public void testInvalidCarrierConfig_NTN_5G_NR_SSSINR_thresholdIsTooSmall() {
+        // 4 threshold integers must be within the boundaries [-23, 40]
+        mBundle.putIntArray(CarrierConfigManager.KEY_NTN_5G_NR_SSSINR_THRESHOLDS_INT_ARRAY,
+                new int[]{
+                        -24, /* SIGNAL_STRENGTH_POOR */
+                        5,   /* SIGNAL_STRENGTH_MODERATE */
+                        15,  /* SIGNAL_STRENGTH_GOOD */
+                        30   /* SIGNAL_STRENGTH_GREAT */
+                });
+        sendCarrierConfigUpdate();
+    }
+
+    @Test
+    public void testInvalidCarrierConfig_NTN_5G_NR_SSSINR_thresholdIsTooLarge() {
+        // 4 threshold integers must be within the boundaries [-23, 40]
+        mBundle.putIntArray(CarrierConfigManager.KEY_NTN_5G_NR_SSSINR_THRESHOLDS_INT_ARRAY,
+                new int[]{
+                        -5, /* SIGNAL_STRENGTH_POOR */
+                        5,  /* SIGNAL_STRENGTH_MODERATE */
+                        15, /* SIGNAL_STRENGTH_GOOD */
+                        41  /* SIGNAL_STRENGTH_GREAT */
+                });
+        sendCarrierConfigUpdate();
+    }
+
+    @Test
+    public void testNrSignalStrengthReportingCriteriaWhenServiceStateChanged() {
+        SignalStrength ss = new SignalStrength(
+                new CellSignalStrengthCdma(),
+                new CellSignalStrengthGsm(),
+                new CellSignalStrengthWcdma(),
+                new CellSignalStrengthTdscdma(),
+                new CellSignalStrengthLte(),
+                new CellSignalStrengthNr(
+                        -1, /* csiRsrp */
+                        -1, /* csiRsrq */
+                        -1, /* csiSinr */
+                        -113, /* ssRsrp */
+                        -1, /* ssRsrq */
+                        -1  /* ssSinr */
+                ));
+
+        logd("Add all necessary carrier configurations to mBundle in advance for the test");
+        mBundle.putInt(CarrierConfigManager.KEY_PARAMETERS_USE_FOR_NTN_5G_NR_SIGNAL_BAR_INT,
+                CellSignalStrengthNr.USE_SSRSRP);
+
+        logd("When connected to NTN: ssRsrp -113 is GOOD (above -115)");
+        mBundle.putIntArray(CarrierConfigManager.KEY_NTN_5G_NR_SSRSRP_THRESHOLDS_INT_ARRAY,
+                new int[]{-125, -120, -115, -110});
+
+        logd("When connected to TN: ssRsrp -113 is POOR (above -114)");
+        mBundle.putIntArray(CarrierConfigManager.KEY_5G_NR_SSRSRP_THRESHOLDS_INT_ARRAY,
+                new int[]{-114, -110, -105, -100});
+
+        logd("ensure the controller's cache is updated");
+        sendCarrierConfigUpdate();
+
+        mSimulatedCommands.setSignalStrength(ss);
+        mSimulatedCommands.notifySignalStrength();
+        processAllMessages();
+
+        logd("Default thresholds are POOR=-115 MODERATE=-105 GOOD=-95 GREAT=-85");
+        assertEquals(CellSignalStrength.SIGNAL_STRENGTH_POOR, mSsc.getSignalStrength().getLevel());
+
+        logd("Set ServiceState to NTN=true, IN_SERVICE");
+        AsyncResult asyncResult = mock(AsyncResult.class);
+        asyncResult.result = mServiceState;
+        doReturn(true).when(mServiceState).isUsingNonTerrestrialNetwork();
+        doReturn(STATE_IN_SERVICE).when(mServiceState).getState();
+
+        logd("Send the service state change event");
+        mSsc.handleMessage(mSsc.obtainMessage(10 /* EVENT_SERVICE_STATE_CHANGED */, asyncResult));
+        processAllMessages();
+
+        logd("updateReportingCriteria is called, which will use the NTN configs");
+        mBundle.putIntArray(CarrierConfigManager.KEY_NTN_5G_NR_SSRSRP_THRESHOLDS_INT_ARRAY,
+                new int[]{-125, -120, -115, -110});
+        sendCarrierConfigUpdate();
+
+        logd("Send the signal strength and verify the level.");
+        mSimulatedCommands.setSignalStrength(ss);
+        mSimulatedCommands.notifySignalStrength();
+        processAllMessages();
+        assertEquals("Should be GOOD level when connected to NTN.",
+                CellSignalStrength.SIGNAL_STRENGTH_GOOD, mSsc.getSignalStrength().getLevel());
+
+        logd("Change ServiceState to TN");
+        doReturn(false).when(mServiceState).isUsingNonTerrestrialNetwork();
+
+        logd("Send the service state change event again to switch to TN mode");
+        mSsc.handleMessage(mSsc.obtainMessage(10 /* EVENT_SERVICE_STATE_CHANGED */, asyncResult));
+        processAllMessages();
+
+        logd("Send the signal strength and verify the level");
+        mSimulatedCommands.setSignalStrength(ss);
+        mSimulatedCommands.notifySignalStrength();
+        processAllMessages();
+        assertEquals("Should be POOR level when connected to TN.",
+                CellSignalStrength.SIGNAL_STRENGTH_POOR, mSsc.getSignalStrength().getLevel());
     }
 
     @Test

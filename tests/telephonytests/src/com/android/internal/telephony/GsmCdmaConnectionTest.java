@@ -241,7 +241,8 @@ public class GsmCdmaConnectionTest extends TelephonyTest {
     @Test
     public void testUpdateEmergencyRouting() {
         Bundle extras = new Bundle();
-        extras.putBoolean(PhoneConstants.EXTRA_USE_EMERGENCY_ROUTING, true);
+        extras.putInt(PhoneConstants.EXTRA_EMERGENCY_ROUTING_UPDATE_CAUSE,
+                PhoneConstants.EMERGENCY_ROUTING_UPDATE_CAUSE_ALTERNATE_SERVICE);
 
         DialArgs dialArgs = new DialArgs.Builder()
                 .setIsEmergency(true)

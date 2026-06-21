@@ -75,6 +75,7 @@ java_library {
     jarjar_rules: ":jarjar-rules-shared",
 
     libs: [
+        "android.app.privatecompute.flags-aconfig-java-export",
         "android.hardware.radio-V1.0-java",
         "android.hardware.radio-V1.1-java",
         "android.hardware.radio-V1.2-java",
@@ -90,6 +91,7 @@ java_library {
         "android.hardware.radio.network-V5-java",
         "android.hardware.radio.sim-V5-java",
         "android.hardware.radio.voice-V5-java",
+        "error_prone_annotations",
         "voip-common",
         "ims-common",
         "unsupportedappusage",
@@ -103,7 +105,9 @@ java_library {
         "libphonenumber-nogeocoder",
         "PlatformProperties",
         "net-utils-framework-common",
+        "telephony-config-update-proto-lite",
         "telephony-protos",
+        "modules-utils-binary-xml",
         "modules-utils-build_system",
         "modules-utils-fastxmlserializer",
         "modules-utils-statemachine",

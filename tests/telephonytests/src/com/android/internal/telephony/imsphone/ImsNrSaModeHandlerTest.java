@@ -17,35 +17,46 @@
 package com.android.internal.telephony.imsphone;
 
 import static android.telephony.CarrierConfigManager.CARRIER_NR_AVAILABILITY_SA;
+import static android.telephony.CarrierConfigManager.Ims.KEY_NR_SA_DISABLE_POLICY_FOR_EMERGENCY_INT;
 import static android.telephony.CarrierConfigManager.Ims.KEY_NR_SA_DISABLE_POLICY_INT;
 import static android.telephony.CarrierConfigManager.Ims.NR_SA_DISABLE_POLICY_NONE;
 import static android.telephony.CarrierConfigManager.Ims.NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED;
 import static android.telephony.CarrierConfigManager.Ims.NR_SA_DISABLE_POLICY_WFC_ESTABLISHED;
 import static android.telephony.CarrierConfigManager.Ims.NR_SA_DISABLE_POLICY_WFC_ESTABLISHED_WHEN_VONR_DISABLED;
 import static android.telephony.CarrierConfigManager.KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY;
-import static android.telephony.ims.feature.MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE;
+import static android.telephony.CarrierConfigManager.ImsWfc.KEY_EMERGENCY_CALL_OVER_EMERGENCY_PDN_BOOL;
+import static android.telephony.CarrierConfigManager.KEY_CARRIER_WFC_IMS_AVAILABLE_BOOL;
 import static android.telephony.ims.stub.ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN;
-import static android.telephony.ims.stub.ImsRegistrationImplBase.REGISTRATION_TECH_NONE;
+import static android.telephony.ims.stub.ImsRegistrationImplBase.REGISTRATION_TECH_LTE;
+
+import static com.android.internal.telephony.CommandsInterface.IMS_MMTEL_CAPABILITY_VOICE;
+import static com.android.internal.telephony.RILConstants.RIL_ERRNO_INVALID_RESPONSE;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_IS_VONR_ENABLED;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_N1_MODE_ENABLED;
+
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.anyInt;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import android.os.Handler;
 import android.os.Message;
+import android.os.PersistableBundle;
+import android.os.WorkSource;
 import android.telephony.CarrierConfigManager;
 import android.testing.AndroidTestingRunner;
 import android.testing.TestableLooper;
-import android.util.ArraySet;
 
 import com.android.internal.telephony.Call;
-import com.android.internal.telephony.GsmCdmaPhone;
-import com.android.internal.telephony.Phone;
-import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.telephony.TelephonyTest;
 
 import org.junit.After;
@@ -57,464 +68,454 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-import java.util.Set;
-
 @RunWith(AndroidTestingRunner.class)
 @TestableLooper.RunWithLooper
-public final class ImsNrSaModeHandlerTest extends TelephonyTest{
-    @Captor ArgumentCaptor<CarrierConfigManager.CarrierConfigChangeListener>
+public final class ImsNrSaModeHandlerTest extends TelephonyTest {
+    @Captor
+    ArgumentCaptor<CarrierConfigManager.CarrierConfigChangeListener>
             mCarrierConfigChangeListenerCaptor;
-    @Captor ArgumentCaptor<Handler> mPreciseCallStateHandlerCaptor;
+    @Captor
+    ArgumentCaptor<Handler> mPreciseCallStateHandlerCaptor;
 
     private ImsNrSaModeHandler mTestImsNrSaModeHandler;
     private CarrierConfigManager.CarrierConfigChangeListener mCarrierConfigChangeListener;
-    private Handler mPreciseCallStateHandler;
 
-    private Phone mDefaultPhone;
+    @Mock
+    private ImsPhoneCall mForegroundCall;
+    @Mock
+    private ImsPhoneCall mBackgroundCall;
+    @Mock
+    private ImsPhoneConnection mForegroundConnection;
+    @Mock
+    private ImsPhoneConnection mBackgroundConnection;
 
-    @Mock private ImsPhoneCall mForegroundCall;
-    @Mock private ImsPhoneCall mBackgroundCall;
-    private Call.State mActiveState = ImsPhoneCall.State.ACTIVE;
-    private Call.State mIdleState = ImsPhoneCall.State.IDLE;
-
-    private int mAnyInt = 0;
-    private final Set<String> mFeatureTags = new ArraySet<String>();
-
-    private class N1ModeHandlerCaptor implements ImsNrSaModeHandler.N1ModeSetter {
-        private boolean mIsN1ModeEnabled = false;
-
-        public void setN1ModeEnabled(boolean enabled, Message message) {
-            mIsN1ModeEnabled = enabled;
-            mSimulatedCommands.setN1ModeEnabled(enabled, message);
-        }
-
-        public boolean isN1ModeEnabled() {
-            return mIsN1ModeEnabled;
-        };
-    };
-
-    private N1ModeHandlerCaptor mN1ModeCaptor;
 
     @Before
     public void setUp() throws Exception {
         super.setUp(getClass().getSimpleName());
         MockitoAnnotations.initMocks(this);
 
+        doReturn(mPhone).when(mImsPhone).getDefaultPhone();
+        doReturn(mForegroundCall).when(mImsPhone).getForegroundCall();
+        doReturn(mBackgroundCall).when(mImsPhone).getBackgroundCall();
+        doReturn(mForegroundConnection).when(mForegroundCall).getFirstConnection();
+        doReturn(mBackgroundConnection).when(mBackgroundCall).getFirstConnection();
+
+        // Forward the call from Phone.setN1ModeEnabled(...) to mCi.setN1ModeEnabled(...).
+        doAnswer(invocation -> {
+            // Retrieve arguments from the setN1ModeEnabled(boolean enable, Message result) method.
+            boolean enable = invocation.getArgument(0);
+            Message result = invocation.getArgument(1);
+
+            // Invoke the corresponding method on mPhone.mCi (i.e., SimulatedCommands).
+            mPhone.mCi.setN1ModeEnabled(enable, result);
+            return null;
+        }).when(mPhone).setN1ModeEnabled(anyBoolean(), any(Message.class));
+
+        // Forward the call from Phone.isVoNrEnabled(...) to mCi.isVoNrEnabled(...).
+        doAnswer(invocation -> {
+            // Retrieve arguments from the
+            // isVoNrEnabled(Message message, WorkSource workSource) method.
+            Message message = invocation.getArgument(0);
+            WorkSource workSource = invocation.getArgument(1);
+
+            // Invoke the corresponding method on mPhone.mCi (i.e., SimulatedCommands).
+            mPhone.mCi.isVoNrEnabled(message, workSource);
+            return null;
+        }).when(mPhone).isVoNrEnabled(any(Message.class), nullable(WorkSource.class));
+
         mTestImsNrSaModeHandler = new ImsNrSaModeHandler(mImsPhone, mTestableLooper.getLooper());
-        mN1ModeCaptor = new N1ModeHandlerCaptor();
-        mTestImsNrSaModeHandler.setN1ModeSetter(mN1ModeCaptor);
 
         verify(mCarrierConfigManager).registerCarrierConfigChangeListener(
                 any(), mCarrierConfigChangeListenerCaptor.capture());
-
         mCarrierConfigChangeListener = mCarrierConfigChangeListenerCaptor.getValue();
 
-        doReturn(mAnyInt).when(mImsPhone).getSubId();
+        doReturn(0).when(mImsPhone).getSubId();
         doReturn(mContextFixture.getCarrierConfigBundle()).when(mCarrierConfigManager)
                 .getConfigForSubId(anyInt(), any());
-
-        mDefaultPhone = new GsmCdmaPhone(
-                mContext, mSimulatedCommands, mNotifier, true, 0,
-                PhoneConstants.PHONE_TYPE_GSM, mTelephonyComponentFactory,
-                (c, p) -> mImsManager, mFeatureFlags);
-
-        doReturn(mDefaultPhone).when(mImsPhone).getDefaultPhone();
-
-        doReturn(mForegroundCall).when(mImsPhone).getForegroundCall();
-        doReturn(mBackgroundCall).when(mImsPhone).getBackgroundCall();
-
-        doReturn(mActiveState).when(mForegroundCall).getState();
-        doReturn(mActiveState).when(mBackgroundCall).getState();
     }
 
     @After
     public void tearDown() throws Exception {
+        mTestImsNrSaModeHandler.tearDown();
         mTestImsNrSaModeHandler = null;
         super.tearDown();
     }
 
+    private void sendCarrierConfigChanged(
+            int normalPolicy, int emergencyPolicy, boolean isNrSaSupported,
+            boolean isWfcAvailable, boolean isWfcEmergencyOverEpdn) {
+        PersistableBundle bundle = mContextFixture.getCarrierConfigBundle();
+        bundle.putInt(KEY_NR_SA_DISABLE_POLICY_INT, normalPolicy);
+        bundle.putInt(KEY_NR_SA_DISABLE_POLICY_FOR_EMERGENCY_INT, emergencyPolicy);
+        if (isNrSaSupported) {
+            bundle.putIntArray(KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY,
+                    new int[]{CARRIER_NR_AVAILABILITY_SA});
+        } else {
+            bundle.putIntArray(KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{});
+        }
+        bundle.putBoolean(KEY_CARRIER_WFC_IMS_AVAILABLE_BOOL, isWfcAvailable);
+        bundle.putBoolean(KEY_EMERGENCY_CALL_OVER_EMERGENCY_PDN_BOOL, isWfcEmergencyOverEpdn);
+        mCarrierConfigChangeListener.onCarrierConfigChanged(
+                mImsPhone.getPhoneId(), mImsPhone.getSubId(), 0, 0);
+    }
+
+    private void setForegroundCallStatus(Call.State state, boolean isEmergency) {
+        doReturn(state).when(mForegroundConnection).getState();
+        doReturn(isEmergency).when(mForegroundConnection).isEmergencyCall();
+    }
+
+    private void setBackgroundCallStatus(Call.State state, boolean isEmergency) {
+        doReturn(state).when(mBackgroundConnection).getState();
+        doReturn(isEmergency).when(mBackgroundConnection).isEmergencyCall();
+    }
+
     @Test
     public void testTearDown() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_WFC_ESTABLISHED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_WFC_ESTABLISHED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
         verify(mImsPhone).registerForPreciseCallStateChanged(
                 mPreciseCallStateHandlerCaptor.capture(), anyInt(), any());
-        mPreciseCallStateHandler = mPreciseCallStateHandlerCaptor.getValue();
-
-        mTestImsNrSaModeHandler.setNrSaDisabledForWfc(true);
+        mTestImsNrSaModeHandler.updateImsCapability(IMS_MMTEL_CAPABILITY_VOICE);
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
+        setForegroundCallStatus(Call.State.ACTIVE, false);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
+        processAllMessages();
+        assertFalse(mSimulatedCommands.isN1ModeEnabled());
 
         mTestImsNrSaModeHandler.tearDown();
-
-        verify(mCarrierConfigManager).unregisterCarrierConfigChangeListener(any());
-        verify(mImsPhone).unregisterForPreciseCallStateChanged(mPreciseCallStateHandler);
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
-    }
-
-    @Test
-    public void testOnImsRegisteredWithNrSaCapabilityAndVoiceCapabilityAndSaDisablePolicyNone() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_NONE);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-        mTestImsNrSaModeHandler.updateImsCapability(CAPABILITY_TYPE_VOICE);
-        mTestImsNrSaModeHandler.setWifiRegStatus(false);
-
-        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN, mFeatureTags);
-
-        assertFalse(mTestImsNrSaModeHandler.isWifiRegistered());
-    }
-
-    @Test
-    public void testOnImsRegisteredWithSaDisablePolicyWfcEstablished() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_WFC_ESTABLISHED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-        mTestImsNrSaModeHandler.updateImsCapability(CAPABILITY_TYPE_VOICE);
-
-        verify(mImsPhone).registerForPreciseCallStateChanged(any(), anyInt(), any());
-
-        mN1ModeCaptor.setN1ModeEnabled(false, null);
-        mTestImsNrSaModeHandler.setNrSaDisabledForWfc(true);
-        mTestImsNrSaModeHandler.setWifiRegStatus(true);
-        mTestImsNrSaModeHandler.setImsCallStatus(true);
-
-        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_NONE, mFeatureTags);
-
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
-        assertFalse(mTestImsNrSaModeHandler.isWifiRegistered());
-
-        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN, mFeatureTags);
-
-        assertFalse(mN1ModeCaptor.isN1ModeEnabled());
-        assertTrue(mTestImsNrSaModeHandler.isWifiRegistered());
-    }
-
-    @Test
-    public void testOnImsRegisteredWithSaDisablePolicyWfcEstablishedWithVonrDisabled() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT,
-                NR_SA_DISABLE_POLICY_WFC_ESTABLISHED_WHEN_VONR_DISABLED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-        mTestImsNrSaModeHandler.updateImsCapability(CAPABILITY_TYPE_VOICE);
-
-        verify(mImsPhone).registerForPreciseCallStateChanged(any(), anyInt(), any());
-
-        mN1ModeCaptor.setN1ModeEnabled(true, null);
-        mTestImsNrSaModeHandler.setWifiRegStatus(false);
-        mTestImsNrSaModeHandler.setImsCallStatus(true);
-        mSimulatedCommands.setVonrEnabled(true);
-
-        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN, mFeatureTags);
         processAllMessages();
 
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
-        assertTrue(mTestImsNrSaModeHandler.isWifiRegistered());
+        verify(mCarrierConfigManager).unregisterCarrierConfigChangeListener(
+                mCarrierConfigChangeListener);
+        verify(mImsPhone).unregisterForPreciseCallStateChanged(
+                mPreciseCallStateHandlerCaptor.getValue());
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+    }
 
-        mN1ModeCaptor.setN1ModeEnabled(true, null);
-        mTestImsNrSaModeHandler.setWifiRegStatus(false);
-        mTestImsNrSaModeHandler.setImsCallStatus(true);
+    @Test
+    public void testNormalVoWifiRegistered() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
+        mTestImsNrSaModeHandler.updateImsCapability(IMS_MMTEL_CAPABILITY_VOICE);
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        assertFalse(mSimulatedCommands.isN1ModeEnabled());
+
+        mTestImsNrSaModeHandler.onImsUnregistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        assertFalse(mSimulatedCommands.isN1ModeEnabled());
+
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_LTE);
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+    }
+
+    @Test
+    public void testNormalWfcEstablished() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_WFC_ESTABLISHED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
+        mTestImsNrSaModeHandler.updateImsCapability(IMS_MMTEL_CAPABILITY_VOICE);
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+
+        setForegroundCallStatus(Call.State.ACTIVE, false);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
+        processAllMessages();
+        assertFalse(mSimulatedCommands.isN1ModeEnabled());
+
+        setForegroundCallStatus(Call.State.IDLE, false);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+    }
+
+    @Test
+    public void testNormalWfcEstablishedWhenVonrDisabled() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_WFC_ESTABLISHED_WHEN_VONR_DISABLED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
         mSimulatedCommands.setVonrEnabled(false);
 
-        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN, mFeatureTags);
+        mTestImsNrSaModeHandler.updateImsCapability(IMS_MMTEL_CAPABILITY_VOICE);
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
+        setForegroundCallStatus(Call.State.ACTIVE, false);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
         processAllMessages();
+        assertFalse(mSimulatedCommands.isN1ModeEnabled());
 
-        assertFalse(mN1ModeCaptor.isN1ModeEnabled());
-        assertTrue(mTestImsNrSaModeHandler.isWifiRegistered());
+        // Call ends, SA should be re-enabled
+        setForegroundCallStatus(Call.State.IDLE, false);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
 
-        mN1ModeCaptor.setN1ModeEnabled(true, null);
-        mTestImsNrSaModeHandler.setWifiRegStatus(false);
-        mTestImsNrSaModeHandler.setImsCallStatus(true);
         mSimulatedCommands.setVonrEnabled(true);
-
-        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_NONE, mFeatureTags);
+        setForegroundCallStatus(Call.State.ACTIVE, false);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
         processAllMessages();
-
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
-        assertFalse(mTestImsNrSaModeHandler.isWifiRegistered());
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
     }
 
     @Test
-    public void testOnImsRegisteredWithSaDisablePolicyVowifiRegistered() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
+    public void testNoNrSaSupport() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED,
+                NR_SA_DISABLE_POLICY_NONE, false, true, true);
 
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-        mTestImsNrSaModeHandler.updateImsCapability(CAPABILITY_TYPE_VOICE);
-
-        verify(mImsPhone).unregisterForPreciseCallStateChanged(mTestImsNrSaModeHandler);
-
-        mN1ModeCaptor.setN1ModeEnabled(true, null);
-        mTestImsNrSaModeHandler.setWifiRegStatus(false);
-
-        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN, mFeatureTags);
-
-        assertFalse(mN1ModeCaptor.isN1ModeEnabled());
-        assertTrue(mTestImsNrSaModeHandler.isWifiRegistered());
-
-        mN1ModeCaptor.setN1ModeEnabled(false, null);
-        mTestImsNrSaModeHandler.setWifiRegStatus(true);
-
-        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_NONE, mFeatureTags);
-
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
-        assertFalse(mTestImsNrSaModeHandler.isWifiRegistered());
-    }
-
-    @Test
-    public void testOnImsRegisteredWithoutNrSaCapabilityWithSaDisablePolicyVowifiRegistered() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-        mTestImsNrSaModeHandler.updateImsCapability(CAPABILITY_TYPE_VOICE);
-
-        verify(mImsPhone, times(0)).unregisterForPreciseCallStateChanged(mTestImsNrSaModeHandler);
-
-        mN1ModeCaptor.setN1ModeEnabled(true, null);
-        mTestImsNrSaModeHandler.setWifiRegStatus(false);
-
-        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN, mFeatureTags);
-
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
-        assertFalse(mTestImsNrSaModeHandler.isWifiRegistered());
-    }
-
-    @Test
-    public void testOnImsRegisteredWithoutVoiceCapabilityWithSaDisablePolicyVowifiRegistered() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-
-        verify(mImsPhone).unregisterForPreciseCallStateChanged(mTestImsNrSaModeHandler);
-
-        mN1ModeCaptor.setN1ModeEnabled(true, null);
-        mTestImsNrSaModeHandler.setWifiRegStatus(false);
-
-        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN, mFeatureTags);
-
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
-        assertTrue(mTestImsNrSaModeHandler.isWifiRegistered());
-    }
-
-    @Test
-    public void testOnImsUnregisteredWithoutNrSaCapability() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-
-        mTestImsNrSaModeHandler.setWifiRegStatus(true);
-
-        mTestImsNrSaModeHandler.onImsUnregistered(REGISTRATION_TECH_IWLAN);
-
-        assertTrue(mTestImsNrSaModeHandler.isWifiRegistered());
-    }
-
-
-    @Test
-    public void testOnImsUnregisteredWithSaDisablePolicyNone() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_NONE);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-
-        mTestImsNrSaModeHandler.setWifiRegStatus(true);
-
-        mTestImsNrSaModeHandler.onImsUnregistered(REGISTRATION_TECH_IWLAN);
-
-        assertTrue(mTestImsNrSaModeHandler.isWifiRegistered());
-    }
-
-    @Test
-    public void testOnImsUnregisteredWithoutRadioTechIwlan() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-
-        mTestImsNrSaModeHandler.setWifiRegStatus(true);
-
-        mTestImsNrSaModeHandler.onImsUnregistered(NR_SA_DISABLE_POLICY_NONE);
-
-        assertTrue(mTestImsNrSaModeHandler.isWifiRegistered());
-    }
-
-    @Test
-    public void testOnImsUnregisteredWithoutWifiResistring() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-
-        mTestImsNrSaModeHandler.setWifiRegStatus(false);
-
-        mTestImsNrSaModeHandler.onImsUnregistered(REGISTRATION_TECH_IWLAN);
-
-        assertFalse(mTestImsNrSaModeHandler.isWifiRegistered());
-    }
-
-    @Test
-    public void testOnImsUnregisteredWithNrSaCapabilityAndVoiceCapabilityAndRadioTechIwlan() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-        mTestImsNrSaModeHandler.updateImsCapability(CAPABILITY_TYPE_VOICE);
-
-        mN1ModeCaptor.setN1ModeEnabled(false, null);
-        mTestImsNrSaModeHandler.setNrSaDisabledForWfc(true);
-        mTestImsNrSaModeHandler.setWifiRegStatus(true);
-
-        mTestImsNrSaModeHandler.onImsUnregistered(REGISTRATION_TECH_IWLAN);
-
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
-        assertFalse(mTestImsNrSaModeHandler.isWifiRegistered());
-    }
-
-    @Test
-    public void testOnPreciseCallStateChangedWithSaDisablePolicyWfcEstablished() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_WFC_ESTABLISHED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-        mTestImsNrSaModeHandler.updateImsCapability(CAPABILITY_TYPE_VOICE);
-
-        verify(mImsPhone).registerForPreciseCallStateChanged(
-                mPreciseCallStateHandlerCaptor.capture(), anyInt(), any());
-        mPreciseCallStateHandler = mPreciseCallStateHandlerCaptor.getValue();
-
-        mTestImsNrSaModeHandler.setWifiRegStatus(true);
-        mN1ModeCaptor.setN1ModeEnabled(true, null);
-
-        mPreciseCallStateHandler.handleMessage(mPreciseCallStateHandler.obtainMessage(101));
-
-        assertTrue(mTestImsNrSaModeHandler.isImsCallOngoing());
-        assertFalse(mN1ModeCaptor.isN1ModeEnabled());
-
-        doReturn(mIdleState).when(mForegroundCall).getState();
-        doReturn(mIdleState).when(mBackgroundCall).getState();
-        mPreciseCallStateHandler.handleMessage(mPreciseCallStateHandler.obtainMessage(101));
-
-        assertFalse(mTestImsNrSaModeHandler.isImsCallOngoing());
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
-    }
-
-    @Test
-    public void testOnPreciseCallStateChangedWithSaDisablePolicyWfcEstablishedWithVonrDisabled() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT,
-                NR_SA_DISABLE_POLICY_WFC_ESTABLISHED_WHEN_VONR_DISABLED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-        mTestImsNrSaModeHandler.updateImsCapability(CAPABILITY_TYPE_VOICE);
-
-        verify(mImsPhone).registerForPreciseCallStateChanged(
-                mPreciseCallStateHandlerCaptor.capture(), anyInt(), any());
-        mPreciseCallStateHandler = mPreciseCallStateHandlerCaptor.getValue();
-
-        mTestImsNrSaModeHandler.setWifiRegStatus(true);
-        mN1ModeCaptor.setN1ModeEnabled(true, null);
-        mSimulatedCommands.setVonrEnabled(false);
-
-        mPreciseCallStateHandler.handleMessage(mPreciseCallStateHandler.obtainMessage(101));
+        mTestImsNrSaModeHandler.updateImsCapability(IMS_MMTEL_CAPABILITY_VOICE);
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
         processAllMessages();
-
-        assertFalse(mN1ModeCaptor.isN1ModeEnabled());
-
-        doReturn(mIdleState).when(mForegroundCall).getState();
-        doReturn(mIdleState).when(mBackgroundCall).getState();
-        mPreciseCallStateHandler.handleMessage(mPreciseCallStateHandler.obtainMessage(101));
-
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
-
-        doReturn(mActiveState).when(mForegroundCall).getState();
-        doReturn(mActiveState).when(mBackgroundCall).getState();
-        mPreciseCallStateHandler.handleMessage(mPreciseCallStateHandler.obtainMessage(101));
-        mTestImsNrSaModeHandler.setImsCallStatus(false);
-        processAllMessages();
-
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
     }
 
     @Test
-    public void testOnCarrierConfigChangedRegisterOrUnregisterListenerForPreciseCallStateChange() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_WFC_ESTABLISHED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-
-        verify(mImsPhone).registerForPreciseCallStateChanged(
-                mPreciseCallStateHandlerCaptor.capture(), anyInt(), any());
-        mPreciseCallStateHandler = mPreciseCallStateHandlerCaptor.getValue();
-
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED);
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-
-        verify(mImsPhone).unregisterForPreciseCallStateChanged(mPreciseCallStateHandler);
-    }
-
-    @Test
-    public void testUpdateImsCapabilityWithSaDisablePolicyWfcEstablished() {
-        mContextFixture.getCarrierConfigBundle().putInt(
-                KEY_NR_SA_DISABLE_POLICY_INT, NR_SA_DISABLE_POLICY_WFC_ESTABLISHED);
-        mContextFixture.getCarrierConfigBundle().putIntArray(
-                KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY, new int[]{CARRIER_NR_AVAILABILITY_SA});
-
-        mCarrierConfigChangeListener.onCarrierConfigChanged(mAnyInt, mAnyInt, mAnyInt, mAnyInt);
-
-        mN1ModeCaptor.setN1ModeEnabled(true, null);
-        verify(mImsPhone).registerForPreciseCallStateChanged(
-                mPreciseCallStateHandlerCaptor.capture(), anyInt(), any());
-        mPreciseCallStateHandler = mPreciseCallStateHandlerCaptor.getValue();
-
-        mTestImsNrSaModeHandler.setWifiRegStatus(true);
-        mPreciseCallStateHandler.handleMessage(mPreciseCallStateHandler.obtainMessage(101));
-
-        assertTrue(mTestImsNrSaModeHandler.isImsCallOngoing());
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
-
-        mTestImsNrSaModeHandler.updateImsCapability(CAPABILITY_TYPE_VOICE);
-        assertFalse(mN1ModeCaptor.isN1ModeEnabled());
+    public void testNoVoiceCapability() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
 
         mTestImsNrSaModeHandler.updateImsCapability(0);
-        assertTrue(mN1ModeCaptor.isN1ModeEnabled());
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+    }
+
+    @Test
+    public void testEmergencyVoWifiRegistered() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_NONE,
+                NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED, true, true, true);
+
+        mTestImsNrSaModeHandler.onImsEmergencyRegistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        assertFalse(mSimulatedCommands.isN1ModeEnabled());
+
+        mTestImsNrSaModeHandler.onImsEmergencyUnregistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+
+        mTestImsNrSaModeHandler.onImsEmergencyRegistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        assertFalse(mSimulatedCommands.isN1ModeEnabled());
+
+        mTestImsNrSaModeHandler.onImsEmergencyRegistered(REGISTRATION_TECH_LTE);
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+    }
+
+    @Test
+    public void testEmergencyWfcEstablished() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_NONE,
+                NR_SA_DISABLE_POLICY_WFC_ESTABLISHED, true, true, true);
+        verify(mImsPhone).registerForPreciseCallStateChanged(any(), anyInt(), any());
+
+        mTestImsNrSaModeHandler.onImsEmergencyRegistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+
+        setForegroundCallStatus(Call.State.ACTIVE, false);
+        setBackgroundCallStatus(Call.State.ACTIVE, false);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+
+        setForegroundCallStatus(Call.State.ACTIVE, true);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
+        processAllMessages();
+        assertFalse(mSimulatedCommands.isN1ModeEnabled());
+
+        setForegroundCallStatus(Call.State.DISCONNECTED, true);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+    }
+
+    @Test
+    public void testPolicyConflict() {
+        // Normal policy wants to enable SA, but emergency policy wants to disable it.
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED,
+                NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED, true, true, true);
+
+        mTestImsNrSaModeHandler.updateImsCapability(IMS_MMTEL_CAPABILITY_VOICE);
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_LTE); // Not on IWLAN
+        mTestImsNrSaModeHandler.onImsEmergencyRegistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+
+        // Emergency is on IWLAN, so SA should be disabled.
+        assertFalse(mSimulatedCommands.isN1ModeEnabled());
+    }
+
+    @Test
+    public void testPolicyPriority() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_WFC_ESTABLISHED_WHEN_VONR_DISABLED,
+                NR_SA_DISABLE_POLICY_WFC_ESTABLISHED, true, true, true);
+
+        mSimulatedCommands.setVonrEnabled(true);
+        mTestImsNrSaModeHandler.updateImsCapability(IMS_MMTEL_CAPABILITY_VOICE);
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
+        mTestImsNrSaModeHandler.onImsEmergencyRegistered(REGISTRATION_TECH_IWLAN);
+        setForegroundCallStatus(Call.State.ACTIVE, false);
+        setBackgroundCallStatus(Call.State.ACTIVE, true);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
+        processAllMessages();
+
+        assertFalse(mSimulatedCommands.isN1ModeEnabled());
+    }
+
+    @Test
+    public void testRegisterUnregisterForPreciseCallStateChanges() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
+        verify(mImsPhone, never()).registerForPreciseCallStateChanged(any(), anyInt(), any());
+        verify(mImsPhone, times(1)).unregisterForPreciseCallStateChanged(any());
+
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_WFC_ESTABLISHED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
+        verify(mImsPhone, times(1)).registerForPreciseCallStateChanged(
+                mPreciseCallStateHandlerCaptor.capture(), anyInt(), any());
+
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
+        verify(mImsPhone, times(2)).unregisterForPreciseCallStateChanged(
+                mPreciseCallStateHandlerCaptor.getValue());
+    }
+
+    @Test
+    public void testIsVonrEnabledQueryIsFailed() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_WFC_ESTABLISHED_WHEN_VONR_DISABLED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
+        mSimulatedCommands.setVonrEnabled(false);
+
+        mTestImsNrSaModeHandler.updateImsCapability(IMS_MMTEL_CAPABILITY_VOICE);
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
+        setForegroundCallStatus(Call.State.ACTIVE, false);
+        // It triggers a failure for the request.
+        mSimulatedCommands.setRilRequestErrorCode(
+                RIL_REQUEST_IS_VONR_ENABLED, RIL_ERRNO_INVALID_RESPONSE);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+    }
+
+    @Test
+    public void testSetNrSaRequestIsFailed() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_NONE,
+                NR_SA_DISABLE_POLICY_WFC_ESTABLISHED, true, true, true);
+        verify(mImsPhone).registerForPreciseCallStateChanged(any(), anyInt(), any());
+
+        mTestImsNrSaModeHandler.onImsEmergencyRegistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+
+        setForegroundCallStatus(Call.State.ACTIVE, true);
+        // It triggers a failure for the request.
+        mSimulatedCommands.setRilRequestErrorCode(
+                RIL_REQUEST_SET_N1_MODE_ENABLED, RIL_ERRNO_INVALID_RESPONSE);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
+        processAllMessages();
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+    }
+
+    @Test
+    public void testAsynchronousResponseHandling() {
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_WFC_ESTABLISHED_WHEN_VONR_DISABLED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
+        mSimulatedCommands.setVonrEnabled(false);
+
+        mTestImsNrSaModeHandler.updateImsCapability(IMS_MMTEL_CAPABILITY_VOICE);
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
+        setForegroundCallStatus(Call.State.ACTIVE, false);
+        mTestImsNrSaModeHandler.onPreciseCallStateChanged();
+
+        // This part causes a change while waiting for the asynchronous response.
+        // Ultimately, it will enable NR SA.
+        mTestImsNrSaModeHandler.updateImsCapability(0);
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+
+        // sends an asynchronous response for isVoNrEnabled query
+        mTestableLooper.processMessages(1);
+        assertFalse(mTestImsNrSaModeHandler.isNrSaDisabledForWfc());
+
+        // sends an asynchronous response for setN1ModeEnabled request(false)
+        mTestableLooper.processMessages(1);
+        assertTrue(mTestImsNrSaModeHandler.isNrSaDisabledForWfc());
+
+        // After completing the ongoing operation, it handles the changes
+        // that occurred while waiting for the asynchronous response.
+        // sends an asynchronous response for setN1ModeEnabled request(true))
+        mTestableLooper.processMessages(1);
+        assertFalse(mTestImsNrSaModeHandler.isNrSaDisabledForWfc());
+    }
+
+    @Test
+    public void testWfcNotAvailable() {
+        // Send carrier config changed with WFC availability set to false.
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED,
+                NR_SA_DISABLE_POLICY_NONE, true, false, true);
+        mSimulatedCommands.setVonrEnabled(true);
+
+        // Trigger IMS capability update and IMS registration on WiFi.
+        mTestImsNrSaModeHandler.updateImsCapability(IMS_MMTEL_CAPABILITY_VOICE);
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        // Since WFC is not available, NR SA mode should not be disabled and remain enabled
+        // (default).
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+    }
+
+    @Test
+    public void testEmergencyOverImsPdnWithNormalPolicyNone() {
+        // Set no normal policy but an emergency policy, and emergency call is over IMS PDN (false).
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_NONE,
+                NR_SA_DISABLE_POLICY_VOWIFI_REGISTERED, true, true, false);
+        mSimulatedCommands.setVonrEnabled(true);
+
+        // Trigger IMS registration on WiFi (shares IMS PDN, so onImsRegistered is called).
+        mTestImsNrSaModeHandler.onImsRegistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+        // Even without a normal policy, NR SA mode should be disabled by the emergency policy.
+        assertFalse(mSimulatedCommands.isN1ModeEnabled());
+
+        // Trigger IMS unregistration on WiFi.
+        // In a shared PDN environment, onImsUnregistered should also clear the emergency status.
+        mTestImsNrSaModeHandler.onImsUnregistered(REGISTRATION_TECH_IWLAN);
+        processAllMessages();
+
+        // NR SA mode should be re-enabled.
+        assertTrue(mSimulatedCommands.isN1ModeEnabled());
+    }
+
+    @Test
+    public void testSetNrSaDisablePolicy_CleanupWhenNotSupportedOrUnavailable() {
+        // 1. Setup with valid config (NR SA supported, WFC available)
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_WFC_ESTABLISHED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
+
+        // Verify registration and capture the handler
+        verify(mImsPhone).registerForPreciseCallStateChanged(
+                mPreciseCallStateHandlerCaptor.capture(), anyInt(), any());
+        Handler handler = mPreciseCallStateHandlerCaptor.getValue();
+
+        // 2. Update config: NR SA NOT supported
+        // This triggers the code block: if (!isNrSaSupported || !isWfcAvailable) ...
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_WFC_ESTABLISHED,
+                NR_SA_DISABLE_POLICY_NONE, false, true, true);
+
+        // Verify unregistration
+        verify(mImsPhone).unregisterForPreciseCallStateChanged(eq(handler));
+
+        // 3. Reset to valid config
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_WFC_ESTABLISHED,
+                NR_SA_DISABLE_POLICY_NONE, true, true, true);
+
+        // 4. Update config: WFC NOT available
+        // This triggers the code block: if (!isNrSaSupported || !isWfcAvailable) ...
+        sendCarrierConfigChanged(NR_SA_DISABLE_POLICY_WFC_ESTABLISHED,
+                NR_SA_DISABLE_POLICY_NONE, true, false, true);
+
+        // Verify unregistration again (total 2 times)
+        verify(mImsPhone, times(2)).unregisterForPreciseCallStateChanged(eq(handler));
     }
 }

@@ -109,6 +109,7 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SMSC_A
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SYSTEM_SELECTION_CHANNELS;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_UICC_APPLICATIONS_ENABLEMENT;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_USAGE_SETTING;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GET_SUPPORTED_NETWORK_ALERT_CATEGORIES;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GSM_BROADCAST_ACTIVATION;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GSM_GET_BROADCAST_CONFIG;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_GSM_SET_BROADCAST_CONFIG;
@@ -145,6 +146,7 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_QUERY_FACI
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_QUERY_NETWORK_SELECTION_MODE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_QUERY_TTY_MODE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_RADIO_POWER;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_REBOOT_MODEM;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_RELEASE_PDU_SESSION_ID;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_REPORT_SMS_MEMORY_STATUS;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_REPORT_STK_SERVICE_IS_RUNNING;
@@ -184,6 +186,7 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_PREFER
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_PREFERRED_NETWORK_TYPE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_RADIO_CAPABILITY;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SATELLITE_ENABLED_FOR_CARRIER;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SATELLITE_NETWORK_INFO;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SATELLITE_PLMN;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SECURITY_ALGORITHMS_UPDATED_ENABLED;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SET_SIGNAL_STRENGTH_REPORTING_CRITERIA;
@@ -214,6 +217,7 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_START_IMS_
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_START_KEEPALIVE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_START_LCE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_START_NETWORK_SCAN;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_START_PRIORITIZED_NETWORK_SCAN;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_STK_GET_PROFILE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_STK_HANDLE_CALL_SETUP_REQUESTED_FROM_SIM;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_STK_SEND_ENVELOPE_COMMAND;
@@ -224,6 +228,7 @@ import static com.android.internal.telephony.RILConstants.RIL_REQUEST_STOP_IMS_T
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_STOP_KEEPALIVE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_STOP_LCE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_STOP_NETWORK_SCAN;
+import static com.android.internal.telephony.RILConstants.RIL_REQUEST_STOP_PRIORITIZED_NETWORK_SCAN;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SWITCH_DUAL_SIM_CONFIG;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE;
 import static com.android.internal.telephony.RILConstants.RIL_REQUEST_TRIGGER_EMERGENCY_NETWORK_SCAN;
@@ -249,7 +254,9 @@ import static com.android.internal.telephony.RILConstants.RIL_UNSOL_CELLULAR_IDE
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_CELL_INFO_LIST;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_CONNECTION_SETUP_FAILURE;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_DATA_CALL_LIST_CHANGED;
+import static com.android.internal.telephony.RILConstants.RIL_UNSOL_DATA_CALL_LIST_UPDATED;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_DC_RT_INFO_CHANGED;
+import static com.android.internal.telephony.RILConstants.RIL_UNSOL_DISPLAY_NETWORK_TYPE_CHANGED;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_EMERGENCY_NETWORK_SCAN_RESULT;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_EMERGENCY_NUMBER_LIST;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_ENTER_EMERGENCY_CALLBACK_MODE;
@@ -261,6 +268,7 @@ import static com.android.internal.telephony.RILConstants.RIL_UNSOL_KEEPALIVE_ST
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_LCEDATA_RECV;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_MODEM_RESTART;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_NETWORK_SCAN_RESULT;
+import static com.android.internal.telephony.RILConstants.RIL_UNSOL_NETWORK_SECURITY_EVENTS;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_NITZ_TIME_RECEIVED;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_NOTIFY_ANBR;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_OEM_HOOK_RAW;
@@ -269,6 +277,7 @@ import static com.android.internal.telephony.RILConstants.RIL_UNSOL_ON_USSD;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_ON_USSD_REQUEST;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_PCO_DATA;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_PHYSICAL_CHANNEL_CONFIG;
+import static com.android.internal.telephony.RILConstants.RIL_UNSOL_PRIORITIZED_SCAN_MODE_CHANGED;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RADIO_CAPABILITY;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_REGISTRATION_FAILED;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESEND_INCALL_MUTE;
@@ -315,8 +324,11 @@ import android.net.LinkProperties;
 import android.os.SystemClock;
 import android.service.carrier.CarrierIdentifier;
 import android.telephony.AccessNetworkConstants;
+import android.telephony.AccessNetworkConstants.RadioAccessNetworkType;
+import android.telephony.AccessNetworkConstants.TransportType;
 import android.telephony.Annotation;
 import android.telephony.Annotation.DataState;
+import android.telephony.AnomalyReporter;
 import android.telephony.BarringInfo;
 import android.telephony.CarrierInfo;
 import android.telephony.CarrierRestrictionRules;
@@ -349,6 +361,7 @@ import android.telephony.EmergencyRegistrationResult;
 import android.telephony.LinkCapacityEstimate;
 import android.telephony.ModemInfo;
 import android.telephony.NetworkRegistrationInfo;
+import android.telephony.NetworkSecurityEvent;
 import android.telephony.PhoneCapability;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.PhysicalChannelConfig;
@@ -395,6 +408,7 @@ import com.android.internal.telephony.cdma.sms.CdmaSmsSubaddress;
 import com.android.internal.telephony.cdma.sms.SmsEnvelope;
 import com.android.internal.telephony.data.KeepaliveStatus;
 import com.android.internal.telephony.data.KeepaliveStatus.KeepaliveStatusCode;
+import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.imsphone.ImsCallInfo;
 import com.android.internal.telephony.uicc.AdnCapacity;
 import com.android.internal.telephony.uicc.IccCardApplicationStatus;
@@ -426,6 +440,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -446,6 +461,17 @@ public class RILUtils {
             "316f3801-fa21-4954-a42f-0041eada3b32";
     public static final String RADIO_POWER_FAILURE_NO_RF_CALIBRATION_UUID =
             "316f3801-fa21-4954-a42f-0041eada3b33";
+
+    // UUIDs and messages for anomalies detected during HAL RadioAccessSpecifier conversion.
+    public static final UUID ANOMALY_HAL_SPECIFIER_HAS_BAD_ACCESS_NETWORK_VALUES_UUID =
+            UUID.fromString("b87c4f08-b24d-4f81-8179-5479903f35c6");
+    public static final String ANOMALY_HAL_SPECIFIER_HAS_BAD_ACCESS_NETWORK_VALUES_MSG =
+            "RadioAccessSpecifier has bad RAN type, "
+            + "possibly using HIDL values or unsupported CDMA2000";
+    public static final UUID ANOMALY_HAL_SPECIFIER_USES_PADDING_VALUES_UUID =
+            UUID.fromString("dae80057-b69c-455e-91ec-2c898f0e2566");
+    public static final String ANOMALY_HAL_SPECIFIER_USES_PADDING_VALUES_MSG =
+            "RadioAccessSpecifier channels arrays contained padding values";
 
     private static final Set<Class> WRAPPER_CLASSES = new HashSet(Arrays.asList(
             Boolean.class, Character.class, Byte.class, Short.class, Integer.class, Long.class,
@@ -981,7 +1007,7 @@ public class RILUtils {
      * @return The converted DataProfileInfo
      */
     public static android.hardware.radio.data.DataProfileInfo convertToHalDataProfile(
-            @Nullable DataProfile dp) {
+            @Nullable DataProfile dp, HalVersion radioHalVersion) {
         if (dp == null) return null;
         android.hardware.radio.data.DataProfileInfo dpi =
                 new android.hardware.radio.data.DataProfileInfo();
@@ -1013,7 +1039,8 @@ public class RILUtils {
             dpi.alwaysOn = dp.getApnSetting().isAlwaysOn();
             dpi.infrastructureBitmap = dp.getApnSetting().getInfrastructureBitmask();
         }
-        dpi.trafficDescriptor = convertToHalTrafficDescriptorAidl(dp.getTrafficDescriptor());
+        dpi.trafficDescriptor = convertToHalTrafficDescriptorAidl(dp.getTrafficDescriptor(),
+                radioHalVersion);
 
         // profile id is only meaningful when it's persistent on the modem.
         dpi.profileId = (dpi.persistent) ? dp.getProfileId()
@@ -1151,7 +1178,8 @@ public class RILUtils {
      * @return The converted TrafficDescriptor
      */
     public static android.hardware.radio.data.TrafficDescriptor
-            convertToHalTrafficDescriptorAidl(@Nullable TrafficDescriptor trafficDescriptor) {
+            convertToHalTrafficDescriptorAidl(@Nullable TrafficDescriptor trafficDescriptor,
+            HalVersion radioHalVersion) {
         if (trafficDescriptor == null) {
             return new android.hardware.radio.data.TrafficDescriptor();
         }
@@ -1165,6 +1193,10 @@ public class RILUtils {
             android.hardware.radio.data.OsAppId osAppId = new android.hardware.radio.data.OsAppId();
             osAppId.osAppId = trafficDescriptor.getOsAppId();
             td.osAppId = osAppId;
+        }
+        if (Flags.enableTrafficDescriptorConnectionCapability() && radioHalVersion.greaterOrEqual(
+                RIL.RADIO_HAL_VERSION_2_4)) {
+            td.connectionCapability = (byte) (trafficDescriptor.getConnectionCapability() & 0xFF);
         }
         return td;
     }
@@ -1274,7 +1306,20 @@ public class RILUtils {
     }
 
     /**
-     * Convert RadioAccessSpecifier defined in RadioAccessSpecifier.aidl to RadioAccessSpecifier
+     * Convert RadioAccessSpecifier defined in RadioAccessSpecifier.aidl to RadioAccessSpecifier.
+     *
+     * Applies defensive conversions for vendor HAL implementations that may send
+     * incorrect values:
+     * <ul>
+     *   <li>accessNetwork: derived from the bands union tag (geranBands → GERAN, etc.)
+     *       instead of trusting specifier.accessNetwork, which may contain incorrect HIDL
+     *       RadioAccessNetworks values (NGRAN=4) from vendor HALs ported from HIDL to AIDL
+     *       without updating enum values.</li>
+     *   <li>channels: negative sentinel values (e.g. -1) stripped, as some vendor HALs
+     *       return a fixed-size 32-element buffer padded with -1 instead of a properly
+     *       sized empty array.</li>
+     * </ul>
+     *
      * @param specifier RadioAccessSpecifier defined in RadioAccessSpecifier.aidl
      * @return The converted RadioAccessSpecifier
      */
@@ -1282,21 +1327,38 @@ public class RILUtils {
             android.hardware.radio.network.RadioAccessSpecifier specifier) {
         if (specifier == null) return null;
         int[] halBands = null;
+        // The bands union tag is the authoritative source for the RAN type.
+        // specifier.accessNetwork may contain incorrect HIDL enum values from
+        // vendor HALs ported from HIDL to AIDL (e.g., HIDL NGRAN=4 instead of
+        // AIDL NGRAN=6). The bands tag is always correct because the union
+        // discriminator is set by the band-specific setter (setNgranBands, etc.).
+        int accessNetwork = AccessNetworkConstants.AccessNetworkType.UNKNOWN;
         switch (specifier.bands.getTag()) {
             case android.hardware.radio.network.RadioAccessSpecifierBands.geranBands:
                 halBands = specifier.bands.getGeranBands();
+                accessNetwork = AccessNetworkConstants.AccessNetworkType.GERAN;
                 break;
             case android.hardware.radio.network.RadioAccessSpecifierBands.utranBands:
                 halBands = specifier.bands.getUtranBands();
+                accessNetwork = AccessNetworkConstants.AccessNetworkType.UTRAN;
                 break;
             case android.hardware.radio.network.RadioAccessSpecifierBands.eutranBands:
                 halBands = specifier.bands.getEutranBands();
+                accessNetwork = AccessNetworkConstants.AccessNetworkType.EUTRAN;
                 break;
             case android.hardware.radio.network.RadioAccessSpecifierBands.ngranBands:
                 halBands = specifier.bands.getNgranBands();
+                accessNetwork = AccessNetworkConstants.AccessNetworkType.NGRAN;
                 break;
         }
-        return new RadioAccessSpecifier(specifier.accessNetwork, halBands, specifier.channels);
+        if (specifier.accessNetwork != accessNetwork) {
+            AnomalyReporter.reportAnomaly(
+                                          ANOMALY_HAL_SPECIFIER_HAS_BAD_ACCESS_NETWORK_VALUES_UUID,
+                                          ANOMALY_HAL_SPECIFIER_HAS_BAD_ACCESS_NETWORK_VALUES_MSG);
+        }
+        // Strip negative sentinel values from channels array.
+        int[] channels = sanitizeChannels(specifier.channels);
+        return new RadioAccessSpecifier(accessNetwork, halBands, channels);
     }
 
     /**
@@ -1718,6 +1780,42 @@ public class RILUtils {
             default:
                 return AccessNetworkConstants.AccessNetworkType.UNKNOWN;
         }
+    }
+
+    /**
+     * Strip negative sentinel values from a channels array.
+     *
+     * <p>Some vendor HAL implementations return a fixed-size 32-element buffer for the
+     * channels array, with unused entries initialized to -1. The framework expects an
+     * empty array when no channels are specified. This method filters out negative values.
+     *
+     * @param channels Raw channels array from HAL response
+     * @return Sanitized channels array with only non-negative values
+     */
+    private static int[] sanitizeChannels(int[] channels) {
+        if (channels == null || channels.length == 0) {
+            return new int[0];
+        }
+
+        // Implementation chosen over using an ArrayList to avoid int <=> Integer boxing/unboxing
+        // overhead.
+        int newLength = 0;
+        for (int channel : channels) {
+            if (channel >= 0) newLength++;
+        }
+        if (newLength == channels.length) return channels;
+
+        // If we get this far then at least one value was padded and needs to be fixed.
+        AnomalyReporter.reportAnomaly(
+                                      ANOMALY_HAL_SPECIFIER_USES_PADDING_VALUES_UUID,
+                                      ANOMALY_HAL_SPECIFIER_USES_PADDING_VALUES_MSG);
+        if (newLength == 0) return new int[0];
+        int[] cleanChannels = new int[newLength];
+        int resultPos = 0;
+        for (int channel : channels) {
+            if (channel >= 0) cleanChannels[resultPos++] = channel;
+        }
+        return cleanChannels;
     }
 
     /**
@@ -3155,6 +3253,184 @@ public class RILUtils {
         return serviceInfos;
     }
 
+    private static @NetworkSecurityEvent.AlertCategory int
+            convertHalNetworkSecurityAlertCategory(int alertCategory) {
+       return switch (alertCategory) {
+            case android.hardware.radio.network.AlertCategory.UNSPECIFIED ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_UNSPECIFIED;
+            case android.hardware.radio.network.AlertCategory.DOWNGRADE ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_DOWNGRADE;
+            case android.hardware.radio.network.AlertCategory.DOWNGRADE_2G ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_DOWNGRADE_2G;
+            case android.hardware.radio.network.AlertCategory.DOWNGRADE_3G ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_DOWNGRADE_3G;
+            case android.hardware.radio.network.AlertCategory.DOWNGRADE_4G ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_DOWNGRADE_4G;
+            case android.hardware.radio.network.AlertCategory.IMPRISONMENT ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_IMPRISONMENT;
+            case android.hardware.radio.network.AlertCategory.DOS_NETWORK ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_DOS_NETWORK;
+            case android.hardware.radio.network.AlertCategory.ATTRACTIVE_CELL ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_ATTRACTIVE_CELL;
+            case android.hardware.radio.network.AlertCategory.JAMMING ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_JAMMING;
+            case android.hardware.radio.network.AlertCategory.LOCATION_TRACKING ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_LOCATION_TRACKING;
+            case android.hardware.radio.network.AlertCategory.AUTH_PASSED ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_AUTH_PASSED;
+            case android.hardware.radio.network.AlertCategory.UNAUTH_SMS ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_UNAUTH_SMS;
+            case android.hardware.radio.network.AlertCategory.UNAUTH_EMERGENCY_MSG ->
+                    NetworkSecurityEvent.ALERT_CATEGORY_UNAUTH_EMERGENCY_MSG;
+            default -> NetworkSecurityEvent.ALERT_CATEGORY_UNSPECIFIED;
+        };
+    }
+
+    private static @NetworkSecurityEvent.AlertStatus int
+            convertHalNetworkSecurityAlertStatus(int alertStatus) {
+        return switch (alertStatus) {
+            case android.hardware.radio.network.AlertStatus.UNSPECIFIED ->
+                    NetworkSecurityEvent.ALERT_STATUS_UNSPECIFIED;
+            case android.hardware.radio.network.AlertStatus.NOT_DETECTED ->
+                    NetworkSecurityEvent.ALERT_STATUS_NOT_DETECTED;
+            case android.hardware.radio.network.AlertStatus.DETECTED ->
+                    NetworkSecurityEvent.ALERT_STATUS_DETECTED;
+            case android.hardware.radio.network.AlertStatus.MITIGATED_CELL_BARRED ->
+                    NetworkSecurityEvent.ALERT_STATUS_MITIGATED_CELL_BARRED;
+            case android.hardware.radio.network.AlertStatus.MITIGATED_CELL_DEPRIORITIZED ->
+                    NetworkSecurityEvent.ALERT_STATUS_MITIGATED_CELL_DEPRIORITIZED;
+            case android.hardware.radio.network.AlertStatus.MITIGATED_UNSPECIFIED ->
+                    NetworkSecurityEvent.ALERT_STATUS_MITIGATED_UNSPECIFIED;
+            default -> NetworkSecurityEvent.ALERT_STATUS_UNSPECIFIED;
+        };
+    }
+
+    private static @NetworkSecurityEvent.ReasonCode int
+            convertHalNetworkSecurityReasonCode(int reasonCode) {
+        return switch (reasonCode) {
+            case android.hardware.radio.network.ReasonCode.UNSPECIFIED ->
+                    NetworkSecurityEvent.REASON_CODE_UNSPECIFIED;
+            case android.hardware.radio.network.ReasonCode.DOWNGRADE_WEAK_CIPHER_SUITES_OFFERED ->
+                    NetworkSecurityEvent.REASON_CODE_DOWNGRADE_WEAK_CIPHER_SUITES_OFFERED;
+            case android.hardware.radio.network.ReasonCode.DOWNGRADE_HIGHER_RAT_REJECTED ->
+                    NetworkSecurityEvent.REASON_CODE_DOWNGRADE_HIGHER_RAT_REJECTED;
+            case android.hardware.radio.network.ReasonCode.DOWNGRADE_SIGNAL_STRENGTH_ANOMALY ->
+                    NetworkSecurityEvent.REASON_CODE_DOWNGRADE_SIGNAL_STRENGTH_ANOMALY;
+            case android.hardware.radio.network.ReasonCode.DOWNGRADE_FORCED_HANDOVER ->
+                    NetworkSecurityEvent.REASON_CODE_DOWNGRADE_FORCED_HANDOVER;
+            case android.hardware.radio.network.ReasonCode.IMPRISONMENT_CELL_RESELECTION_FAILURE ->
+                    NetworkSecurityEvent.REASON_CODE_IMPRISONMENT_CELL_RESELECTION_FAILURE;
+            case android.hardware.radio.network.ReasonCode
+                    .IMPRISONMENT_NEIGHBOR_LIST_EMPTY_OR_INVALID ->
+                    NetworkSecurityEvent.REASON_CODE_IMPRISONMENT_NEIGHBOR_LIST_EMPTY_OR_INVALID;
+            case android.hardware.radio.network.ReasonCode.IMPRISONMENT_BARRING_OF_OTHER_CELLS ->
+                    NetworkSecurityEvent.REASON_CODE_IMPRISONMENT_BARRING_OF_OTHER_CELLS;
+            case android.hardware.radio.network.ReasonCode.IMPRISONMENT_REJECTED_FROM_NEIGHBORS ->
+                    NetworkSecurityEvent.REASON_CODE_IMPRISONMENT_REJECTED_FROM_NEIGHBORS;
+            case android.hardware.radio.network.ReasonCode.DOS_EXCESSIVE_PAGING_RATE ->
+                    NetworkSecurityEvent.REASON_CODE_DOS_EXCESSIVE_PAGING_RATE;
+            case android.hardware.radio.network.ReasonCode.DOS_CONNECTION_SETUP_FAIL_LOOP ->
+                    NetworkSecurityEvent.REASON_CODE_DOS_CONNECTION_SETUP_FAIL_LOOP;
+            case android.hardware.radio.network.ReasonCode.DOS_AUTHENTICATION_REQUEST_FLOOD ->
+                    NetworkSecurityEvent.REASON_CODE_DOS_AUTHENTICATION_REQUEST_FLOOD;
+            case android.hardware.radio.network.ReasonCode.DOS_DETACH_ATTACH_CYCLE ->
+                    NetworkSecurityEvent.REASON_CODE_DOS_DETACH_ATTACH_CYCLE;
+            case android.hardware.radio.network.ReasonCode.ATTRACTIVE_CELL_VERY_HIGH_RX_LEVEL ->
+                    NetworkSecurityEvent.REASON_CODE_ATTRACTIVE_CELL_VERY_HIGH_RX_LEVEL;
+            case android.hardware.radio.network.ReasonCode.ATTRACTIVE_CELL_UNEXPECTED_PLMN_ID ->
+                    NetworkSecurityEvent.REASON_CODE_ATTRACTIVE_CELL_UNEXPECTED_PLMN_ID;
+            case android.hardware.radio.network.ReasonCode.ATTRACTIVE_CELL_MISSING_NEIGHBOR_INFO ->
+                    NetworkSecurityEvent.REASON_CODE_ATTRACTIVE_CELL_MISSING_NEIGHBOR_INFO;
+            case android.hardware.radio.network.ReasonCode
+                    .ATTRACTIVE_CELL_IMSI_CATCHER_PARAMETERS ->
+                    NetworkSecurityEvent.REASON_CODE_ATTRACTIVE_CELL_IMSI_CATCHER_PARAMETERS;
+            case android.hardware.radio.network.ReasonCode.JAMMING_WIDEBAND_INTERFERENCE ->
+                    NetworkSecurityEvent.REASON_CODE_JAMMING_WIDEBAND_INTERFERENCE;
+            case android.hardware.radio.network.ReasonCode.JAMMING_NARROWBAND_INTERFERENCE ->
+                    NetworkSecurityEvent.REASON_CODE_JAMMING_NARROWBAND_INTERFERENCE;
+            case android.hardware.radio.network.ReasonCode.JAMMING_SNR_DEGRADATION ->
+                    NetworkSecurityEvent.REASON_CODE_JAMMING_SNR_DEGRADATION;
+            case android.hardware.radio.network.ReasonCode
+                    .LOCATION_FREQUENT_TRACKING_AREA_UPDATES ->
+                    NetworkSecurityEvent.REASON_CODE_LOCATION_FREQUENT_TRACKING_AREA_UPDATES;
+            case android.hardware.radio.network.ReasonCode.LOCATION_SILENT_SMS_DETECTED ->
+                    NetworkSecurityEvent.REASON_CODE_LOCATION_SILENT_SMS_DETECTED;
+            case android.hardware.radio.network.ReasonCode.LOCATION_PAGING_WITHOUT_FOLLOWUP ->
+                    NetworkSecurityEvent.REASON_CODE_LOCATION_PAGING_WITHOUT_FOLLOWUP;
+            case android.hardware.radio.network.ReasonCode.UNAUTH_SMS_INTEGRITY_CHECK_FAILED ->
+                    NetworkSecurityEvent.REASON_CODE_UNAUTH_SMS_INTEGRITY_CHECK_FAILED;
+            case android.hardware.radio.network.ReasonCode.UNAUTH_SMS_MISSING_SECURITY_HEADERS ->
+                    NetworkSecurityEvent.REASON_CODE_UNAUTH_SMS_MISSING_SECURITY_HEADERS;
+            case android.hardware.radio.network.ReasonCode.UNAUTH_SMS_UNTRUSTED_SME ->
+                    NetworkSecurityEvent.REASON_CODE_UNAUTH_SMS_UNTRUSTED_SME;
+            case android.hardware.radio.network.ReasonCode.UNAUTH_SMS_KNOWN_SPOOFING_METHOD ->
+                    NetworkSecurityEvent.REASON_CODE_UNAUTH_SMS_KNOWN_SPOOFING_METHOD;
+            case android.hardware.radio.network.ReasonCode
+                    .UNAUTH_EMERGENCY_SOURCE_CELL_NOT_AUTHENTICATED ->
+                    NetworkSecurityEvent.REASON_CODE_UNAUTH_EMERGENCY_SOURCE_CELL_NOT_AUTHENTICATED;
+            default -> NetworkSecurityEvent.REASON_CODE_UNSPECIFIED;
+        };
+    }
+
+    private static @NonNull @NetworkSecurityEvent.ReasonCode int[]
+            convertHalNetworkSecurityReasonCodeList(int[] reasonCodes) {
+        if (reasonCodes == null) {
+            return new int[0];
+        }
+        int[] convertedReasonCodes = new int[reasonCodes.length];
+        for (int i = 0; i < reasonCodes.length; i++) {
+            convertedReasonCodes[i] = convertHalNetworkSecurityReasonCode(reasonCodes[i]);
+        }
+        return convertedReasonCodes;
+    }
+
+  /**
+     * Convert a list of NetworkSecurityEvent defined in NetworkSecurityEvent.aidl to a set
+     * of NetworkSecurityEvent
+     * @param halNetworkSecurityEvents List of halNetworkSecurityEvent defined in
+     *        NetworkSecurityEvent.aidl
+     * @return The converted set of NetworkSecurityEvent
+     */
+    public static Set<NetworkSecurityEvent> convertHalNetworkSecurityEventList(
+            android.hardware.radio.network.NetworkSecurityEvent[] halNetworkSecurityEvents) {
+        Set<NetworkSecurityEvent> networkSecurityEvents = new HashSet<>();
+        if (halNetworkSecurityEvents == null) {
+            return networkSecurityEvents;
+        }
+        for (android.hardware.radio.network.NetworkSecurityEvent halNetworkSecurityEvent :
+                halNetworkSecurityEvents) {
+            networkSecurityEvents.add(convertHalNetworkSecurityEvent(halNetworkSecurityEvent));
+        }
+        return networkSecurityEvents;
+    }
+
+    /**
+     * Convert a single NetworkSecurityEvent defined in NetworkSecurityEvent.aidl to a single
+     * of NetworkSecurityEvent
+     * @param halNetworkSecurityEvent A single halNetworkSecurityEvent defined in
+     *        NetworkSecurityEvent.aidl
+     * @return The converted set of NetworkSecurityEvent
+     */
+    public static NetworkSecurityEvent convertHalNetworkSecurityEvent(@Nullable
+            android.hardware.radio.network.NetworkSecurityEvent halNetworkSecurityEvent) {
+        if (halNetworkSecurityEvent == null) {
+            return null;
+        }
+        return new NetworkSecurityEvent(
+                            convertHalNetworkSecurityAlertCategory(
+                                    halNetworkSecurityEvent.alertCategory),
+                            convertHalNetworkSecurityAlertStatus(
+                                    halNetworkSecurityEvent.alertStatus),
+                            convertHalNetworkSecurityReasonCodeList(
+                                    halNetworkSecurityEvent.reasonCodes),
+                            halNetworkSecurityEvent.cellId,
+                            halNetworkSecurityEvent.physicalCellId,
+                            halNetworkSecurityEvent.arfcn,
+                            halNetworkSecurityEvent.plmn,
+                            halNetworkSecurityEvent.rat,
+                            halNetworkSecurityEvent.isEmergency);
+    }
+
     private static LinkAddress convertToLinkAddress(String addressString) {
         return convertToLinkAddress(addressString, 0, LinkAddress.LIFETIME_UNKNOWN,
                 LinkAddress.LIFETIME_UNKNOWN);
@@ -3533,6 +3809,9 @@ public class RILUtils {
         }
         if (osAppId != null) {
             builder.setOsAppId(osAppId);
+        }
+        if (td.connectionCapability != 0 && Flags.enableTrafficDescriptorConnectionCapability()) {
+            builder.setConnectionCapability(td.connectionCapability & 0xFF);
         }
         return builder.build();
     }
@@ -4800,6 +5079,26 @@ public class RILUtils {
     }
 
     /**
+     * Convert to HAL IMS data network info.
+     * @param accessNetwork The access network type.
+     * @param dataNetworkState The data network connection state.
+     * @param physicalTransportType The physical transport type of the data network.
+     * @param physicalNetworkSlotIndex The slot index of physicalTransportType.
+     * @return The converted HAL IMS data network info.
+     */
+    public static android.hardware.radio.data.ImsDataNetworkInfo convertToHalImsDataNetworkInfo(
+            @RadioAccessNetworkType int accessNetwork, @DataState int dataNetworkState,
+            @TransportType int physicalTransportType, int physicalNetworkSlotIndex) {
+        android.hardware.radio.data.ImsDataNetworkInfo info =
+                new android.hardware.radio.data.ImsDataNetworkInfo();
+        info.accessNetwork = accessNetwork;
+        info.dataNetworkState = convertToHalDataNetworkState(dataNetworkState);
+        info.physicalTransportType = physicalTransportType;
+        info.physicalNetworkModemId = physicalNetworkSlotIndex;
+        return info;
+    }
+
+    /**
      * Convert to HAL data network state.
      * @param state Telephony data state.
      * @return The converted HAL data network state.
@@ -5351,6 +5650,16 @@ public class RILUtils {
                 return "SET_SIM_TYPE";
             case RIL_REQUEST_GET_SIM_TYPE_INFO:
                 return "GET_SIM_TYPE_INFO";
+            case RIL_REQUEST_SET_SATELLITE_NETWORK_INFO:
+                return "SET_SATELLITE_NETWORK_INFO";
+            case RIL_REQUEST_START_PRIORITIZED_NETWORK_SCAN:
+                return "START_PRIORITIZED_NETWORK_SCAN";
+            case RIL_REQUEST_STOP_PRIORITIZED_NETWORK_SCAN:
+                return "STOP_PRIORITIZED_NETWORK_SCAN";
+            case RIL_REQUEST_GET_SUPPORTED_NETWORK_ALERT_CATEGORIES:
+                return "GET_SUPPORTED_NETWORK_ALERT_CATEGORIES";
+            case RIL_REQUEST_REBOOT_MODEM:
+                return "REBOOT_MODEM";
             default:
                 return "<unknown request " + request + ">";
         }
@@ -5502,6 +5811,14 @@ public class RILUtils {
                 return "UNSOL_IMEI_MAPPING_CHANGED";
             case RIL_UNSOL_SIMULTANEOUS_CALLING_SUPPORT_CHANGED:
                 return "UNSOL_SIMULTANEOUS_CALLING_SUPPORT_CHANGED";
+            case RIL_UNSOL_PRIORITIZED_SCAN_MODE_CHANGED:
+                return "UNSOL_PRIORITIZED_SCAN_MODE_CHANGED";
+            case RIL_UNSOL_NETWORK_SECURITY_EVENTS:
+                return "UNSOL_NETWORK_SECURITY_EVENTS";
+            case RIL_UNSOL_DATA_CALL_LIST_UPDATED:
+                return "UNSOL_DATA_CALL_LIST_UPDATED";
+            case RIL_UNSOL_DISPLAY_NETWORK_TYPE_CHANGED:
+                return "UNSOL_DISPLAY_NETWORK_TYPE_CHANGED";
             default:
                 return "<unknown response " + response + ">";
         }

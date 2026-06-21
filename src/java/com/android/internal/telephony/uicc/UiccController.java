@@ -1126,7 +1126,16 @@ public class UiccController extends Handler {
             log("onGetIccCardStatusDone: shutdown in progress ignore event");
             return;
         }
-
+        // Defensive check to avoid ClassCastException from RIL response mismatch
+        if (!(ar.result instanceof IccCardStatus)) {
+            logel("onGetIccCardStatusDone: Expected IccCardStatus but got "
+                    + ar.result.getClass().getName());
+            final String unExpectedError =
+                    "Unexpected result type while onGetIccCardStatusDone";
+            AnomalyReporter.reportAnomaly(UUID.fromString("52a70831-c9e7-465b-944d-bfc7968f31e1"),
+                    unExpectedError + ar.result.getClass().getName());
+            return;
+        }
         IccCardStatus status = (IccCardStatus)ar.result;
 
         logl("onGetIccCardStatusDone: phoneId-" + index + " IccCardStatus: " + status);
@@ -1146,7 +1155,7 @@ public class UiccController extends Handler {
                 log("Creating mUiccSlots[" + slotId + "]; mUiccSlots.length = "
                         + mUiccSlots.length);
             }
-            setUiccSlot(slotId, new UiccSlot(mContext, true));
+            setUiccSlot(slotId, new UiccSlot(mContext, true, mFeatureFlags));
         }
 
         mUiccSlots[slotId].update(mCis[index], status, index, slotId);
@@ -1427,7 +1436,7 @@ public class UiccController extends Handler {
                 if (VDBG) {
                     log("Creating mUiccSlot[" + i + "]; mUiccSlots.length = " + mUiccSlots.length);
                 }
-                setUiccSlot(i, new UiccSlot(mContext, isActive));
+                setUiccSlot(i, new UiccSlot(mContext, isActive, mFeatureFlags));
             }
 
             if (isActive) { // check isActive flag so that we don't have to iterate through all

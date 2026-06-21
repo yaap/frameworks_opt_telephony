@@ -170,6 +170,7 @@ public class DatagramDispatcherTest extends TelephonyTest {
                 mMockSessionMetricsStats);
 
         doReturn(true).when(mFeatureFlags).satelliteImproveMultiThreadDesign();
+        doReturn(SatelliteConstants.DEFAULT_PLMN).when(mPhone).getOperatorNumeric();
         mDatagramDispatcherUT = new TestDatagramDispatcher(mContext, Looper.myLooper(),
                 mFeatureFlags,
                 mMockDatagramController);

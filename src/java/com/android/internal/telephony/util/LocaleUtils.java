@@ -40,23 +40,35 @@ public class LocaleUtils {
      *
      * @param context Context to act on.
      * @param mcc Mobile Country Code of the SIM or SIM-like entity (build prop on CDMA)
+     * @param mnc Mobile Network Code of the SIM
      * @param simLanguage (nullable) the language from the SIM records (if present).
      *
      * @return locale for the mcc or null if none
      */
-    public static Locale getLocaleFromMcc(Context context, int mcc, String simLanguage) {
+    public static Locale getLocaleFromMccMnc(Context context, int mcc, String mnc,
+                                                String simLanguage) {
         boolean hasSimLanguage = !TextUtils.isEmpty(simLanguage);
-        String language = hasSimLanguage ? simLanguage : defaultLanguageForMcc(mcc);
-        String country = MccTable.countryCodeForMcc(String.valueOf(mcc));
+        String language = hasSimLanguage ? simLanguage : defaultLanguageForMccMnc(mcc, mnc);
+        String country;
+        if (!TextUtils.isEmpty(mnc)
+                && com.android.internal.telephony.flags.Flags.mccMncLocaleResolution()) {
+            country = MccTable.geoCountryCodeForMccMnc(new MccTable.MccMnc(String.valueOf(mcc),
+                        mnc));
+        } else {
+            country = MccTable.countryCodeForMcc(String.valueOf(mcc));
+        }
 
-        Rlog.d(LOG_TAG, "getLocaleFromMcc(" + language + ", " + country + ", " + mcc);
+        Rlog.d(LOG_TAG, "getLocaleFromMccMnc(" + language + ", " + country + ", " + mcc
+                                                          + ", " + mnc);
         final Locale locale = getLocaleForLanguageCountry(context, language, country);
 
         // If we couldn't find a locale that matches the SIM language, give it a go again
         // with the "likely" language for the given country.
         if (locale == null && hasSimLanguage) {
-            language = defaultLanguageForMcc(mcc);
-            Rlog.d(LOG_TAG, "[retry ] getLocaleFromMcc(" + language + ", " + country + ", " + mcc);
+            language = defaultLanguageForMccMnc(mcc, mnc);
+            Rlog.d(LOG_TAG,
+                    "[retry ] getLocaleFromMccMnc(" + language + ", " + country + ", " + mcc
+                                                    + ", " + mnc);
             return getLocaleForLanguageCountry(context, language, country);
         }
 
@@ -154,11 +166,19 @@ public class LocaleUtils {
      * an ISO 2-3 character language code if available.
      * Returns null if unavailable.
      */
-    public static String defaultLanguageForMcc(int mcc) {
-        String country = MccTable.countryCodeForMcc(String.valueOf(mcc));
+    public static String defaultLanguageForMccMnc(int mcc, String mnc) {
+        String country;
+        if (!TextUtils.isEmpty(mnc)
+                && com.android.internal.telephony.flags.Flags.mccMncLocaleResolution()) {
+            country = MccTable.geoCountryCodeForMccMnc(new MccTable.MccMnc(String.valueOf(mcc),
+                        mnc));
+        } else {
+            country = MccTable.countryCodeForMcc(String.valueOf(mcc));
+        }
 
         if (country.isEmpty()) {
-            Rlog.d(LOG_TAG, "defaultLanguageForMcc(" + mcc + "): no country for mcc");
+            Rlog.d(LOG_TAG, "defaultLanguageForMccMnc(" + mcc + ", " + mnc
+                                                        + "): no country for mcc");
             return null;
         }
 
@@ -170,7 +190,8 @@ public class LocaleUtils {
         // Ask CLDR for the language this country uses...
         ULocale likelyLocale = ULocale.addLikelySubtags(new ULocale("und", country));
         String likelyLanguage = likelyLocale.getLanguage();
-        Rlog.d(LOG_TAG, "defaultLanguageForMcc(" + mcc + "): country " + country + " uses "
+        Rlog.d(LOG_TAG, "defaultLanguageForMccMnc(" + mcc + ", " + mnc
+                                                    + "): country " + country + " uses "
                 + likelyLanguage);
         return likelyLanguage;
     }

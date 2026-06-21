@@ -35,6 +35,8 @@ import android.net.NetworkRequest;
 import android.net.Uri;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.platform.test.annotations.EnableFlags;
+import android.platform.test.flag.junit.SetFlagsRule;
 import android.provider.Telephony;
 import android.telephony.AccessNetworkConstants;
 import android.telephony.NetworkRegistrationInfo;
@@ -50,13 +52,16 @@ import android.testing.AndroidTestingRunner;
 import android.testing.TestableLooper;
 
 import com.android.internal.telephony.IccCardConstants;
+import com.android.internal.telephony.RIL;
 import com.android.internal.telephony.TelephonyTest;
 import com.android.internal.telephony.data.DataConfigManager.DataConfigManagerCallback;
 import com.android.internal.telephony.data.DataNetworkController.DataNetworkControllerCallback;
 import com.android.internal.telephony.data.DataProfileManager.DataProfileManagerCallback;
+import com.android.internal.telephony.flags.Flags;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
@@ -93,6 +98,9 @@ public class DataProfileManagerTest extends TelephonyTest {
     private static final int DEFAULT_APN_SET_ID = Telephony.Carriers.NO_APN_SET_ID;
     private static final int APN_SET_ID_1 = 1;
     private static final int MATCH_ALL_APN_SET_ID = Telephony.Carriers.MATCH_ALL_APN_SET_ID;
+
+    @Rule
+    public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
 
     // Mocked classes
     private DataProfileManagerCallback mDataProfileManagerCallback;
@@ -960,7 +968,7 @@ public class DataProfileManagerTest extends TelephonyTest {
                 tnr, TelephonyManager.NETWORK_TYPE_LTE, false, false, false);
         assertThat(dataProfile.getApnSetting().getApnName()).isEqualTo(GENERAL_PURPOSE_APN);
         logd("Set setLastSetupTimestamp on " + dataProfile);
-        dataProfile.setLastSetupTimestamp(SystemClock.elapsedRealtime());
+        mDataProfileManagerUT.setDataProfileUsedTime(dataProfile, SystemClock.elapsedRealtime());
 
         // See if another one can be returned.
         dataProfile = mDataProfileManagerUT.getDataProfileForNetworkRequest(
@@ -1027,6 +1035,18 @@ public class DataProfileManagerTest extends TelephonyTest {
         assertThat(osAppId.getOsId()).isEqualTo(OsAppId.ANDROID_OS_ID);
         assertThat(osAppId.getAppId()).isEqualTo("PRIORITIZE_BANDWIDTH");
         assertThat(osAppId.getDifferentiator()).isEqualTo(1);
+    }
+
+    @Test
+    public void testGetDataProfileForEmbbNetworkRequestOldHal() {
+        doReturn(RIL.RADIO_HAL_VERSION_1_5).when(mPhone).getHalVersion();
+        TelephonyNetworkRequest tnr = new TelephonyNetworkRequest(
+                new NetworkRequest.Builder()
+                        .addCapability(NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH)
+                        .build(), mPhone, mFeatureFlags);
+        DataProfile dataProfile = mDataProfileManagerUT.getDataProfileForNetworkRequest(
+                tnr, TelephonyManager.NETWORK_TYPE_LTE, false, false, false);
+        assertThat(dataProfile).isNull();
     }
 
     @Test
@@ -1954,6 +1974,66 @@ public class DataProfileManagerTest extends TelephonyTest {
                 .isNull();
     }
 
+    @Test
+    public void testClearLastInternetDataProfiles() throws Exception {
+        // Setup: add something to mLastInternetDataProfiles
+        int subId = 1;
+        doReturn(subId).when(mPhone).getSubId();
+        // Create a real DataProfile from mAllApnSettings[0] (GP_APN)
+        DataProfile dp = mDataProfileManagerUT.getDataProfileForNetworkRequest(
+                new TelephonyNetworkRequest(new NetworkRequest.Builder()
+                        .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),
+                        mPhone, mFeatureFlags),
+                TelephonyManager.NETWORK_TYPE_LTE, false, false, false);
+
+        Field field = DataProfileManager.class.getDeclaredField("mLastInternetDataProfiles");
+        field.setAccessible(true);
+        android.util.LruCache<Integer, DataProfile> lastInternetDataProfiles =
+                (android.util.LruCache<Integer, DataProfile>) field.get(mDataProfileManagerUT);
+        lastInternetDataProfiles.put(subId, dp);
+        lastInternetDataProfiles.put(subId + 1, dp); // Add another subId
+
+        assertThat(lastInternetDataProfiles.get(subId)).isEqualTo(dp);
+        assertThat(lastInternetDataProfiles.get(subId + 1)).isEqualTo(dp);
+
+        // Action: clear the cache for subId 1
+        mDataProfileManagerUT.clearLastInternetDataProfiles(subId);
+        processAllMessages();
+
+        // Assert: subId 1 should be gone, but subId 2 should remain
+        assertThat(lastInternetDataProfiles.get(subId)).isNull();
+        assertThat(lastInternetDataProfiles.get(subId + 1)).isEqualTo(dp);
+    }
+
+    @Test
+    public void testUpdatePreferredDataProfileReversion() throws Exception {
+        // Setup: Ensure DB and Config return null for preferred profile
+        mPreferredApnId = -1;
+        doReturn(null).when(mDataConfigManager).getDefaultPreferredApn();
+
+        // Add a profile to the cache
+        int subId = mPhone.getSubId();
+        // Create a real DataProfile from mAllApnSettings[0] (GP_APN)
+        DataProfile dp = mDataProfileManagerUT.getDataProfileForNetworkRequest(
+                new TelephonyNetworkRequest(new NetworkRequest.Builder()
+                        .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),
+                        mPhone, mFeatureFlags),
+                TelephonyManager.NETWORK_TYPE_LTE, false, false, false);
+
+        Field field = DataProfileManager.class.getDeclaredField("mLastInternetDataProfiles");
+        field.setAccessible(true);
+        android.util.LruCache<Integer, DataProfile> lastInternetDataProfiles =
+                (android.util.LruCache<Integer, DataProfile>) field.get(mDataProfileManagerUT);
+        lastInternetDataProfiles.put(subId, dp);
+
+        // Action: trigger preferred profile update (e.g. via APN db changed)
+        mDataProfileManagerUT.obtainMessage(2 /*EVENT_APN_DATABASE_CHANGED*/).sendToTarget();
+        processAllMessages();
+
+        // Assert: It should have picked the profile from the cache
+        assertThat(mDataProfileManagerUT.isDataProfilePreferred(dp)).isTrue();
+    }
+
     private void changeSimStateTo(@TelephonyManager.SimState int simState) {
         mSimInserted = simState == TelephonyManager.SIM_STATE_LOADED;
         doReturn(IccCardConstants.State.intToState(simState)).when(mIccCard).getState();
@@ -2064,4 +2144,39 @@ public class DataProfileManagerTest extends TelephonyTest {
         assertThat(dataProfile.getApnSetting().getApnName()).isEqualTo(RCS_APN1);
     }
 
+    @Test
+    @EnableFlags(Flags.FLAG_ENABLE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY)
+    public void testGetDataProfileForRequest_withConnectionCapability() {
+        doReturn(TrafficDescriptor.CONNECTION_CAPABILITY_IMS)
+                .when(mDataConfigManager)
+                .networkCapabilityToConnectionCapability(
+                        eq(NetworkCapabilities.NET_CAPABILITY_IMS));
+
+        // Set priority of IMS capability to return a non-zero value (the actual value is 40).
+        doReturn(40).when(mDataConfigManager)
+                .getNetworkCapabilityPriority(NetworkCapabilities.NET_CAPABILITY_IMS);
+
+        // IMS TNR
+        NetworkRequest nr = new NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_IMS).build();
+        TelephonyNetworkRequest telephonyNetworkRequest =
+                new TelephonyNetworkRequest(nr, mPhone, mFeatureFlags);
+
+        // create DataProfile
+        DataProfile dataProfile = mDataProfileManagerUT.getDataProfileForNetworkRequest(
+                telephonyNetworkRequest, TelephonyManager.NETWORK_TYPE_LTE, false, false, false);
+
+        // Verify that dataProfile has a TrafficDescriptor
+        assertThat(dataProfile).isNotNull();
+        TrafficDescriptor td = dataProfile.getTrafficDescriptor();
+        assertThat(td).isNotNull();
+
+        // and has CONNECTION_CAPABILITY_IMS
+        assertThat(td.getConnectionCapability())
+                .isEqualTo(TrafficDescriptor.CONNECTION_CAPABILITY_IMS);
+
+        // Check apns
+        assertThat(dataProfile.getApnSetting().getApnName()).isEqualTo(IMS_APN);
+        assertThat(td.getDataNetworkName()).isEqualTo(IMS_APN);
+    }
 }

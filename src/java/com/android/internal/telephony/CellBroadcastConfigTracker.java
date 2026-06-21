@@ -504,7 +504,15 @@ public final class CellBroadcastConfigTracker extends StateMachine {
         }
 
         Message response = obtainMessage(EVENT_CONFIGURATION_DONE, request);
-        mPhone.mCi.setGsmBroadcastConfig(configs, response);
+        try {
+            mPhone.mCi.setGsmBroadcastConfig(configs, response);
+        } catch (RuntimeException e) {
+            log("setGsmConfig: Exception " + e);
+            removeMessages(EVENT_CONFIGURATION_DONE);
+            Message failMsg = obtainMessage(EVENT_CONFIGURATION_DONE, request);
+            AsyncResult.forMessage(failMsg, null, e);
+            failMsg.sendToTarget();
+        }
     }
 
     private void setCdmaConfig(List<CellBroadcastIdRange> ranges, Request request) {
@@ -521,7 +529,15 @@ public final class CellBroadcastConfigTracker extends StateMachine {
         }
 
         Message response = obtainMessage(EVENT_CONFIGURATION_DONE, request);
-        mPhone.mCi.setCdmaBroadcastConfig(configs, response);
+        try {
+            mPhone.mCi.setCdmaBroadcastConfig(configs, response);
+        } catch (RuntimeException e) {
+            log("setCdmaConfig: Exception " + e);
+            removeMessages(EVENT_CONFIGURATION_DONE);
+            Message failMsg = obtainMessage(EVENT_CONFIGURATION_DONE, request);
+            AsyncResult.forMessage(failMsg, null, e);
+            failMsg.sendToTarget();
+        }
     }
 
     private void setActivation(int type, boolean activate, Request request) {
@@ -531,10 +547,23 @@ public final class CellBroadcastConfigTracker extends StateMachine {
 
         Message response = obtainMessage(EVENT_ACTIVATION_DONE, request);
 
-        if (type == SmsCbMessage.MESSAGE_FORMAT_3GPP) {
-            mPhone.mCi.setGsmBroadcastActivation(activate, response);
-        } else if (type == SmsCbMessage.MESSAGE_FORMAT_3GPP2) {
-            mPhone.mCi.setCdmaBroadcastActivation(activate, response);
+        try {
+            if (type == SmsCbMessage.MESSAGE_FORMAT_3GPP) {
+                mPhone.mCi.setGsmBroadcastActivation(activate, response);
+            } else if (type == SmsCbMessage.MESSAGE_FORMAT_3GPP2) {
+                mPhone.mCi.setCdmaBroadcastActivation(activate, response);
+            } else {
+                log("setActivation: Invalid type " + type);
+                AsyncResult.forMessage(response, null,
+                        new IllegalArgumentException("Invalid message format type " + type));
+                response.sendToTarget();
+            }
+        } catch (RuntimeException e) {
+            log("setActivation: Exception " + e);
+            removeMessages(EVENT_ACTIVATION_DONE);
+            Message failMsg = obtainMessage(EVENT_ACTIVATION_DONE, request);
+            AsyncResult.forMessage(failMsg, null, e);
+            failMsg.sendToTarget();
         }
     }
 

@@ -83,6 +83,7 @@ import android.text.TextUtils;
 import android.util.ArrayMap;
 import android.util.IndentingPrintWriter;
 import android.util.LocalLog;
+import android.util.Pair;
 import android.util.SparseArray;
 import android.util.SparseIntArray;
 
@@ -418,6 +419,9 @@ public class DataNetwork extends StateMachine {
 
     /** Data network tear down due to device shut down. */
     public static final int TEAR_DOWN_REASON_DEVICE_SHUT_DOWN = 33;
+
+    /** Data network tear down due to unsupported network capabilities. */
+    public static final int TEAR_DOWN_REASON_UNSUPPORTED_NETWORK_CAPABILITIES = 34;
 
     //********************************************************************************************//
     // WHENEVER ADD A NEW TEAR DOWN REASON, PLEASE UPDATE DataDeactivateReasonEnum in enums.proto //
@@ -769,9 +773,9 @@ public class DataNetwork extends StateMachine {
     private boolean mLastKnownRoamingState;
 
     /**
-     * The non-terrestrial status
+     * {@code true} if the network is on satellite.
      */
-    private final boolean mIsSatellite;
+    private boolean mSatellite;
 
     /** The reason that why setting up this data network is allowed. */
     @NonNull
@@ -852,6 +856,25 @@ public class DataNetwork extends StateMachine {
      */
     @NonNull
     private PhoneSwitcherCallback mPhoneSwitcherCallback;
+
+    /**
+     * Indicates that this {@link DataNetwork} is being torn down not due to a network failure, but
+     * because the network has intentionally reused a Connection ID (CID) that is already active.
+     *
+     * <p>This scenario can occur when a new network request (e.g., with a different
+     * {@link android.telephony.data.TrafficDescriptor.ConnectionCapability}) is satisfied by an
+     * existing PDU session, as determined by the network's URSP rules. The framework attempts to
+     * set up a new data call, but the modem responds with the CID of the existing session.
+     *
+     * <p>When this flag is {@code true}, the teardown of this temporary {@link DataNetwork} is
+     * treated as a successful reconciliation step. It ensures that:
+     * <ul>
+     * <li>The event is not logged as a failure in {@link DataCallSessionStats}.</li>
+     * <li>The attached network requests are released to be re-evaluated and satisfied by the
+     * pre-existing {@link DataNetwork}.</li>
+     * </ul>
+     */
+    private boolean mIsCidReuseTeardown = false;
 
     /**
      * The network bandwidth.
@@ -1041,6 +1064,7 @@ public class DataNetwork extends StateMachine {
      * @param dataProfile The data profile for establishing the data network.
      * @param networkRequestList The initial network requests attached to this data network.
      * @param transport The initial transport of the data network.
+     * @param isSatellite {@code true} if the network is initially setup on satellite.
      * @param dataAllowedReason The reason that why setting up this data network is allowed.
      * @param callback The callback to receives data network state update.
      */
@@ -1049,6 +1073,7 @@ public class DataNetwork extends StateMachine {
             @NonNull DataProfile dataProfile,
             @NonNull NetworkRequestList networkRequestList,
             @TransportType int transport,
+            boolean isSatellite,
             @NonNull DataAllowedReason dataAllowedReason,
             @NonNull DataNetworkCallback callback) {
         super("DataNetwork", looper);
@@ -1094,10 +1119,16 @@ public class DataNetwork extends StateMachine {
         }
         mLastKnownDataNetworkType = getDataNetworkType();
         mLastKnownRoamingState = mPhone.getServiceState().getDataRoamingFromRegistration();
-        mIsSatellite = mPhone.getServiceState().isUsingNonTerrestrialNetwork()
-                && transport == AccessNetworkConstants.TRANSPORT_TYPE_WWAN;
+        mSatellite = isSatellite;
         mDataAllowedReason = dataAllowedReason;
-        dataProfile.setLastSetupTimestamp(SystemClock.elapsedRealtime());
+
+        if (mFlags.enableTrafficDescriptorConnectionCapability()) {
+            mDataNetworkController.getDataProfileManager().setDataProfileUsedTime(dataProfile,
+                    SystemClock.elapsedRealtime());
+        } else {
+            dataProfile.setLastSetupTimestamp(SystemClock.elapsedRealtime());
+        }
+
         mCid.put(AccessNetworkConstants.TRANSPORT_TYPE_WWAN, INVALID_CID);
         mCid.put(AccessNetworkConstants.TRANSPORT_TYPE_WLAN, INVALID_CID);
         mTelephonyDisplayInfo = mPhone.getDisplayInfoController().getTelephonyDisplayInfo();
@@ -1391,6 +1422,7 @@ public class DataNetwork extends StateMachine {
                     onCarrierConfigUpdated();
                     break;
                 case EVENT_SERVICE_STATE_CHANGED: {
+                    log("Service state changed. " + getNetworkRegistrationInfo());
                     int networkType = getDataNetworkType();
                     mDataCallSessionStats.onDrsOrRatChanged(networkType);
                     if (networkType != TelephonyManager.NETWORK_TYPE_UNKNOWN) {
@@ -1405,6 +1437,18 @@ public class DataNetwork extends StateMachine {
                         mLastKnownRoamingState = nri.getNetworkRegistrationState()
                                 == NetworkRegistrationInfo.REGISTRATION_STATE_ROAMING;
                     }
+
+                    if (nri != null && (nri.isInService() || nri.getRegistrationState()
+                            == NetworkRegistrationInfo.REGISTRATION_STATE_EMERGENCY)) {
+                        boolean isSatellite = (mTransport
+                                == AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
+                                && nri.isNonTerrestrialNetwork();
+                        if (mSatellite != isSatellite) {
+                            mSatellite = isSatellite;
+                            logl("Switched to " + (mSatellite ? "Satellite" : "Cellular") + ".");
+                        }
+                    }
+
                     updateSuspendState();
                     updateNetworkCapabilities();
                     int accessNetwork = DataUtils.networkTypeToAccessNetworkType(networkType);
@@ -1443,7 +1487,12 @@ public class DataNetwork extends StateMachine {
                 case EVENT_DATA_STATE_CHANGED: {
                     AsyncResult ar = (AsyncResult) msg.obj;
                     int transport = (int) ar.userObj;
-                    onDataStateChanged(transport, (List<DataCallResponse>) ar.result);
+                    List<DataCallResponse> responseList;
+                    Pair<List<DataCallResponse>, Boolean> result =
+                            (Pair<List<DataCallResponse>, Boolean>) ar.result;
+                    responseList = result.first;
+                    boolean requireExplicitDisconnect = result.second;
+                    onDataStateChanged(transport, responseList, requireExplicitDisconnect);
                     break;
                 }
                 case EVENT_CARRIER_PRIVILEGED_UIDS_CHANGED: {
@@ -1621,16 +1670,28 @@ public class DataNetwork extends StateMachine {
             mRegStateWhenSetup = nri != null
                     ? nri.getNetworkRegistrationState()
                     : NetworkRegistrationInfo.REGISTRATION_STATE_UNKNOWN;
+            ServiceState serviceState = mPhone.getServiceState();
             // We need to use the actual modem roaming state instead of the framework roaming state
             // here. This flag is only passed down to ril_service for picking the correct protocol
             // (for old modem backward compatibility).
-            boolean isModemRoaming = mPhone.getServiceState().getDataRoamingFromRegistration();
+            boolean isModemRoaming = serviceState.getDataRoamingFromRegistration();
+
+            // Indicates whether satellite data is allowed even when the device is roaming
+            // and data roaming is disabled by the user. This applies when the device is on a
+            // satellite network and the carrier config permits ignoring the roaming setting.
+            boolean allowSatelliteWhenRoamingDisabled = serviceState.getDataRoaming()
+                && !mPhone.getDataRoamingEnabled()
+                && serviceState.isUsingNonTerrestrialNetwork()
+                && mDataConfigManager.isDataRoamingAllowedOnSatellite()
+                && mSatellite;
 
             // Set this flag to true if the user turns on data roaming. Or if we override the
             // roaming state in framework, we should set this flag to true as well so the modem will
             // not reject the data call setup (because the modem thinks the device is roaming).
-            boolean allowRoaming = mPhone.getDataRoamingEnabled()
-                    || (isModemRoaming && (!mPhone.getServiceState().getDataRoaming()
+            boolean allowRoaming =
+                mPhone.getDataRoamingEnabled()
+                    || (isModemRoaming  && (!serviceState.getDataRoaming()
+                    || allowSatelliteWhenRoamingDisabled
                     /*|| isUnmeteredUseOnly()*/));
 
             TrafficDescriptor trafficDescriptor = mDataProfile.getTrafficDescriptor();
@@ -1651,13 +1712,33 @@ public class DataNetwork extends StateMachine {
 
             int apnTypeBitmask = mDataProfile.getApnSetting() != null
                     ? mDataProfile.getApnSetting().getApnTypeBitmask() : ApnSetting.TYPE_NONE;
-            mDataCallSessionStats.onSetupDataCall(apnTypeBitmask, isSatellite());
+            int sliceCapability = getSliceCapability(getNetworkCapabilities());
+            int connectionCapability = trafficDescriptor != null
+                    ? trafficDescriptor.getConnectionCapability() :
+                    TrafficDescriptor.CONNECTION_CAPABILITY_UNKNOWN;
+            mDataCallSessionStats.onSetupDataCall(
+                    apnTypeBitmask, mSatellite, sliceCapability, connectionCapability);
 
             logl("setupData: accessNetwork="
-                    + AccessNetworkType.toString(accessNetwork) + ", " + mDataProfile
-                    + ", isModemRoaming=" + isModemRoaming + ", allowRoaming=" + allowRoaming
-                    + ", PDU session id=" + mPduSessionId + ", matchAllRuleAllowed="
+                    + AccessNetworkType.toString(accessNetwork) + ", isSatellite=" + mSatellite
+                    + ", " + mDataProfile + ", isModemRoaming=" + isModemRoaming + ", allowRoaming="
+                    + allowRoaming + ", PDU session id=" + mPduSessionId + ", matchAllRuleAllowed="
                     + matchAllRuleAllowed);
+        }
+
+        private int getSliceCapability(NetworkCapabilities nc) {
+            if (nc == null) {
+                return 0; // Return Unknown if no capabilities.
+            }
+
+            if (nc.hasCapability(DataUtils.NET_CAPABILITY_PRIORITIZE_UNIFIED_COMMUNICATIONS)) {
+                return DataUtils.NET_CAPABILITY_PRIORITIZE_UNIFIED_COMMUNICATIONS;
+            } else if (nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_LATENCY)) {
+                return NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_LATENCY;
+            } else if (nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH)) {
+                return NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH;
+            }
+            return 0; // Return Unknown if not a slice.
         }
 
         /**
@@ -1685,10 +1766,14 @@ public class DataNetwork extends StateMachine {
                                 + " detected.", "62f66e7e-8d71-45de-a57b-dc5c78223fd5");
                     }
 
+                    if (mFlags.enableTrafficDescriptorConnectionCapability()
+                            && dataNetwork.getId() == response.getId()) {
+                        mIsCidReuseTeardown = true;
+                    }
                     // Do not actually invoke onTearDown, otherwise the existing data network will
                     // be torn down.
-                    mRetryDelayMillis = DataCallResponse.RETRY_DURATION_UNDEFINED;
                     mFailCause = DataFailCause.NO_RETRY_FAILURE;
+                    mRetryDelayMillis = DataCallResponse.RETRY_DURATION_UNDEFINED;
                     transitionTo(mDisconnectedState);
                     return;
                 }
@@ -1706,6 +1791,22 @@ public class DataNetwork extends StateMachine {
                 }
 
                 transitionTo(mConnectedState);
+            } else if (mFlags.enableTrafficDescriptorConnectionCapability()
+                    && mFailCause == DataFailCause.DUPLICATE_CID) {
+                int cid = response == null ? INVALID_CID : response.getId();
+                DataNetwork dataNetwork =
+                        cid == INVALID_CID ? null : mDataNetworkController.getDataNetworkByCid(cid);
+                if (dataNetwork != null
+                        && TextUtils.equals(dataNetwork.getLinkProperties().getInterfaceName(),
+                                response.getInterfaceName())) {
+                    logl("onSetupResponse: Intentional CID reuse for cid=" + cid
+                            + " on existing network " + dataNetwork.getName());
+                    mIsCidReuseTeardown = true;
+                    mFailCause = DataFailCause.NO_RETRY_FAILURE;  // Not a failure.
+                    mRetryDelayMillis = DataCallResponse.RETRY_DURATION_UNDEFINED;
+                    transitionTo(mDisconnectedState);
+                    return;
+                }
             } else {
                 // Setup data failed.
                 mRetryDelayMillis = response != null ? response.getRetryDurationMillis()
@@ -1893,7 +1994,9 @@ public class DataNetwork extends StateMachine {
                     // the unrelated.
                     AsyncResult ar = (AsyncResult) msg.obj;
                     int transport = (int) ar.userObj;
-                    List<DataCallResponse> responseList = (List<DataCallResponse>) ar.result;
+                    Pair<List<DataCallResponse>, Boolean> result =
+                            (Pair<List<DataCallResponse>, Boolean>) ar.result;
+                    List<DataCallResponse> responseList = result.first;
                     if (transport != mTransport) {
                         log("Dropped unrelated "
                                 + AccessNetworkConstants.transportTypeToString(transport)
@@ -2080,7 +2183,13 @@ public class DataNetwork extends StateMachine {
             mNetworkAgent.unregister();
             mDataNetworkController.unregisterDataNetworkControllerCallback(
                     mDataNetworkControllerCallback);
-            mDataCallSessionStats.onDataCallDisconnected(mFailCause);
+
+            // Skip logging failure to DataCallSessionStats if it's a reconciliation teardown
+            if (mIsCidReuseTeardown) {
+                logl("Skipping Stats.onDataCallDisconnected for CID reuse.");
+            } else {
+                mDataCallSessionStats.onDataCallDisconnected(mFailCause);
+            }
 
             if (mTransport == AccessNetworkConstants.TRANSPORT_TYPE_WLAN
                     && mPduSessionId != DataCallResponse.PDU_SESSION_ID_NOT_SET) {
@@ -2354,32 +2463,6 @@ public class DataNetwork extends StateMachine {
         return true;
     }
 
-    /**
-     * Check if there are immutable capabilities changed. The connectivity service is not able
-     * to handle immutable capabilities changed, but in very rare scenarios, immutable capabilities
-     * need to be changed dynamically, such as in setup data call response, modem responded with the
-     * same cid. In that case, we need to merge the new capabilities into the existing data network.
-     *
-     * @param oldCapabilities The old network capabilities.
-     * @param newCapabilities The new network capabilities.
-     * @return {@code true} if there are immutable network capabilities changed.
-     */
-    private static boolean areImmutableCapabilitiesChanged(
-            @NonNull NetworkCapabilities oldCapabilities,
-            @NonNull NetworkCapabilities newCapabilities) {
-        if (ArrayUtils.isEmpty(oldCapabilities.getCapabilities())) return false;
-
-        // Remove mutable capabilities from both old and new capabilities, the remaining
-        // capabilities would be immutable capabilities.
-        List<Integer> oldImmutableCapabilities = Arrays.stream(oldCapabilities.getCapabilities())
-                .boxed().collect(Collectors.toList());
-        oldImmutableCapabilities.removeAll(MUTABLE_CAPABILITIES);
-        List<Integer> newImmutableCapabilities = Arrays.stream(newCapabilities.getCapabilities())
-                .boxed().collect(Collectors.toList());
-        newImmutableCapabilities.removeAll(MUTABLE_CAPABILITIES);
-        return oldImmutableCapabilities.size() != newImmutableCapabilities.size()
-                || !oldImmutableCapabilities.containsAll(newImmutableCapabilities);
-    }
 
     /**
      * In some rare cases we need to re-create the network agent, for example, underlying network
@@ -2413,19 +2496,12 @@ public class DataNetwork extends StateMachine {
     }
 
     /**
-     * @return {@code true} if this is a satellite data network.
-     */
-    public boolean isSatellite() {
-        return mIsSatellite;
-    }
-
-    /**
      * Update the network capabilities.
      */
     private void updateNetworkCapabilities() {
         final NetworkCapabilities.Builder builder = new NetworkCapabilities.Builder();
 
-        if (mIsSatellite && mDataConfigManager.getForcedCellularTransportCapabilities().stream()
+        if (mSatellite && mDataConfigManager.getForcedCellularTransportCapabilities().stream()
                 .noneMatch(this::hasNetworkCapabilityInNetworkRequests)) {
             logd("transport satellite is set");
             builder.addTransportType(NetworkCapabilities.TRANSPORT_SATELLITE);
@@ -2477,6 +2553,16 @@ public class DataNetwork extends StateMachine {
         }
 
         // Extract network capabilities from the traffic descriptor.
+        if (mFlags.enableTrafficDescriptorConnectionCapability()) {
+            for (TrafficDescriptor trafficDescriptor : mTrafficDescriptors) {
+                int netCap = mDataConfigManager.connectionCapabilityToNetworkCapability(
+                        trafficDescriptor.getConnectionCapability());
+                if (netCap != -1) {
+                    builder.addCapability(netCap);
+                }
+            }
+        }
+
         for (TrafficDescriptor trafficDescriptor : mTrafficDescriptors) {
             try {
                 if (trafficDescriptor.getOsAppId() == null) continue;
@@ -2555,7 +2641,8 @@ public class DataNetwork extends StateMachine {
         }
 
         // Always start with not-restricted, and then remove if needed.
-        // By default, NET_CAPABILITY_NOT_RESTRICTED and NET_CAPABILITY_NOT_CONSTRAINED are included
+        // By default, NET_CAPABILITY_NOT_RESTRICTED and NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED
+        // are included
         builder.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED);
 
         // When data is disabled, or data roaming is disabled and the device is roaming, we need
@@ -2641,17 +2728,13 @@ public class DataNetwork extends StateMachine {
         builder.setLinkUpstreamBandwidthKbps(mNetworkBandwidth.uplinkBandwidthKbps);
 
         // Configure the network as restricted/constrained for unrestricted satellite network.
-        if (mIsSatellite && builder.build().hasCapability(
+        if (mSatellite && builder.build().hasCapability(
                 NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)) {
 
             int dataPolicy;
-            if (mFlags.dataServiceCheck()) {
-                final SatelliteController satelliteController = SatelliteController.getInstance();
-                dataPolicy = satelliteController.getSatelliteDataServicePolicyForPlmn(mSubId,
-                        mPhone.getServiceState().getOperatorNumeric());
-            } else {
-                dataPolicy = mDataConfigManager.getSatelliteDataSupportMode();
-            }
+            final SatelliteController satelliteController = SatelliteController.getInstance();
+            dataPolicy = satelliteController.getSatelliteDataServicePolicyForPlmn(mSubId,
+                    mPhone.getServiceState().getOperatorNumeric());
             switch (dataPolicy) {
                 case CarrierConfigManager.SATELLITE_DATA_SUPPORT_ONLY_RESTRICTED
                         -> builder.removeCapability(
@@ -2677,27 +2760,11 @@ public class DataNetwork extends StateMachine {
         }
 
         if (!nc.equals(mNetworkCapabilities)) {
-            // Check if we are changing the immutable capabilities. Note that we should be very
-            // careful and limit the use cases of changing immutable capabilities. Connectivity
-            // service would not close sockets for clients if a network request becomes
-            // unsatisfiable.
-            if (mEverConnected && areImmutableCapabilitiesChanged(mNetworkCapabilities, nc)
-                    && (isConnected() || isHandoverInProgress())) {
-                // Before connectivity service supports making all capabilities mutable, it is
-                // suggested to de-register and re-register the network agent if it is needed to
-                // add/remove immutable capabilities.
-                logl("updateNetworkCapabilities: Immutable capabilities changed. Re-create the "
-                        + "network agent. Attempted to change from " + mNetworkCapabilities + " to "
-                        + nc);
-                mNetworkCapabilities = nc;
-                recreateNetworkAgent();
-            } else {
-                // Now we need to inform connectivity service and data network controller
-                // about the capabilities changed.
-                mNetworkCapabilities = nc;
-                log("Capabilities changed to " + mNetworkCapabilities);
-                mNetworkAgent.sendNetworkCapabilities(mNetworkCapabilities);
-            }
+            // Inform connectivity service and data network controller about the capabilities
+            // changed.
+            mNetworkCapabilities = nc;
+            log("Capabilities changed to " + mNetworkCapabilities);
+            mNetworkAgent.sendNetworkCapabilities(mNetworkCapabilities);
 
             // Only retry the request when the network is in connected or handover state. This is to
             // prevent request is detached during connecting state, and then become a setup/detach
@@ -3014,6 +3081,7 @@ public class DataNetwork extends StateMachine {
         if (failCause == DataFailCause.NONE) {
             if (TextUtils.isEmpty(response.getInterfaceName())
                     || response.getAddresses().isEmpty()
+                    || response.getId() == INVALID_CID
                     // if out of range
                     || response.getLinkStatus() < DataCallResponse.LINK_STATUS_UNKNOWN
                     || response.getLinkStatus() > DataCallResponse.LINK_STATUS_ACTIVE
@@ -3116,7 +3184,9 @@ public class DataNetwork extends StateMachine {
         }
 
         mDataServiceManagers.get(mTransport).deactivateDataCall(mCid.get(mTransport),
-                reason == TEAR_DOWN_REASON_AIRPLANE_MODE_ON ? DataService.REQUEST_REASON_SHUTDOWN
+                (reason == TEAR_DOWN_REASON_AIRPLANE_MODE_ON
+                        || reason == TEAR_DOWN_REASON_DEVICE_SHUT_DOWN)
+                        ? DataService.REQUEST_REASON_SHUTDOWN
                         : DataService.REQUEST_REASON_NORMAL,
                 obtainMessage(EVENT_DEACTIVATE_DATA_NETWORK_RESPONSE));
         mDataCallSessionStats.setDeactivateDataCallReason(reason);
@@ -3177,9 +3247,13 @@ public class DataNetwork extends StateMachine {
      *
      * @param transport The transport where this event from.
      * @param responseList The data call response list.
+     * @param requireExplicitDisconnect {@code true} if the framework should wait for the data call
+     *     to be explicitly reported as {@link DataCallResponse#LINK_STATUS_INACTIVE} before
+     *     disconnecting; {@code false} if the framework should treat the absence of the data call
+     *     in the list as a disconnection (legacy behavior).
      */
     private void onDataStateChanged(@TransportType int transport,
-            @NonNull List<DataCallResponse> responseList) {
+            @NonNull List<DataCallResponse> responseList, boolean requireExplicitDisconnect) {
         // Ignore the update if it's not from the data service on the right transport.
         // Also if never received data call response from setup call response, which updates the
         // cid, ignore the update here.
@@ -3210,12 +3284,17 @@ public class DataNetwork extends StateMachine {
                     transitionTo(mDisconnectedState);
                 }
             }
-        } else {
+        } else if (!(mFlags.supportExplicitDataDisconnect() && requireExplicitDisconnect)) {
             // The data call response is missing from the list. This means the PDN is gone. This
             // is the PDN lost reported by the modem. We don't send another DEACTIVATE_DATA request
             // for that
+            // This handles the legacy HAL behavior where dropping a call from the list
+            // implies disconnection. In the new HAL (HAL version >= 2.4), the modem must explicitly
+            // report LINK_STATUS_INACTIVE before removing the entry to avoid dangling
+            // data calls.
             log("onDataStateChanged: PDN disconnected reported by "
-                    + AccessNetworkConstants.transportTypeToString(mTransport) + " data service.");
+                    + AccessNetworkConstants.transportTypeToString(mTransport) + " data service."
+                    + " requireExplicitDisconnect " + requireExplicitDisconnect);
             mFailCause = mEverConnected ? DataFailCause.LOST_CONNECTION
                     : DataFailCause.NO_RETRY_FAILURE;
             mRetryDelayMillis = DataCallResponse.RETRY_DURATION_UNDEFINED;
@@ -3786,7 +3865,7 @@ public class DataNetwork extends StateMachine {
             TelephonyNetworkRequest networkRequest = mAttachedNetworkRequestList.get(0);
             DataProfile dataProfile = mDataNetworkController.getDataProfileManager()
                     .getDataProfileForNetworkRequest(networkRequest, targetNetworkType,
-                            mPhone.getServiceState().isUsingNonTerrestrialNetwork(),
+                            mSatellite,
                             mDataNetworkController.isEsimBootStrapProvisioningActivated(), false);
             // Some carriers have different profiles between cellular and IWLAN. We need to
             // dynamically switch profile, but only when those profiles have same APN name.
@@ -4111,6 +4190,8 @@ public class DataNetwork extends StateMachine {
                     "TRANSPORT_NOT_ALLOWED";
             case TEAR_DOWN_REASON_DEVICE_SHUT_DOWN ->
                     "DEVICE_SHUT_DOWN";
+            case TEAR_DOWN_REASON_UNSUPPORTED_NETWORK_CAPABILITIES ->
+                    "UNSUPPORTED_NETWORK_CAPABILITIES";
             default -> "UNKNOWN(" + reason + ")";
         };
     }
@@ -4242,6 +4323,7 @@ public class DataNetwork extends StateMachine {
         pw.println("mSubId=" + mSubId);
         pw.println("mOnPreferredDataPhone=" + mOnPreferredDataPhone);
         pw.println("mTransport=" + AccessNetworkConstants.transportTypeToString(mTransport));
+        pw.println("isSatellite=" + mSatellite);
         pw.println("mLastKnownDataNetworkType=" + TelephonyManager
                 .getNetworkTypeName(mLastKnownDataNetworkType));
         pw.println("WWAN cid=" + mCid.get(AccessNetworkConstants.TRANSPORT_TYPE_WWAN));

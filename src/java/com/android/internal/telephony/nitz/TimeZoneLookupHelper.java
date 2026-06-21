@@ -18,6 +18,7 @@ package com.android.internal.telephony.nitz;
 
 import static com.android.internal.telephony.nitz.TimeZoneLookupHelper.CountryResult.QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS;
 import static com.android.internal.telephony.nitz.TimeZoneLookupHelper.CountryResult.QUALITY_MULTIPLE_ZONES_SAME_OFFSET;
+
 import static java.util.stream.Collectors.toList;
 
 import android.annotation.IntDef;
@@ -40,15 +41,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
-/**
- * An interface to various time zone lookup behaviors.
- */
+/** An interface to various time zone lookup behaviors. */
 @VisibleForTesting
 public final class TimeZoneLookupHelper {
 
-    /**
-     * The result of looking up a time zone using country information.
-     */
+    /** The result of looking up a time zone using country information. */
     @VisibleForTesting
     public static final class CountryResult {
 
@@ -67,18 +64,13 @@ public final class TimeZoneLookupHelper {
         public static final int QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS = 4;
 
         /** A time zone to use for the country. */
-        @NonNull
-        public final String zoneId;
+        @NonNull public final String zoneId;
 
         /** The country where the time zone was found. */
-        @NonNull
-        public final String countryIsoCode;
+        @NonNull public final String countryIsoCode;
 
-        /**
-         * The quality of the match.
-         */
-        @Quality
-        public final int quality;
+        /** The quality of the match. */
+        @Quality public final int quality;
 
         /**
          * Freeform information about why the value of {@link #quality} was chosen. Not used for
@@ -86,8 +78,11 @@ public final class TimeZoneLookupHelper {
          */
         private final String mDebugInfo;
 
-        public CountryResult(@NonNull String zoneId, @NonNull String countryIsoCode,
-                @Quality int quality, String debugInfo) {
+        public CountryResult(
+                @NonNull String zoneId,
+                @NonNull String countryIsoCode,
+                @Quality int quality,
+                String debugInfo) {
             this.zoneId = Objects.requireNonNull(zoneId);
             this.countryIsoCode = Objects.requireNonNull(countryIsoCode);
             this.quality = quality;
@@ -130,8 +125,7 @@ public final class TimeZoneLookupHelper {
     }
 
     /** The last CountryTimeZones object retrieved. */
-    @Nullable
-    private CountryTimeZones mLastCountryTimeZones;
+    @Nullable private CountryTimeZones mLastCountryTimeZones;
 
     @VisibleForTesting
     public TimeZoneLookupHelper() {}
@@ -160,14 +154,17 @@ public final class TimeZoneLookupHelper {
         // hours and the DST info is optional.
         Integer dstAdjustmentMillis = nitzData.getDstAdjustmentMillis();
         if (dstAdjustmentMillis == null) {
-            return countryTimeZones.lookupByOffsetWithBias(nitzData.getCurrentTimeInMillis(), bias,
-                    nitzData.getLocalOffsetMillis());
+            return countryTimeZones.lookupByOffsetWithBias(
+                    nitzData.getCurrentTimeInMillis(), bias, nitzData.getLocalOffsetMillis());
         } else {
             // We don't try to match the exact DST offset given, we just use it to work out if
             // the country is in DST.
             boolean isDst = dstAdjustmentMillis != 0;
-            return countryTimeZones.lookupByOffsetWithBias(nitzData.getCurrentTimeInMillis(), bias,
-                    nitzData.getLocalOffsetMillis(), isDst);
+            return countryTimeZones.lookupByOffsetWithBias(
+                    nitzData.getCurrentTimeInMillis(),
+                    bias,
+                    nitzData.getLocalOffsetMillis(),
+                    isDst);
         }
     }
 
@@ -252,13 +249,12 @@ public final class TimeZoneLookupHelper {
      * Returns information about the time zones used in a country at a given time.
      *
      * <p>{@code null} can be returned if a problem occurs during lookup, e.g. if the country code
-     * is
-     * unrecognized, if the country is uninhabited, or if there is a problem with the data.
+     * is unrecognized, if the country is uninhabited, or if there is a problem with the data.
      */
     @VisibleForTesting
     @Nullable
-    public CountryResult lookupByMobileCountries(@NonNull MobileCountries mobileCountries,
-            long whenMillis) {
+    public CountryResult lookupByMobileCountries(
+            @NonNull MobileCountries mobileCountries, long whenMillis) {
         List<CountryResult> validResults =
                 mobileCountries.getCountryIsoCodes().stream()
                         .map(countryIsoCode -> lookupByCountry(countryIsoCode, whenMillis))
@@ -283,7 +279,9 @@ public final class TimeZoneLookupHelper {
             // MobileCountries#getCountryIsoCodes contains the default country ISO code. If all
             // countries in `mobileCountries` share the same offset, then we set the time
             // zone to the default country.
-            return lookupByCountry(mobileCountries.getDefaultCountryIsoCode(), whenMillis,
+            return lookupByCountry(
+                    mobileCountries.getDefaultCountryIsoCode(),
+                    whenMillis,
                     CountryResult.QUALITY_MULTIPLE_ZONES_SAME_OFFSET);
         }
 
@@ -295,8 +293,7 @@ public final class TimeZoneLookupHelper {
      * Returns information about the time zones used in a country at a given time.
      *
      * <p>{@code null} can be returned if a problem occurs during lookup, e.g. if the country code
-     * is
-     * unrecognized, if the country is uninhabited, or if there is a problem with the data.
+     * is unrecognized, if the country is uninhabited, or if there is a problem with the data.
      */
     @VisibleForTesting
     @Nullable
@@ -305,8 +302,8 @@ public final class TimeZoneLookupHelper {
     }
 
     @Nullable
-    private CountryResult lookupByCountry(@NonNull String countryIsoCode, long whenMillis,
-            Integer qualityOverride) {
+    private CountryResult lookupByCountry(
+            @NonNull String countryIsoCode, long whenMillis, Integer qualityOverride) {
         CountryTimeZones countryTimeZones = getCountryTimeZones(countryIsoCode);
         if (countryTimeZones == null) {
             // Unknown country code.
@@ -336,21 +333,31 @@ public final class TimeZoneLookupHelper {
                 matchQuality = CountryResult.QUALITY_SINGLE_ZONE;
                 debugInfo = "One effective time zone found at whenMillis=" + whenMillis;
             } else {
-                boolean countryUsesDifferentOffsets = countryUsesDifferentOffsets(
-                        whenMillis, effectiveTimeZoneMappings, countryDefaultZone);
-                matchQuality = countryUsesDifferentOffsets
-                        ? QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS
-                        : QUALITY_MULTIPLE_ZONES_SAME_OFFSET;
-                debugInfo = "countryUsesDifferentOffsets=" + countryUsesDifferentOffsets + " at"
-                        + " whenMillis=" + whenMillis;
+                boolean countryUsesDifferentOffsets =
+                        countryUsesDifferentOffsets(
+                                whenMillis, effectiveTimeZoneMappings, countryDefaultZone);
+                matchQuality =
+                        countryUsesDifferentOffsets
+                                ? QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS
+                                : QUALITY_MULTIPLE_ZONES_SAME_OFFSET;
+                debugInfo =
+                        "countryUsesDifferentOffsets="
+                                + countryUsesDifferentOffsets
+                                + " at"
+                                + " whenMillis="
+                                + whenMillis;
             }
         }
-        return new CountryResult(countryDefaultZone.getID(), countryIsoCode,
-                qualityOverride != null ? qualityOverride : matchQuality, debugInfo);
+        return new CountryResult(
+                countryDefaultZone.getID(),
+                countryIsoCode,
+                qualityOverride != null ? qualityOverride : matchQuality,
+                debugInfo);
     }
 
     private static boolean countryUsesDifferentOffsets(
-            long whenMillis, @NonNull List<TimeZoneMapping> effectiveTimeZoneMappings,
+            long whenMillis,
+            @NonNull List<TimeZoneMapping> effectiveTimeZoneMappings,
             @NonNull TimeZone countryDefaultZone) {
         String countryDefaultId = countryDefaultZone.getID();
         int countryDefaultOffset = countryDefaultZone.getOffset(whenMillis);
@@ -368,8 +375,8 @@ public final class TimeZoneLookupHelper {
         return false;
     }
 
-    private static OffsetResult lookupByInstantOffsetDst(long timeMillis, int utcOffsetMillis,
-            @Nullable Boolean isDst) {
+    private static OffsetResult lookupByInstantOffsetDst(
+            long timeMillis, int utcOffsetMillis, @Nullable Boolean isDst) {
 
         // Use java.util.TimeZone and not android.icu.util.TimeZone to find candidate zone IDs: ICU
         // references some non-standard zone IDs that can be rejected by java.util.TimeZone. There
@@ -402,8 +409,11 @@ public final class TimeZoneLookupHelper {
      * If {@code isDst} is {@code null} this means the DST state is unknown so DST state is ignored.
      * If {@code isDst} is not {@code null} then it is also matched.
      */
-    private static boolean offsetMatchesAtTime(@NonNull TimeZone timeZone, int totalOffsetMillis,
-            @Nullable Boolean isDst, long whenMillis) {
+    private static boolean offsetMatchesAtTime(
+            @NonNull TimeZone timeZone,
+            int totalOffsetMillis,
+            @Nullable Boolean isDst,
+            long whenMillis) {
         int[] offsets = new int[2];
         timeZone.getOffset(whenMillis, false /* local */, offsets);
 

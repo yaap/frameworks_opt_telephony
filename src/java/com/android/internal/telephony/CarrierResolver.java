@@ -596,7 +596,7 @@ public class CarrierResolver extends Handler {
         private static final int SCORE_ICCID_PREFIX             = 1 << 6;
         private static final int SCORE_GID1                     = 1 << 5;
         private static final int SCORE_GID2                     = 1 << 4;
-        private static final int SCORE_PLMN                     = 1 << 3;
+        private static final int SCORE_PNN                      = 1 << 3;
         private static final int SCORE_PRIVILEGE_ACCESS_RULE    = 1 << 2;
         private static final int SCORE_SPN                      = 1 << 1;
         private static final int SCORE_APN                      = 1 << 0;
@@ -609,7 +609,7 @@ public class CarrierResolver extends Handler {
         public final String iccidPrefix;
         public final String gid1;
         public final String gid2;
-        public final String plmn;
+        public final String pnn;
         public final String spn;
         public final String apn;
         // there can be multiple certs configured in the UICC
@@ -626,14 +626,14 @@ public class CarrierResolver extends Handler {
 
         @VisibleForTesting
         public CarrierMatchingRule(String mccmnc, String imsiPrefixPattern, String iccidPrefix,
-                String gid1, String gid2, String plmn, String spn, String apn,
+                String gid1, String gid2, String pnn, String spn, String apn,
                 List<String> privilegeAccessRule, int cid, String name, int parentCid) {
             mccMnc = mccmnc;
             this.imsiPrefixPattern = imsiPrefixPattern;
             this.iccidPrefix = iccidPrefix;
             this.gid1 = gid1;
             this.gid2 = gid2;
-            this.plmn = plmn;
+            this.pnn = pnn;
             this.spn = spn;
             this.apn = apn;
             this.privilegeAccessRule = privilegeAccessRule;
@@ -648,7 +648,7 @@ public class CarrierResolver extends Handler {
             iccidPrefix = rule.iccidPrefix;
             gid1 = rule.gid1;
             gid2 = rule.gid2;
-            plmn = rule.plmn;
+            pnn = rule.pnn;
             spn = rule.spn;
             apn = rule.apn;
             privilegeAccessRule = rule.privilegeAccessRule;
@@ -699,12 +699,12 @@ public class CarrierResolver extends Handler {
                 }
                 mScore += SCORE_GID2;
             }
-            if (plmn != null) {
-                if (!CarrierResolver.equals(subscriptionRule.plmn, plmn, true)) {
+            if (pnn != null) {
+                if (!CarrierResolver.equals(subscriptionRule.pnn, pnn, true)) {
                     mScore = SCORE_INVALID;
                     return;
                 }
-                mScore += SCORE_PLMN;
+                mScore += SCORE_PNN;
             }
             if (spn != null) {
                 if (!CarrierResolver.equals(subscriptionRule.spn, spn, true)) {
@@ -783,7 +783,7 @@ public class CarrierResolver extends Handler {
                     + " mccmnc: " + mccMnc
                     + " gid1: " + gid1
                     + " gid2: " + gid2
-                    + " plmn: " + plmn
+                    + " pnn: " + pnn
                     + " imsi_prefix: " + imsiPrefixPattern
                     + " iccid_prefix" + iccidPrefix
                     + " spn: " + spn
@@ -801,7 +801,7 @@ public class CarrierResolver extends Handler {
         final String gid1 = mPhone.getGroupIdLevel1();
         final String gid2 = mPhone.getGroupIdLevel2();
         final String imsi = mPhone.getSubscriberId();
-        final String plmn = mPhone.getPlmn();
+        final String pnn = mPhone.getPnnHomeNetworkName();
         final String spn = mSpn;
         final String apn = mPreferApn;
         List<String> accessRules;
@@ -820,13 +820,13 @@ public class CarrierResolver extends Handler {
                     + " gid2: " + gid2
                     + " imsi: " + Rlog.pii(LOG_TAG, imsi)
                     + " iccid: " + Rlog.pii(LOG_TAG, iccid)
-                    + " plmn: " + plmn
+                    + " pnn: " + pnn
                     + " spn: " + spn
                     + " apn: " + apn
                     + " accessRules: " + ((accessRules != null) ? accessRules : null));
         }
         return new CarrierMatchingRule(
-                mccmnc, imsi, iccid, gid1, gid2, plmn, spn, apn, accessRules,
+                mccmnc, imsi, iccid, gid1, gid2, pnn, spn, apn, accessRules,
                 TelephonyManager.UNKNOWN_CARRIER_ID, null,
                 TelephonyManager.UNKNOWN_CARRIER_ID);
     }
@@ -948,7 +948,7 @@ public class CarrierResolver extends Handler {
                 iccidPrefix,
                 subscriptionRule.gid1,
                 subscriptionRule.gid2,
-                subscriptionRule.plmn,
+                subscriptionRule.pnn,
                 subscriptionRule.spn,
                 apn,
                 subscriptionRule.privilegeAccessRule,
@@ -957,9 +957,11 @@ public class CarrierResolver extends Handler {
         // Generate statsd metrics only when MCC/MNC is unknown or there is no match for GID1.
         if (unknownMccmncToLog != null || unknownGid1ToLog != null) {
             // Pass the PNN value to metrics only if the SPN is empty
-            String pnn = TextUtils.isEmpty(subscriptionRule.spn) ? subscriptionRule.plmn : "";
+            String preferredName = TextUtils.isEmpty(subscriptionRule.spn)
+                    ? subscriptionRule.pnn : "";
             CarrierIdMatchStats.onCarrierIdMismatch(
-                    mCarrierId, unknownMccmncToLog, unknownGid1ToLog, subscriptionRule.spn, pnn);
+                    mCarrierId, unknownMccmncToLog,
+                    unknownGid1ToLog, subscriptionRule.spn, preferredName);
         }
     }
 

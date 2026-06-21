@@ -64,7 +64,7 @@ import java.util.concurrent.TimeUnit;
 @RunWith(AndroidTestingRunner.class)
 @TestableLooper.RunWithLooper
 public class DataSettingsManagerTest extends TelephonyTest {
-    private static final String DATA_ROAMING_IS_USER_SETTING = "data_roaming_is_user_setting_key0";
+    private static final String DATA_ROAMING_IS_USER_SETTING = "data_roaming_is_user_setting_key1";
 
     // Mocked
     DataSettingsManagerCallback mMockedDataSettingsManagerCallback;
@@ -93,6 +93,7 @@ public class DataSettingsManagerTest extends TelephonyTest {
 
         doReturn(new SubscriptionInfoInternal.Builder().setId(1).build())
                 .when(mSubscriptionManagerService).getSubscriptionInfoInternal(anyInt());
+        doReturn(1).when(mPhone).getSubId();
 
         mDataSettingsManagerUT = new DataSettingsManager(mPhone, mDataNetworkController,
                 mMockDataServiceManagerSparseArray,
@@ -386,24 +387,68 @@ public class DataSettingsManagerTest extends TelephonyTest {
     }
 
     @Test
-    public void testNotifyDataEnabledFromNewValidSubId() throws Exception {
-        final CountDownLatch latch = new CountDownLatch(1);
-        mDataSettingsManagerUT.registerCallback(
-                new DataSettingsManagerCallback(mDataSettingsManagerUT::post) {
-                    @Override
-                    public void onDataEnabledChanged(boolean enabled,
-                            @TelephonyManager.DataEnabledChangedReason int reason,
-                            @NonNull String callingPackage) {
-                        latch.countDown();
-                    }
-                });
+    public void testOnSubscriptionChangedSubIdChanged() throws Exception {
+        ArgumentCaptor<SubscriptionManagerService.SubscriptionManagerServiceCallback>
+                callbackArgumentCaptor = ArgumentCaptor
+                .forClass(SubscriptionManagerService.SubscriptionManagerServiceCallback.class);
+        verify(mSubscriptionManagerService).registerCallback(callbackArgumentCaptor.capture());
+        SubscriptionManagerService.SubscriptionManagerServiceCallback callback =
+                callbackArgumentCaptor.getValue();
+        processAllMessages();
+        verify(mPhone, never()).notifyUserMobileDataStateChanged(anyBoolean());
 
-        Message.obtain(mDataSettingsManagerUT, 4 /* EVENT_SUBSCRIPTIONS_CHANGED */, -1)
-                .sendToTarget();
-        Message.obtain(mDataSettingsManagerUT, 4 /* EVENT_SUBSCRIPTIONS_CHANGED */, 2)
-                .sendToTarget();
+        // Sub id changed from 1 to 10.
+        doReturn(10).when(mPhone).getSubId();
+        callback.onSubscriptionChanged(10);
         processAllMessages();
 
-        assertTrue(latch.await(1000, TimeUnit.MILLISECONDS));
+        verify(mPhone).notifyUserMobileDataStateChanged(true);
+    }
+
+    @Test
+    public void testNotifyDataEnabledOnOpportunisticSubscriptionChanged() throws Exception {
+        mDataSettingsManagerUT.setDataEnabled(TelephonyManager.DATA_ENABLED_REASON_USER, false, "");
+        processAllMessages();
+        ArgumentCaptor<SubscriptionManagerService.SubscriptionManagerServiceCallback>
+                callbackArgumentCaptor = ArgumentCaptor
+                .forClass(SubscriptionManagerService.SubscriptionManagerServiceCallback.class);
+        verify(mSubscriptionManagerService).registerCallback(callbackArgumentCaptor.capture());
+        SubscriptionManagerService.SubscriptionManagerServiceCallback callback =
+                callbackArgumentCaptor.getValue();
+
+        // Setup opportunistic subscription
+        SubscriptionInfoInternal opportunisticSub = new SubscriptionInfoInternal.Builder()
+                .setId(1)
+                .setOpportunistic(1)
+                .build();
+        doReturn(opportunisticSub).when(mSubscriptionManagerService)
+                .getSubscriptionInfoInternal(anyInt());
+
+        callback.onSubscriptionChanged(1);
+        processAllMessages();
+
+        verify(mPhone).notifyDataEnabled(true, TelephonyManager.DATA_ENABLED_REASON_OVERRIDE);
+    }
+
+    @Test
+    public void testNotifyDataServiceUserDataEnabledWhenProvisionedChanged() {
+        mMockDataServiceManagers.forEach(Mockito::clearInvocations);
+        mDataSettingsManagerUT.sendEmptyMessage(9 /* EVENT_PROVISIONED_CHANGED */);
+        processAllMessages();
+
+        mMockDataServiceManagers.forEach(mockDataServiceManager -> {
+            verify(mockDataServiceManager, times(1)).notifyUserDataEnabled(anyBoolean(), isNull());
+        });
+    }
+
+    @Test
+    public void testNotifyDataServiceUserDataEnabledWhenProvisioningDataEnabledChanged() {
+        mMockDataServiceManagers.forEach(Mockito::clearInvocations);
+        mDataSettingsManagerUT.sendEmptyMessage(10 /* EVENT_PROVISIONING_DATA_ENABLED_CHANGED */);
+        processAllMessages();
+
+        mMockDataServiceManagers.forEach(mockDataServiceManager -> {
+            verify(mockDataServiceManager, times(1)).notifyUserDataEnabled(anyBoolean(), isNull());
+        });
     }
 }

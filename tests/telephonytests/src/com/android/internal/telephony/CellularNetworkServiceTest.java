@@ -26,11 +26,16 @@ import static org.mockito.Mockito.verify;
 
 import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.hardware.radio.network.NrVopsInfo;
+import android.hardware.radio.network.SatelliteTechnology;
 import android.os.RemoteException;
+import android.platform.test.flag.junit.FlagsParameterization;
+import android.platform.test.flag.junit.SetFlagsRule;
 import android.telephony.AccessNetworkConstants;
 import android.telephony.CellIdentityGsm;
 import android.telephony.CellIdentityLte;
 import android.telephony.CellIdentityWcdma;
+import android.telephony.DataSpecificRegistrationInfo;
 import android.telephony.INetworkService;
 import android.telephony.INetworkServiceCallback;
 import android.telephony.LteVopsSupportInfo;
@@ -43,22 +48,49 @@ import android.telephony.SmsManager;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.telephony.VopsSupportInfo;
+import android.telephony.satellite.SatelliteManager;
 
 import androidx.test.filters.MediumTest;
 import androidx.test.filters.SmallTest;
 
 import com.android.internal.R;
+import com.android.internal.telephony.flags.Flags;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
+@RunWith(Parameterized.class)
 public class CellularNetworkServiceTest extends TelephonyTest {
     CellularNetworkService mCellularNetworkService;
+
+    @Rule
+    public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
+
+    @Parameters(name = "{1}")
+    public static Collection<Object[]> getParams() {
+        return FlagsParameterization.allCombinationsOf(Flags.FLAG_NR_NTN).stream()
+                .map(p -> new Object[] {
+                        p,
+                        p.toString().replace("com.android.internal.telephony.", "")
+                })
+                .collect(Collectors.toList());
+    }
+
+    public CellularNetworkServiceTest(FlagsParameterization params, String shortName) {
+        mSetFlagsRule.setFlagsParameterization(params);
+    }
 
     // Mocked classes
     private INetworkServiceCallback mCallback;
@@ -558,5 +590,204 @@ public class CellularNetworkServiceTest extends TelephonyTest {
         } catch (RemoteException e) {
             assertTrue(false);
         }
+    }
+
+    @Test
+    public void testGetLteNetworkRegistrationInfo_withSatelliteTechnology() throws RemoteException {
+        logd("testGetNetworkRegistrationInfoLte_withSatelliteTechnology");
+        final int domain = NetworkRegistrationInfo.DOMAIN_PS;
+        final int regState = NetworkRegistrationInfo.REGISTRATION_STATE_HOME;
+        final int radioTech = ServiceState.RIL_RADIO_TECHNOLOGY_LTE;
+
+        logd("Create an AIDL HAL RegStateResult object and set the SatelliteTechnology type");
+        android.hardware.radio.network.RegStateResult regResult =
+                new android.hardware.radio.network.RegStateResult();
+        regResult.regState = regState;
+        regResult.rat = radioTech;
+        regResult.reasonForDenial = 0;
+        regResult.cellIdentity = new android.hardware.radio.network.CellIdentity();
+        regResult.registeredPlmn = "";
+
+        regResult.accessTechnologySpecificInfo =
+                new android.hardware.radio.network.AccessTechnologySpecificInfo();
+        android.hardware.radio.network.EutranRegistrationInfo eutranInfo =
+                new android.hardware.radio.network.EutranRegistrationInfo();
+
+        eutranInfo.satelliteTechnology = SatelliteTechnology.SAT_TECH_DTC;
+        android.hardware.radio.network.NrIndicators nrIndicators =
+                new android.hardware.radio.network.NrIndicators();
+        nrIndicators.isEndcAvailable = true;
+        nrIndicators.isDcNrRestricted = false;
+        nrIndicators.isNrAvailable = true;
+        eutranInfo.nrIndicators = nrIndicators;
+        android.hardware.radio.network.LteVopsInfo lteVopsInfo =
+                new android.hardware.radio.network.LteVopsInfo();
+        lteVopsInfo.isVopsSupported = true;
+        lteVopsInfo.isEmcBearerSupported = true;
+        eutranInfo.lteVopsInfo = lteVopsInfo;
+        regResult.accessTechnologySpecificInfo =
+                android.hardware.radio.network.AccessTechnologySpecificInfo.eutranInfo(eutranInfo);
+
+        logd("Set the mock response created above in SimulatedCommands");
+        mSimulatedCommands.setDataRegStateResult(regResult);
+
+        logd("Call the method of the CellularNetworkService under test");
+        mBinder.requestNetworkRegistrationInfo(0, domain, mCallback);
+
+        logd("Build expected result with default maxDataCalls=16.");
+        VopsSupportInfo lteVops = new LteVopsSupportInfo(
+                LteVopsSupportInfo.LTE_STATUS_SUPPORTED, LteVopsSupportInfo.LTE_STATUS_SUPPORTED);
+        int maxDataCalls = 16;
+        DataSpecificRegistrationInfo dsri =
+                Objects.requireNonNull(new DataSpecificRegistrationInfo.Builder(maxDataCalls)
+                                .setDcNrRestricted(nrIndicators.isDcNrRestricted)
+                                .setNrAvailable(nrIndicators.isNrAvailable)
+                                .setEnDcAvailable(nrIndicators.isEndcAvailable)
+                                .setVopsSupportInfo(lteVops))
+                        .build();
+
+        NetworkRegistrationInfo expectedState;
+        logd("Create the expected NetworkRegistrationInfo object using a builder");
+        if (Flags.nrNtn()) {
+            logd("Flags.nrNtn() is true");
+            NetworkRegistrationInfo.Builder expectedStateBuilder =
+                    new NetworkRegistrationInfo.Builder()
+                            .setDomain(domain)
+                            .setTransportType(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
+                            .setRegistrationState(regState)
+                            .setAccessNetworkTechnology(TelephonyManager.NETWORK_TYPE_LTE)
+                            .setRejectCause(regResult.reasonForDenial)
+                            .setEmergencyOnly(false)
+                            .setAvailableServices(
+                                    Arrays.asList(NetworkRegistrationInfo.SERVICE_TYPE_DATA))
+                            .setCellIdentity(
+                                    RILUtils.convertHalCellIdentity(regResult.cellIdentity))
+                            .setRegisteredPlmn(regResult.registeredPlmn)
+                            .setSatelliteTechnology(SatelliteManager.NT_RADIO_TECHNOLOGY_LTE_DTC)
+                            .setIsNonTerrestrialNetwork(true)
+                            .setDataSpecificInfo(dsri);
+            expectedState = expectedStateBuilder.build();
+        } else {
+            logd("Flags.nrNtn() is false");
+            NetworkRegistrationInfo.Builder expectedStateBuilder =
+                    new NetworkRegistrationInfo.Builder()
+                            .setDomain(domain)
+                            .setTransportType(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
+                            .setRegistrationState(regState)
+                            .setAccessNetworkTechnology(TelephonyManager.NETWORK_TYPE_LTE)
+                            .setRejectCause(regResult.reasonForDenial)
+                            .setEmergencyOnly(false)
+                            .setAvailableServices(
+                                    Arrays.asList(NetworkRegistrationInfo.SERVICE_TYPE_DATA))
+                            .setCellIdentity(
+                                    RILUtils.convertHalCellIdentity(regResult.cellIdentity))
+                            .setRegisteredPlmn(regResult.registeredPlmn)
+                            .setSatelliteTechnology(SatelliteManager.NT_RADIO_TECHNOLOGY_UNKNOWN)
+                            .setIsNonTerrestrialNetwork(false)
+                            .setDataSpecificInfo(dsri);
+            expectedState = expectedStateBuilder.build();
+        }
+        logd("Verify the callback result matches the expected one");
+        verify(mCallback, timeout(1000)).onRequestNetworkRegistrationInfoComplete(
+                eq(NetworkServiceCallback.RESULT_SUCCESS), eq(expectedState));
+    }
+
+    @Test
+    public void testGetNrNetworkRegistrationInfo_withSatelliteTechnology() throws RemoteException {
+        logd("testGetNetworkRegistrationInfoNr_withSatelliteTechnology");
+        final int domain = NetworkRegistrationInfo.DOMAIN_PS;
+        final int regState = NetworkRegistrationInfo.REGISTRATION_STATE_HOME;
+        final int radioTech = ServiceState.RIL_RADIO_TECHNOLOGY_NR;
+
+        byte vopsSupported = NrVopsInfo.VOPS_INDICATOR_VOPS_OVER_3GPP;
+        byte emcSupported = NrVopsInfo.EMC_INDICATOR_NR_CONNECTED_TO_5GCN;
+        byte emfSupported = NrVopsInfo.EMF_INDICATOR_NR_CONNECTED_TO_5GCN;
+
+        logd("Create an AIDL HAL RegStateResult object and set the SatelliteTechnology type");
+        android.hardware.radio.network.RegStateResult regResult =
+                new android.hardware.radio.network.RegStateResult();
+        regResult.regState = regState;
+        regResult.rat = radioTech;
+        regResult.reasonForDenial = 0;
+        regResult.cellIdentity = new android.hardware.radio.network.CellIdentity();
+        regResult.registeredPlmn = "";
+
+        regResult.accessTechnologySpecificInfo =
+                new android.hardware.radio.network.AccessTechnologySpecificInfo();
+        android.hardware.radio.network.NrRegistrationInfo nrInfo =
+                new android.hardware.radio.network.NrRegistrationInfo();
+        android.hardware.radio.network.NrVopsInfo nrVopsInfo =
+                new android.hardware.radio.network.NrVopsInfo();
+        nrVopsInfo.emcSupported = emcSupported;
+        nrVopsInfo.emfSupported = emfSupported;
+        nrVopsInfo.vopsSupported = vopsSupported;
+        nrInfo.nrVopsInfo = nrVopsInfo;
+        nrInfo.satelliteTechnology = SatelliteTechnology.SAT_TECH_3GPP_NTN;
+        regResult.accessTechnologySpecificInfo =
+                android.hardware.radio.network.AccessTechnologySpecificInfo.nrInfo(nrInfo);
+
+        logd("Set the mock response created above in SimulatedCommands");
+        mSimulatedCommands.setDataRegStateResult(regResult);
+
+        logd("Call the method of the CellularNetworkService under test");
+        mBinder.requestNetworkRegistrationInfo(0, domain, mCallback);
+
+        logd("Build expected result with default maxDataCalls=16.");
+
+        int maxDataCalls = 16;
+        VopsSupportInfo nrVops = new NrVopsSupportInfo(vopsSupported, emcSupported, emfSupported);
+        DataSpecificRegistrationInfo dsri =
+                Objects.requireNonNull(new DataSpecificRegistrationInfo.Builder(maxDataCalls)
+                                .setDcNrRestricted(false)
+                                .setNrAvailable(false)
+                                .setEnDcAvailable(false)
+                                .setVopsSupportInfo(nrVops))
+                        .build();
+
+        NetworkRegistrationInfo expectedState;
+        logd("Create the expected NetworkRegistrationInfo object using a builder");
+        if (Flags.nrNtn()) {
+            logd("Flags.nrNtn() is true");
+            NetworkRegistrationInfo.Builder expectedStateBuilder =
+                    new NetworkRegistrationInfo.Builder()
+                            .setDomain(domain)
+                            .setTransportType(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
+                            .setRegistrationState(regState)
+                            .setAccessNetworkTechnology(TelephonyManager.NETWORK_TYPE_NR)
+                            .setRejectCause(regResult.reasonForDenial)
+                            .setEmergencyOnly(false)
+                            .setAvailableServices(
+                                    Arrays.asList(NetworkRegistrationInfo.SERVICE_TYPE_DATA))
+                            .setCellIdentity(
+                                    RILUtils.convertHalCellIdentity(regResult.cellIdentity))
+                            .setRegisteredPlmn(regResult.registeredPlmn)
+                            .setSatelliteTechnology(SatelliteManager.NT_RADIO_TECHNOLOGY_NR_NTN)
+                            .setDataSpecificInfo(dsri)
+                            .setIsNonTerrestrialNetwork(true);
+            expectedState = expectedStateBuilder.build();
+        } else {
+            logd("Flags.nrNtn() is false");
+            NetworkRegistrationInfo.Builder expectedStateBuilder =
+                    new NetworkRegistrationInfo.Builder()
+                            .setDomain(domain)
+                            .setTransportType(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
+                            .setRegistrationState(regState)
+                            .setAccessNetworkTechnology(TelephonyManager.NETWORK_TYPE_NR)
+                            .setRejectCause(regResult.reasonForDenial)
+                            .setEmergencyOnly(false)
+                            .setAvailableServices(
+                                    Arrays.asList(NetworkRegistrationInfo.SERVICE_TYPE_DATA))
+                            .setCellIdentity(
+                                    RILUtils.convertHalCellIdentity(regResult.cellIdentity))
+                            .setRegisteredPlmn(regResult.registeredPlmn)
+                            .setSatelliteTechnology(SatelliteManager.NT_RADIO_TECHNOLOGY_UNKNOWN)
+                            .setDataSpecificInfo(dsri)
+                            .setIsNonTerrestrialNetwork(false);
+            expectedState = expectedStateBuilder.build();
+        }
+
+        logd("Verify the callback result matches the expected one");
+        verify(mCallback, timeout(1000)).onRequestNetworkRegistrationInfoComplete(
+                eq(NetworkServiceCallback.RESULT_SUCCESS), eq(expectedState));
     }
 }

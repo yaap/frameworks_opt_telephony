@@ -22,6 +22,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -172,5 +174,13 @@ public class IccSmsInterfaceManagerTest extends TelephonyTest {
 
         mIccSmsInterfaceManager.notifyIfOutgoingEmergencySms("1234");
         verify(mEmergencyNumberTracker2).getEmergencyNumber("1234");
+    }
+
+    @Test
+    public void testSendRawPdu() {
+        byte[] pdu = new byte[] {0x01, 0x02};
+        mIccSmsInterfaceManager.sendRawPdu("callingPackage", 0, "1234", "5678", pdu, null, null, 0);
+        verify(mSmsDispatchersController).sendRawPdu(eq("callingPackage"), eq(0),
+                eq("1234"), eq("5678"), eq(pdu), isNull(), isNull(), eq(0));
     }
 }

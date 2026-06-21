@@ -144,9 +144,11 @@ public class ServiceStateStats extends DataNetworkControllerCallback {
             if (satelliteController != null) {
                 newState.isNtn = satelliteController.isInSatelliteModeForCarrierRoaming(mPhone);
                 newState.isNbIotNtn = satelliteController.isInCarrierRoamingNbIotNtn(mPhone);
+                newState.plmn = satelliteController.getSatellitePlmnForMetrics(mPhone);
             } else {
                 newState.isNtn = false;
                 newState.isNbIotNtn = false;
+                newState.plmn = "";
             }
             TimestampedServiceState prevState =
                     mLastState.getAndSet(new TimestampedServiceState(newState, now));
@@ -323,6 +325,7 @@ public class ServiceStateStats extends DataNetworkControllerCallback {
         copy.isIwlanCrossSim = state.isIwlanCrossSim;
         copy.isNtn = state.isNtn;
         copy.isNbIotNtn = state.isNbIotNtn;
+        copy.plmn = state.plmn;
         return copy;
     }
 

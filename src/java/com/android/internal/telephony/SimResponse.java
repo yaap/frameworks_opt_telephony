@@ -142,14 +142,21 @@ public class SimResponse extends IRadioSimResponse.Stub {
                     RILUtils.convertAidlCarrierInfoList(
                             carrierRestrictions.excludedCarrierInfoList)).setCarrierLockInfoFeature(
                             true).build();
-        } else {
+        } else if (mRil.getHalVersion(HAL_SERVICE_SIM).equals(RIL.RADIO_HAL_VERSION_2_1)) {
             ret = CarrierRestrictionRules.newBuilder().setAllowedCarriers(
                     RILUtils.convertHalCarrierList(
                             carrierRestrictions.allowedCarriers)).setExcludedCarriers(
                     RILUtils.convertHalCarrierList(
                             carrierRestrictions.excludedCarriers)).setDefaultCarrierRestriction(
                     carrierRestrictionDefault).setMultiSimPolicy(
-                    policy).build();
+                    policy).setCarrierRestrictionStatus(carrierRestrictions.status).build();
+        } else {
+            ret = CarrierRestrictionRules.newBuilder().setAllowedCarriers(
+                    RILUtils.convertHalCarrierList(
+                            carrierRestrictions.allowedCarriers)).setExcludedCarriers(
+                    RILUtils.convertHalCarrierList(
+                            carrierRestrictions.excludedCarriers)).setDefaultCarrierRestriction(
+                    carrierRestrictionDefault).setMultiSimPolicy(policy).build();
         }
         if (responseInfo.error == RadioError.NONE) {
             RadioResponse.sendMessageResponse(rr.mResult, ret);

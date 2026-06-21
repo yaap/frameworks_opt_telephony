@@ -17,6 +17,7 @@
 package com.android.internal.telephony;
 
 import android.compat.annotation.UnsupportedAppUsage;
+import android.content.Context;
 import android.os.AsyncResult;
 import android.os.Build;
 import android.os.Handler;
@@ -25,6 +26,7 @@ import android.os.Registrant;
 import android.os.RegistrantList;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.ServiceState;
+import android.telephony.TelephonyManager;
 
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.flags.Flags;
@@ -83,7 +85,7 @@ public class CallManager {
     private static final int EVENT_TTY_MODE_RECEIVED = 122;
 
     // Singleton instance
-    private static final CallManager INSTANCE = new CallManager();
+    private static CallManager INSTANCE = null;
 
     // list of registered phones, which are Phone objs
     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
@@ -103,6 +105,8 @@ public class CallManager {
 
     // mapping of phones to registered handler instances used for callbacks from RIL
     private final HashMap<Phone, CallManagerHandler> mHandlerMap = new HashMap<>();
+
+    private final TelephonyManager mTelephonyManager;
 
     // default phone as the first phone registered, which is Phone obj
     private Phone mDefaultPhone;
@@ -176,7 +180,8 @@ public class CallManager {
     protected final RegistrantList mTtyModeReceivedRegistrants
     = new RegistrantList();
 
-    private CallManager() {
+    private CallManager(Context context) {
+        mTelephonyManager = context.getSystemService(TelephonyManager.class);
         mPhones = new ArrayList<Phone>();
         mRingingCalls = new ArrayList<Call>();
         mBackgroundCalls = new ArrayList<Call>();
@@ -189,8 +194,16 @@ public class CallManager {
      * @return CallManager
      */
     @UnsupportedAppUsage
-    public static CallManager getInstance() {
+    public static synchronized CallManager getInstance(Context context) {
+        if (INSTANCE == null) {
+            INSTANCE = new CallManager(context);
+        }
         return INSTANCE;
+    }
+
+    @VisibleForTesting
+    public static synchronized void setInstanceForTesting(Context context) {
+        INSTANCE = new CallManager(context);
     }
 
     /**
@@ -853,7 +866,16 @@ public class CallManager {
                             && ((ImsPhoneConnection) c).isIncomingCallAutoRejected()) {
                         incomingRejected = true;
                     }
-                    if ((getActiveFgCallState(subId).isDialing() || hasMoreThanOneRingingCall())
+                    boolean hasMoreThanOneRingingCall = hasMoreThanOneRingingCall();
+                    if (Flags.allowMultipleIncomingForDsda() && hasMoreThanOneRingingCall
+                            && isSimultaneousCallingEnabled()) {
+                        if (VDBG) Rlog.d(LOG_TAG, "Allow ringing call on other sub.");
+                        // Allow pass through for DSDA. Let this be caught by Telecom instead so
+                        // that the call can be logged as a missed call.
+                        hasMoreThanOneRingingCall = false;
+                    }
+
+                    if ((getActiveFgCallState(subId).isDialing() || hasMoreThanOneRingingCall)
                             && (!incomingRejected)) {
                         try {
                             Rlog.d(LOG_TAG, "silently drop incoming call: " + c.getCall());
@@ -956,4 +978,17 @@ public class CallManager {
             }
         }
     };
+
+    private boolean isSimultaneousCallingEnabled() {
+        try {
+            return mTelephonyManager.getMaxNumberOfSimultaneouslyActiveSims() > 1
+                    || mTelephonyManager.getPhoneCapability().getMaxActiveVoiceSubscriptions() > 1;
+        } catch (UnsupportedOperationException uoe) {
+            Rlog.d(LOG_TAG, "Telephony not supported");
+            return false;
+        } catch (Exception e) {
+            Rlog.d(LOG_TAG, "exception in isSimultaneousCallingEnabled(): ", e);
+            return false;
+        }
+    }
 }

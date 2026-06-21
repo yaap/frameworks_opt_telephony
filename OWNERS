@@ -1,19 +1,30 @@
+abhisultaniya@google.com
 amagup@google.com
 amallampati@google.com
 amruthr@google.com
+arunrajms@google.com
+arunvoddu@google.com
 breadley@google.com
+chinmayd@google.com
 fionaxu@google.com
 grantmenke@google.com
 huiwang@google.com
+hyeinyu@google.com
 jackyu@google.com
+jagdishpawar@google.com
 jayachandranc@google.com
+justingross@google.com
+nagendranb@google.com
 pmadapurmath@google.com
+raghavgoel@google.com
 rgreenwalt@google.com
+sangyun@google.com
 sarahchin@google.com
 sasindran@google.com
 tgunn@google.com
 tjstuart@google.com
 tnd@google.com
+ysnam@google.com
 
 # Domain Selection code is co-owned, adding additional owners for this code
-per-file EmergencyStateTracker*=hwangoo@google.com,avinashmp@google.com,mkoon@google.com,seheele@google.com,jdyou@google.com
+per-file flags/domainselection.aconfig,*DomainSelection*,*EmergencyStateTracker*=hwangoo@google.com,avinashmp@google.com,mkoon@google.com,seheele@google.com,jdyou@google.com,jaesikkong@google.com,kimjiny@google.com

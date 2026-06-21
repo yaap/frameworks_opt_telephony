@@ -18,7 +18,6 @@ package com.android.internal.telephony;
 
 import static com.google.common.truth.Truth.assertThat;
 
-import static org.junit.Assert.assertThrows;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.anyString;
@@ -669,17 +668,20 @@ public class NetworkScanRequestTrackerTest extends TelephonyTest {
 
     @Test
     public void testStopNetworkScan_invalidScanId_throwIllegalArgumentException() throws Exception {
-        final int invalidScanId = 1000;
-        assertThrows(IllegalArgumentException.class,
-                () -> mNetworkScanRequestTracker.stopNetworkScan(invalidScanId, CLIENT_UID));
+        mNetworkScanRequestTracker.stopNetworkScan(1000 /* invalid ScanId */, CLIENT_UID);
+
+        processAllMessages();
+        verify(mPhone, never()).stopNetworkScan(any());
     }
 
     @Test
     public void testStopNetworkScan_fromOtherUid_throwIllegalArgumentException() throws Exception {
-        mScanId = scanNetworkWithOneShot(true /* renounceFineLocationAccess */);
 
-        assertThrows(IllegalArgumentException.class,
-                () -> mNetworkScanRequestTracker.stopNetworkScan(mScanId, 654321));
+        mScanId = scanNetworkWithOneShot(true /* renounceFineLocationAccess */);
+        mNetworkScanRequestTracker.stopNetworkScan(mScanId, 654321);
+
+        processAllMessages();
+        verify(mPhone, never()).stopNetworkScan(any());
     }
 
     @Test

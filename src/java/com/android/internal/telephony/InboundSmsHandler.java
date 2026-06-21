@@ -89,6 +89,7 @@ import com.android.internal.telephony.SmsConstants.MessageClass;
 import com.android.internal.telephony.analytics.TelephonyAnalytics;
 import com.android.internal.telephony.analytics.TelephonyAnalytics.SmsMmsAnalytics;
 import com.android.internal.telephony.flags.FeatureFlags;
+import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.metrics.PersistAtomsStorage;
 import com.android.internal.telephony.nano.PersistAtomsProto;
 import com.android.internal.telephony.satellite.SatelliteController;
@@ -307,7 +308,7 @@ public abstract class InboundSmsHandler extends StateMachine {
 
     private static final TextClassifier.EntityConfig TC_REQUEST_CONFIG =
             new TextClassifier.EntityConfig.Builder()
-                    .setIncludedTypes(List.of(TextClassifier.TYPE_SMS_RETRIEVER_OTP))
+                    .setIncludedTypes(getIncludedTextClassifierTypes())
                     .includeTypesFromTextClassifier(false)
                     .build();
 
@@ -329,6 +330,19 @@ public abstract class InboundSmsHandler extends StateMachine {
     private List<SmsFilter> mSmsFilters;
 
     protected final @NonNull FeatureFlags mFeatureFlags;
+
+    @VisibleForTesting
+    public static List<String> getIncludedTextClassifierTypes() {
+      ArrayList<String> includedTypes = new ArrayList();
+      includedTypes.add(TextClassifier.TYPE_SMS_RETRIEVER_OTP);
+      if (android.view.flags.Flags.redactWebOtpSmsApi()) {
+          includedTypes.add(TextClassifier.TYPE_SMS_WEB_OTP);
+      }
+      if (android.view.flags.Flags.redactOtpAppCompatApi()) {
+          includedTypes.add(TextClassifier.TYPE_OTP);
+      }
+      return includedTypes;
+    }
 
     /**
      * Create a new SMS broadcast helper.
@@ -1263,8 +1277,7 @@ public abstract class InboundSmsHandler extends StateMachine {
     }
 
     private boolean isMainUserUnlocked() {
-        UserHandle mainUser = mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser() ?
-                mUserManager.getMainUser() : null;
+        UserHandle mainUser = mUserManager.getMainUser();
         if (mainUser != null) {
             return mUserManager.isUserUnlocked(mainUser);
         }
@@ -1294,8 +1307,7 @@ public abstract class InboundSmsHandler extends StateMachine {
                 .setChannelId(NotificationChannelController.CHANNEL_ID_SMS);
         NotificationManager mNotificationManager =
             (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
-        UserHandle mainUser = mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser() ?
-                mUserManager.getMainUser() : null;
+        UserHandle mainUser = mUserManager.getMainUser();
         if (mainUser != null) {
             mNotificationManager.notifyAsUser(
                     NOTIFICATION_TAG, NOTIFICATION_ID_NEW_MESSAGE, mBuilder.build(), mainUser);
@@ -1420,7 +1432,6 @@ public abstract class InboundSmsHandler extends StateMachine {
      * @param user user to deliver the intent to
      */
     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
-    @SuppressLint("MissingPermission")
     public void dispatchIntent(Intent intent, String permission, String appOp,
             Bundle opts, SmsBroadcastReceiver resultReceiver, UserHandle user, int subId) {
         intent.addFlags(Intent.FLAG_RECEIVER_NO_ABORT);
@@ -1445,6 +1456,20 @@ public abstract class InboundSmsHandler extends StateMachine {
             SubscriptionManager.putSubscriptionIdExtra(intent, subId);
         }
 
+        Collection<TextLinks.TextLink> textLinks;
+        if (shouldCheckForOtp(intent)) {
+            textLinks = getOtpLinksAndLogMetrics(intent);
+        } else {
+            textLinks = null;
+        }
+
+        dispatchSmsToUsers(intent, permission, appOp, opts, resultReceiver, user, textLinks);
+    }
+
+    @SuppressLint("MissingPermission")
+    private void dispatchSmsToUsers(Intent intent, String permission, String appOp,
+            Bundle opts, SmsBroadcastReceiver resultReceiver, UserHandle user,
+            @Nullable Collection<TextLinks.TextLink> textLinks) {
         if (user.equals(UserHandle.ALL)) {
             // Get a list of currently started users.
             int[] users = null;
@@ -1455,13 +1480,12 @@ public abstract class InboundSmsHandler extends StateMachine {
                 if (mUserManager.isUserRunning(handle)) {
                     runningUserHandles.add(handle);
                 } else {
-                    if (mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()
-                            && handle.equals(mainUser)) {
-                        logeWithLocalLog("dispatchIntent: MAIN user is not running",
-                                resultReceiver.mInboundSmsTracker.getMessageId());
+                    long messageId = resultReceiver != null
+                            ? resultReceiver.mInboundSmsTracker.getMessageId() : -1;
+                    if (handle.equals(mainUser)) {
+                        logeWithLocalLog("dispatchIntent: MAIN user is not running", messageId);
                     } else if (handle.equals(UserHandle.SYSTEM)) {
-                        logeWithLocalLog("dispatchIntent: SYSTEM user is not running",
-                                resultReceiver.mInboundSmsTracker.getMessageId());
+                        logeWithLocalLog("dispatchIntent: SYSTEM user is not running", messageId);
                     }
                 }
             }
@@ -1489,11 +1513,10 @@ public abstract class InboundSmsHandler extends StateMachine {
                 }
                 // Only pass in the resultReceiver when the MAIN user is processed.
                 sendBroadcast(intent, permission, appOp, opts,
-                        isMainUser(users[i]) ? resultReceiver : null, targetUser);
+                        isMainUser(users[i]) ? resultReceiver : null, targetUser, textLinks);
             }
         } else {
-            resultReceiver.setWaitingForIntent(intent);
-            sendBroadcast(intent, permission, appOp, opts, resultReceiver, user);
+            sendBroadcast(intent, permission, appOp, opts, resultReceiver, user, textLinks);
         }
     }
 
@@ -1517,14 +1540,15 @@ public abstract class InboundSmsHandler extends StateMachine {
     }
 
     private void sendBroadcast(Intent intent, String permission, String appOp,
-            Bundle opts, SmsBroadcastReceiver resultReceiver, UserHandle user) {
+            Bundle opts, SmsBroadcastReceiver resultReceiver, UserHandle user,
+            @Nullable Collection<TextLinks.TextLink> textLinks) {
         if (resultReceiver != null) {
             // Set the intent that the result receiver is waiting for, so that it can be handled
             // correctly when the broadcast is received. This is needed to wait for the main user
             // broadcast to complete before continuing with the next message.
             resultReceiver.setWaitingForIntent(intent);
         }
-        if (!shouldCheckForOtp(intent)) {
+        if (textLinks == null) {
             try {
                 mContext.createPackageContextAsUser(mContext.getPackageName(), 0, user)
                         .sendOrderedBroadcast(intent, Activity.RESULT_OK, permission, appOp,
@@ -1538,55 +1562,91 @@ public abstract class InboundSmsHandler extends StateMachine {
             evaluationEvent.redactionTimeMs = -1;
             mAtomsStorage.addOtpEvaluationEvent(evaluationEvent);
         } else {
-            checkOtpAndSendBroadcast(intent, permission, appOp, opts, resultReceiver, user);
-        }
-    }
-
-    private void checkOtpAndSendBroadcast(Intent intent, String permission, String appOp,
-            Bundle opts, SmsBroadcastReceiver resultReceiver, UserHandle user) {
-        final long start = SystemClock.elapsedRealtime();
-        mBackgroundExecutor.execute(() -> {
-            AtomicBoolean containsOtpCallPending = new AtomicBoolean(true);
-            AtomicBoolean sentBroadcastAfterWaitingMaxTime = new AtomicBoolean(false);
-            mMainThreadHandler.postDelayed(() -> {
-                if (containsOtpCallPending.get()) {
-                    // If we've waited the maximum time, and still haven't classified, send the
-                    // broadcast.
-                    sentBroadcastAfterWaitingMaxTime.set(true);
-                    sendBroadcastWithStandardPermissions(intent, permission, appOp, opts,
-                            resultReceiver, user);
+            if (containsOtp(textLinks)) {
+                if (android.view.flags.Flags.redactOtpAppCompatApi() && isGenericOtp(textLinks)) {
+                    sendBroadcastForGenericOtp(intent, permission, appOp, opts, resultReceiver,
+                            user);
+                } else {
+                    sendBroadcastToTrustedPackages(intent, permission, appOp, opts,
+                            resultReceiver, user, getOtpTrustedPackagesFromTextLinks(textLinks));
                 }
-            }, MAXIMUM_BROADCAST_DELAY_TIME_MS);
-            Collection<TextLinks.TextLink> textLinks = generateOtpTextLinks(intent);
-            boolean containsOtp = containsOtp(textLinks);
-            containsOtpCallPending.set(false);
-            int classificationTime = (int)
-                    (Math.min(SystemClock.elapsedRealtime() - start, Integer.MAX_VALUE));
-            if (sentBroadcastAfterWaitingMaxTime.get()) {
-                // Broadcast was already sent, don't re-send
-                return;
-            }
-            int result;
-            if (containsOtp) {
-                String smsRetrieverHashMatchedPackageName = getSmsRetrieverTargetPackageName(
-                        textLinks);
-                sendBroadcastToTrustedPackages(intent, permission, appOp, opts,
-                        resultReceiver, user, smsRetrieverHashMatchedPackageName);
-                result = SMS_OTP_EVALUATION__RESULT__EVALUATION_RESULT_HAS_OTP;
             } else {
                 sendBroadcastWithStandardPermissions(intent, permission, appOp, opts,
                         resultReceiver, user);
-                result = SMS_OTP_EVALUATION__RESULT__EVALUATION_RESULT_NO_OTP;
             }
+        }
+    }
+
+    private boolean isGenericOtp(@NonNull Collection<TextLinks.TextLink> links) {
+        boolean containsOtp = false;
+        for (TextLinks.TextLink link : links) {
+            for (int i = 0; i < link.getEntityCount(); i++) {
+                if (android.view.flags.Flags.redactOtpAppCompatApi()
+                        && link.getEntity(i).equals(TextClassifier.TYPE_OTP)) {
+                    containsOtp = true;
+                } else if (link.getEntity(i).equals(TextClassifier.TYPE_SMS_RETRIEVER_OTP)
+                    || (android.view.flags.Flags.redactWebOtpSmsApi()
+                           && link.getEntity(i).equals(TextClassifier.TYPE_SMS_WEB_OTP))) {
+                    // If `TYPE_SMS_WEB_OTP` or `TYPE_SMS_RETRIEVER_OTP` is found, then this
+                    // OTP is not generic.
+                    return false;
+                }
+            }
+        }
+        return containsOtp;
+    }
+
+    private void sendBroadcastForGenericOtp(Intent intent, String permission,
+            String appOp, Bundle opts, SmsBroadcastReceiver resultReceiver, UserHandle user) {
+        // Send to all packages which does not target SDK 37.
+        BroadcastOptions broadcastOptions = new BroadcastOptions(opts);
+        broadcastOptions.setRequireCompatChange(SmsManager.FILTER_GENERIC_OTP, false /*=enabled*/);
+        sendBroadcastWithStandardPermissions(intent, permission, appOp, broadcastOptions.toBundle(),
+                resultReceiver, user);
+
+        // Send only to trusted packages for packages that target SDK 37.
+        broadcastOptions.setRequireCompatChange(SmsManager.FILTER_GENERIC_OTP, true /*=enabled*/);
+        sendBroadcastToTrustedPackages(intent, permission, appOp, broadcastOptions.toBundle(),
+                resultReceiver, user, null);
+    }
+
+    private Collection<TextLinks.TextLink> getOtpLinksAndLogMetrics(Intent intent) {
+        Collection<TextLinks.TextLink> textLinks;
+        int classificationTime = -1;
+        try {
+            final long start = SystemClock.elapsedRealtime();
+            textLinks =
+                    java.util.concurrent.CompletableFuture.supplyAsync(
+                            () -> generateOtpTextLinks(intent), mBackgroundExecutor)
+                    .get(MAXIMUM_BROADCAST_DELAY_TIME_MS,
+                            java.util.concurrent.TimeUnit.MILLISECONDS);
+            classificationTime = (int)
+                    (Math.min(SystemClock.elapsedRealtime() - start, Integer.MAX_VALUE));
+        } catch (Exception e) {
+            Rlog.e(getName(), "Unable to get OTP links", e);
+            textLinks = Collections.emptyList();
+        }
+
+        // Only log atom if classification was performed successfully.
+        if (classificationTime != -1) {
             PersistAtomsProto.OtpEvaluationEvent evaluationEvent =
                     new PersistAtomsProto.OtpEvaluationEvent();
+            int result;
+            if (containsOtp(textLinks)) {
+                result = SMS_OTP_EVALUATION__RESULT__EVALUATION_RESULT_HAS_OTP;
+            } else {
+                result = SMS_OTP_EVALUATION__RESULT__EVALUATION_RESULT_NO_OTP;
+            }
             evaluationEvent.result = result;
             evaluationEvent.redactionTimeMs = classificationTime;
             mAtomsStorage.addOtpEvaluationEvent(evaluationEvent);
-        });
+        }
+
+        return textLinks;
     }
 
     @WorkerThread
+    @NonNull
     private Collection<TextLinks.TextLink> generateOtpTextLinks(Intent intent) {
         SmsMessage[] messages = Telephony.Sms.Intents.getMessagesFromIntent(intent);
         if (messages == null) {
@@ -1610,10 +1670,14 @@ public abstract class InboundSmsHandler extends StateMachine {
         return getTextClassifier().generateLinks(request).getLinks();
     }
 
-    private boolean containsOtp(Collection<TextLinks.TextLink> links) {
+    private boolean containsOtp(@NonNull Collection<TextLinks.TextLink> links) {
         for (TextLinks.TextLink link : links) {
             for (int i = 0; i < link.getEntityCount(); i++) {
-                if (link.getEntity(i).equals(TextClassifier.TYPE_SMS_RETRIEVER_OTP)) {
+                if (link.getEntity(i).equals(TextClassifier.TYPE_SMS_RETRIEVER_OTP)
+                    || (android.view.flags.Flags.redactWebOtpSmsApi()
+                           && link.getEntity(i).equals(TextClassifier.TYPE_SMS_WEB_OTP))
+                    || (android.view.flags.Flags.redactOtpAppCompatApi()
+                           && link.getEntity(i).equals(TextClassifier.TYPE_OTP))) {
                     return true;
                 }
             }
@@ -1625,7 +1689,8 @@ public abstract class InboundSmsHandler extends StateMachine {
     // was matched to a specific app. This method extracts and returns the package name for that
     // intended app from the TextClassifier response.
     @Nullable
-    private String getSmsRetrieverTargetPackageName(Collection<TextLinks.TextLink> links) {
+    private static String getSmsRetrieverTargetPackageNameFromTextLinks(
+            @NonNull Collection<TextLinks.TextLink> links) {
         for (TextLinks.TextLink link : links) {
             for (int i = 0; i < link.getEntityCount(); i++) {
                 if (link.getEntity(i).equals(TextClassifier.TYPE_SMS_RETRIEVER_OTP)) {
@@ -1635,6 +1700,51 @@ public abstract class InboundSmsHandler extends StateMachine {
             }
         }
         return null;
+    }
+
+    // When the TextClassifier detects an SMS_WEB_OTP type, it means a web domain is associated with
+    // the WebOTP message. This method returns the list of owner packages of that web domain,
+    // extracted from the TextClassifier response.
+    // TODO: b/478818593 - Consolidate TextLinks-related logic is repeated across multiple places.
+    @Nullable
+    private static ArrayList<String> getWebOtpOwnerPackagesFromTextLinks(
+            @NonNull Collection<TextLinks.TextLink> links) {
+        for (TextLinks.TextLink link : links) {
+            for (int i = 0; i < link.getEntityCount(); i++) {
+                if (android.view.flags.Flags.redactWebOtpSmsApi()
+                        && link.getEntity(i).equals(TextClassifier.TYPE_SMS_WEB_OTP)) {
+                    ArrayList<String> extraOtpTrustedPackages =
+                            link.getExtras().getStringArrayList(
+                                TextClassifier.EXTRA_OTP_TRUSTED_PACKAGES);
+                    if (extraOtpTrustedPackages != null && !extraOtpTrustedPackages.isEmpty()) {
+                        // There is only one domain per WebOTP message, hence there will only be
+                        // one corresponding list trusted packages for that domain.
+                        return extraOtpTrustedPackages;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    // Returns additional trusted packages which are allowed to receive the OTP SMS broadcast.
+    // Returns an empty list if there are no additional trusted packages.
+    // NOTE: The returned list may contain duplicated packages.
+    @VisibleForTesting
+    public static List<String> getOtpTrustedPackagesFromTextLinks(
+            @NonNull Collection<TextLinks.TextLink> links) {
+        List<String> additionalTrustedPackageNames = new ArrayList<>();
+        // We allow the SMS Retriever Hash owner to receive the SMS broadcast.
+        String smsRetrieverTargetPackageName = getSmsRetrieverTargetPackageNameFromTextLinks(links);
+        if (smsRetrieverTargetPackageName != null) {
+            additionalTrustedPackageNames.add(smsRetrieverTargetPackageName);
+        }
+        // We allow domain owners of the corresponding Web OTPs to receive the SMS broadcast.
+        List<String> webOtpOwnerPackages = getWebOtpOwnerPackagesFromTextLinks(links);
+        if (webOtpOwnerPackages != null) {
+            additionalTrustedPackageNames.addAll(webOtpOwnerPackages);
+        }
+        return additionalTrustedPackageNames;
     }
 
     private void sendBroadcastWithStandardPermissions(Intent intent, String permission,
@@ -1651,10 +1761,10 @@ public abstract class InboundSmsHandler extends StateMachine {
     @SuppressLint("MissingPermission")
     private void sendBroadcastToTrustedPackages(Intent intent, String permission,
             String appOp, Bundle opts, SmsBroadcastReceiver resultReceiver, UserHandle user,
-            @Nullable String additionalTrustedPackage) {
+            @Nullable List<String> additionalTrustedPackages) {
         Set<String> trustedPackages = SmsManager.getSmsOtpTrustedPackages(mContext, user);
-        if (additionalTrustedPackage != null) {
-            trustedPackages.add(additionalTrustedPackage);
+        if (additionalTrustedPackages != null) {
+            trustedPackages.addAll(additionalTrustedPackages);
         }
         final String[] trustedPackagesArray = new String[trustedPackages.size()];
         int i = 0;
@@ -1719,11 +1829,7 @@ public abstract class InboundSmsHandler extends StateMachine {
 
     @SuppressLint("MissingPermission")
     private  boolean isMainUser(int userId) {
-        if (mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()) {
-            return userId == mUserManager.getMainUser().getIdentifier();
-        } else {
-            return userId == UserHandle.SYSTEM.getIdentifier();
-        }
+        return userId == mUserManager.getMainUser().getIdentifier();
     }
 
     /**
@@ -1759,8 +1865,11 @@ public abstract class InboundSmsHandler extends StateMachine {
             bopts.setBackgroundActivityStartsAllowed(true);
             bundle = bopts.toBundle();
         }
-        long duration = mPowerWhitelistManager.whitelistAppTemporarilyForEvent(
-                pkgName, PowerWhitelistManager.EVENT_SMS, REASON_EVENT_SMS, reason);
+        long duration = 0;
+        if (mPowerWhitelistManager != null) {
+            duration = mPowerWhitelistManager.whitelistAppTemporarilyForEvent(
+                    pkgName, PowerWhitelistManager.EVENT_SMS, REASON_EVENT_SMS, reason);
+        }
         if (bopts == null) bopts = BroadcastOptions.makeBasic();
         bopts.setTemporaryAppAllowlist(duration,
                 TEMPORARY_ALLOWLIST_TYPE_FOREGROUND_SERVICE_ALLOWED,
@@ -1789,12 +1898,20 @@ public abstract class InboundSmsHandler extends StateMachine {
             intent.putExtra("messageId", messageId);
         }
 
-        UserHandle userHandle = null;
+        // Get the user handle associated with the subscription.
+        UserHandle userHandle = TelephonyUtils.getSubscriptionUserHandle(mContext, subId);
+
+        // In case of the  subscription association with default userId -1000, assume that the
+        // subscription is associated with the MAIN user which will be SYSTEM user in non-HSUM mode.
+        if (userHandle == null) {
+            userHandle = mUserManager.getMainUser();
+        }
+
         if (destPort == -1) {
             intent.setAction(Intents.SMS_DELIVER_ACTION);
+
             // Direct the intent to only the default SMS app. If we can't find a default SMS app
             // then sent it to all broadcast receivers.
-            userHandle = TelephonyUtils.getSubscriptionUserHandle(mContext, subId);
             ComponentName componentName = SmsApplication.getDefaultSmsApplicationAsUser(mContext,
                     true, userHandle);
             if (componentName != null) {
@@ -1820,13 +1937,6 @@ public abstract class InboundSmsHandler extends StateMachine {
             intent.setComponent(null);
         }
 
-        if (userHandle == null) {
-            if (mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()) {
-                userHandle = mUserManager.getMainUser();
-            } else {
-                userHandle = UserHandle.SYSTEM;
-            }
-        }
         Bundle options = handleSmsWhitelisting(intent.getComponent(), isClass0);
         dispatchIntent(intent, android.Manifest.permission.RECEIVE_SMS,
                 AppOpsManager.OPSTR_RECEIVE_SMS, options, resultReceiver, userHandle, subId);
@@ -2007,7 +2117,7 @@ public abstract class InboundSmsHandler extends StateMachine {
         @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
         private final String[] mDeleteWhereArgs;
         private long mBroadcastTimeMillis;
-        public Intent mWaitingForIntent;
+        public volatile Intent mWaitingForIntent;
         private final InboundSmsTracker mInboundSmsTracker;
 
         /**
@@ -2032,11 +2142,12 @@ public abstract class InboundSmsHandler extends StateMachine {
          * the timer for it expires. It fakes the receipt of the intent to unblock the state
          * machine.
          */
-        public void fakeNextAction() {
-            if (mWaitingForIntent != null) {
-                logeWithLocalLog("fakeNextAction: " + mWaitingForIntent.getAction(),
+        public synchronized void fakeNextAction() {
+            Intent intent = mWaitingForIntent;
+            if (intent != null) {
+                logeWithLocalLog("fakeNextAction: " + intent.getAction(),
                         mInboundSmsTracker.getMessageId());
-                handleAction(mWaitingForIntent, false);
+                handleAction(intent, false);
             } else {
                 logeWithLocalLog("fakeNextAction: mWaitingForIntent is null",
                         mInboundSmsTracker.getMessageId());
@@ -2055,6 +2166,10 @@ public abstract class InboundSmsHandler extends StateMachine {
 
         @SuppressLint("MissingPermission")
         private synchronized void handleAction(@NonNull Intent intent, boolean onReceive) {
+            if (intent == null) {
+                loge("handleAction: intent is null");
+                return;
+            }
             String action = intent.getAction();
             if (mWaitingForIntent == null || !mWaitingForIntent.getAction().equals(action)) {
                 logeWithLocalLog("handleAction: Received " + action + " when expecting "
@@ -2095,11 +2210,14 @@ public abstract class InboundSmsHandler extends StateMachine {
                 intent.setComponent(null);
                 // Only the primary user will receive notification of incoming mms.
                 // That app will do the actual downloading of the mms.
-                long duration = mPowerWhitelistManager.whitelistAppTemporarilyForEvent(
-                        mContext.getPackageName(),
-                        PowerWhitelistManager.EVENT_MMS,
-                        REASON_EVENT_MMS,
-                        "mms-broadcast");
+                long duration = 0;
+                if (mPowerWhitelistManager != null) {
+                    duration = mPowerWhitelistManager.whitelistAppTemporarilyForEvent(
+                            mContext.getPackageName(),
+                            PowerWhitelistManager.EVENT_MMS,
+                            REASON_EVENT_MMS,
+                            "mms-broadcast");
+                }
                 BroadcastOptions bopts = BroadcastOptions.makeBasic();
                 bopts.setTemporaryAppAllowlist(duration,
                         TEMPORARY_ALLOWLIST_TYPE_FOREGROUND_SERVICE_ALLOWED,
@@ -2110,15 +2228,9 @@ public abstract class InboundSmsHandler extends StateMachine {
                 String mimeType = intent.getType();
 
                 setWaitingForIntent(intent);
-                if (mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()) {
-                    dispatchIntent(intent, WapPushOverSms.getPermissionForType(mimeType),
-                            WapPushOverSms.getAppOpsStringPermissionForIntent(mimeType), options,
-                            this, mUserManager.getMainUser(), subId);
-                } else {
-                    dispatchIntent(intent, WapPushOverSms.getPermissionForType(mimeType),
-                            WapPushOverSms.getAppOpsStringPermissionForIntent(mimeType), options,
-                            this, UserHandle.SYSTEM, subId);
-                }
+                dispatchIntent(intent, WapPushOverSms.getPermissionForType(mimeType),
+                        WapPushOverSms.getAppOpsStringPermissionForIntent(mimeType), options,
+                        this, mUserManager.getMainUser(), subId);
             } else {
                 // Now that the intents have been deleted we can clean up the PDU data.
                 if (!Intents.DATA_SMS_RECEIVED_ACTION.equals(action)

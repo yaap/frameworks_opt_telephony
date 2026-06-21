@@ -55,6 +55,7 @@ import android.telephony.data.IDataServiceCallback;
 import android.telephony.data.NetworkSliceInfo;
 import android.telephony.data.TrafficDescriptor;
 import android.text.TextUtils;
+import android.util.Pair;
 
 import com.android.internal.telephony.IIntegerConsumer;
 import com.android.internal.telephony.Phone;
@@ -137,7 +138,7 @@ public class DataServiceManager extends Handler {
             // Tear down all connections
             mLastDataCallResponseList = new ArrayList<>();
             mDataCallListChangedRegistrants.notifyRegistrants(
-                    new AsyncResult(null, Collections.EMPTY_LIST, null));
+                    new AsyncResult(null, new Pair<>(Collections.EMPTY_LIST, false), null));
         }
     }
 
@@ -296,16 +297,38 @@ public class DataServiceManager extends Handler {
             sendCompleteMessage(msg, resultCode);
 
             // Handle data stall case on WWAN transport
-            if (mTransportType == AccessNetworkConstants.TRANSPORT_TYPE_WWAN) {
-                if (mLastDataCallResponseList.size() != dataCallList.size()
-                        || !mLastDataCallResponseList.containsAll(dataCallList)) {
-                    String message = "RIL reported mismatched data call response list for WWAN: "
-                            + "mLastDataCallResponseList=" + mLastDataCallResponseList
-                            + ", dataCallList=" + dataCallList;
+            if (mTransportType == AccessNetworkConstants.TRANSPORT_TYPE_WWAN
+                    && resultCode == DataServiceCallback.RESULT_SUCCESS) {
+                List<DataCallResponse> lastDataCallResponseListToCheck = mLastDataCallResponseList;
+                if (mFeatureFlags.ignoreInactiveDataCallsInPoll()) {
+                    lastDataCallResponseListToCheck =
+                            mLastDataCallResponseList.stream()
+                                    .filter(
+                                            response ->
+                                                    response.getLinkStatus()
+                                                            != DataCallResponse
+                                                                    .LINK_STATUS_INACTIVE)
+                                    .collect(Collectors.toList());
+                }
+
+                if (lastDataCallResponseListToCheck.size() != dataCallList.size()
+                        || !lastDataCallResponseListToCheck.containsAll(dataCallList)) {
+                    String message =
+                            "RIL reported mismatched data call response list for WWAN: "
+                                    + "mLastDataCallResponseList="
+                                    + mLastDataCallResponseList
+                                    + ", lastDataCallResponseListToCheck="
+                                    + lastDataCallResponseListToCheck
+                                    + ", dataCallList="
+                                    + dataCallList;
                     loge(message);
-                    if (!dataCallList.stream().map(DataCallResponse::getId)
-                            .collect(Collectors.toSet()).equals(mLastDataCallResponseList.stream()
-                                    .map(DataCallResponse::getId).collect(Collectors.toSet()))) {
+                    if (!dataCallList.stream()
+                            .map(DataCallResponse::getId)
+                            .collect(Collectors.toSet())
+                            .equals(
+                                    lastDataCallResponseListToCheck.stream()
+                                            .map(DataCallResponse::getId)
+                                            .collect(Collectors.toSet()))) {
                         AnomalyReporter.reportAnomaly(
                                 UUID.fromString("150323b2-360a-446b-a158-3ce6425821f6"),
                                 message,
@@ -318,10 +341,24 @@ public class DataServiceManager extends Handler {
 
         @Override
         public void onDataCallListChanged(List<DataCallResponse> dataCallList) {
-            mLastDataCallResponseList =
-                    dataCallList != null ? dataCallList : new ArrayList<>();
+            mLastDataCallResponseList = dataCallList != null ? dataCallList : new ArrayList<>();
+
+            // Bundle List and Boolean into a Pair
+            // Notify DataNetwork via AsyncResult
             mDataCallListChangedRegistrants.notifyRegistrants(
-                    new AsyncResult(null, dataCallList, null));
+                    new AsyncResult(null,
+                            new Pair<>(dataCallList, false), null));
+        }
+
+        @Override
+        public void onDataCallListUpdated(List<DataCallResponse> dataCallList) {
+            mLastDataCallResponseList = dataCallList != null ? dataCallList : new ArrayList<>();
+
+            // Bundle List and Boolean into a Pair
+            // Notify DataNetwork via AsyncResult
+            mDataCallListChangedRegistrants.notifyRegistrants(
+                    new AsyncResult(null,
+                            new Pair<>(dataCallList, true), null));
         }
 
         @Override

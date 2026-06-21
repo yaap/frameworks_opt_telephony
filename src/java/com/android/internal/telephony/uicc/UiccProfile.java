@@ -141,7 +141,6 @@ public class UiccProfile extends IccCard {
     private static final int EVENT_RECORDS_LOADED = 4;
     private static final int EVENT_NETWORK_LOCKED = 5;
     private static final int EVENT_EID_READY = 6;
-    private static final int EVENT_ICC_RECORD_EVENTS = 7;
     private static final int EVENT_OPEN_LOGICAL_CHANNEL_DONE = 8;
     private static final int EVENT_CLOSE_LOGICAL_CHANNEL_DONE = 9;
     private static final int EVENT_TRANSMIT_APDU_LOGICAL_CHANNEL_DONE = 10;
@@ -198,8 +197,9 @@ public class UiccProfile extends IccCard {
                 @Override
                 public void onCarrierConfigChanged(int logicalSlotIndex, int subscriptionId,
                         int carrierId, int specificCarrierId) {
-                    if (logicalSlotIndex == mPhoneId && SubscriptionManager.isValidSubscriptionId(
-                            subscriptionId) && carrierId > -1) {
+                    if (logicalSlotIndex == mPhoneId
+                            && SubscriptionManager.isValidSubscriptionId(subscriptionId)
+                            && subscriptionId == SubscriptionManager.getSubscriptionId(mPhoneId)) {
                         log("onCarrierConfigChanged: slotIndex = " + logicalSlotIndex
                                 + ", subId=" + subscriptionId + ", carrierId = " + carrierId);
                         handleCarrierNameOverride();
@@ -242,17 +242,6 @@ public class UiccProfile extends IccCard {
                 case EVENT_EID_READY:
                     if (VDBG) log("handleMessage: Received " + eventName);
                     updateExternalState();
-                    break;
-
-                case EVENT_ICC_RECORD_EVENTS:
-                    if ((mCurrentAppType == UiccController.APP_FAM_3GPP) && (mIccRecords != null)) {
-                        AsyncResult ar = (AsyncResult) msg.obj;
-                        int eventCode = (Integer) ar.result;
-                        if (eventCode == SIMRecords.EVENT_SPN) {
-                            mTelephonyManager.setSimOperatorNameForPhone(
-                                    mPhoneId, mIccRecords.getServiceProviderName());
-                        }
-                    }
                     break;
 
                 case EVENT_CARRIER_PRIVILEGES_LOADED:
@@ -493,7 +482,7 @@ public class UiccProfile extends IccCard {
             // carrier id
             Phone phone = PhoneFactory.getPhone(mPhoneId);
             if (phone != null) {
-                String currPnn = phone.getPlmn();   // Get the name from EF_PNN.
+                String currPnn = phone.getPnnHomeNetworkName();   // Get the name from EF_PNN.
                 if (!TextUtils.isEmpty(currPnn)) {
                     newCarrierName = currPnn;
                     nameSource = SubscriptionManager.NAME_SOURCE_SIM_PNN;
@@ -751,7 +740,6 @@ public class UiccProfile extends IccCard {
                 if (ir != null) {
                     if (VDBG) log("registerUiccCardEvents: registering for EVENT_RECORDS_LOADED");
                     ir.registerForRecordsLoaded(mHandler, EVENT_RECORDS_LOADED, null);
-                    ir.registerForRecordsEvents(mHandler, EVENT_ICC_RECORD_EVENTS, null);
                 }
             }
         }
@@ -764,7 +752,6 @@ public class UiccProfile extends IccCard {
                 IccRecords ir = app.getIccRecords();
                 if (ir != null) {
                     ir.unregisterForRecordsLoaded(mHandler);
-                    ir.unregisterForRecordsEvents(mHandler);
                 }
             }
         }
@@ -1757,7 +1744,6 @@ public class UiccProfile extends IccCard {
             case EVENT_RECORDS_LOADED: return "RECORDS_LOADED";
             case EVENT_NETWORK_LOCKED: return "NETWORK_LOCKED";
             case EVENT_EID_READY: return "EID_READY";
-            case EVENT_ICC_RECORD_EVENTS: return "ICC_RECORD_EVENTS";
             case EVENT_OPEN_LOGICAL_CHANNEL_DONE: return "OPEN_LOGICAL_CHANNEL_DONE";
             case EVENT_CLOSE_LOGICAL_CHANNEL_DONE: return "CLOSE_LOGICAL_CHANNEL_DONE";
             case EVENT_TRANSMIT_APDU_LOGICAL_CHANNEL_DONE:

@@ -96,7 +96,7 @@ public final class NetworkScanRequestTracker {
                     break;
 
                 case CMD_STOP_NETWORK_SCAN:
-                    mScheduler.doStopScan(msg.arg1);
+                    mScheduler.doStopScan(msg.arg1, msg.arg2);
                     break;
 
                 case EVENT_STOP_NETWORK_SCAN_DONE:
@@ -514,11 +514,13 @@ public final class NetworkScanRequestTracker {
         // mLiveRequestInfo will not be cleared and the user will not be notified either.
         // If the scan to be stopped is the pending scan, we will clear mPendingRequestInfo and
         // notify the user.
-        private synchronized void doStopScan(int scanId) {
-            if (mLiveRequestInfo != null && scanId == mLiveRequestInfo.mScanId) {
+        private synchronized void doStopScan(int scanId, int uid) {
+            if (mLiveRequestInfo != null && scanId == mLiveRequestInfo.mScanId
+                    && uid == mLiveRequestInfo.mUid) {
                 mLiveRequestInfo.mPhone.stopNetworkScan(
                         mHandler.obtainMessage(EVENT_STOP_NETWORK_SCAN_DONE, mLiveRequestInfo));
-            } else if (mPendingRequestInfo != null && scanId == mPendingRequestInfo.mScanId) {
+            } else if (mPendingRequestInfo != null && scanId == mPendingRequestInfo.mScanId
+                    && uid == mScheduler.mPendingRequestInfo.mUid) {
                 notifyMessenger(mPendingRequestInfo,
                         TelephonyScanManager.CALLBACK_SCAN_COMPLETE, NetworkScan.SUCCESS, null);
                 mPendingRequestInfo = null;
@@ -670,18 +672,6 @@ public final class NetworkScanRequestTracker {
      * corresponding information associated with it.
      */
     public void stopNetworkScan(int scanId, int callingUid) {
-        synchronized (mScheduler) {
-            if ((mScheduler.mLiveRequestInfo != null
-                    && scanId == mScheduler.mLiveRequestInfo.mScanId
-                    && callingUid == mScheduler.mLiveRequestInfo.mUid)
-                    || (mScheduler.mPendingRequestInfo != null
-                    && scanId == mScheduler.mPendingRequestInfo.mScanId
-                    && callingUid == mScheduler.mPendingRequestInfo.mUid)) {
-                // scanId will be stored at Message.arg1
-                mHandler.obtainMessage(CMD_STOP_NETWORK_SCAN, scanId, 0).sendToTarget();
-            } else {
-                throw new IllegalArgumentException("Scan with id: " + scanId + " does not exist!");
-            }
-        }
+        mHandler.obtainMessage(CMD_STOP_NETWORK_SCAN, scanId, callingUid).sendToTarget();
     }
 }

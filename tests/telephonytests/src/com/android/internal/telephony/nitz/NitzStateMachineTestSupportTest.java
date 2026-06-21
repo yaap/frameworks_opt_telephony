@@ -74,9 +74,10 @@ public class NitzStateMachineTestSupportTest {
 
         // quality == QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS, therefore the country's default zone
         // shouldn't be considered a good match.
-        CountryResult expectedCountryLookupResult = new CountryResult(
-                US_COUNTRY_DEFAULT_ZONE_ID, US_COUNTRY_DEFAULT,
-                QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS, ARBITRARY_DEBUG_INFO);
+        CountryResult expectedCountryLookupResult =
+                new CountryResult(
+                        US_COUNTRY_DEFAULT_ZONE_ID, US_COUNTRY_DEFAULT,
+                        QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS, ARBITRARY_DEBUG_INFO);
         CountryResult actualCountryLookupResult =
                 mTimeZoneLookupHelper.lookupByCountry(
                         UNIQUE_US_ZONE_SCENARIO1.getNetworkCountryIsoCode(),
@@ -85,25 +86,29 @@ public class NitzStateMachineTestSupportTest {
 
         // isOnlyMatch == true, so the combination of country + NITZ should be enough for a match.
         {
-            OffsetResult expectedLookupResult = new OffsetResult(
-                    UNIQUE_US_ZONE_SCENARIO1.getTimeZone(),
-                    UNIQUE_US_ZONE_SCENARIO1.getNetworkCountryIsoCode(),
-                    true /* isOnlyMatch */);
-            OffsetResult actualLookupResult = mTimeZoneLookupHelper.lookupByNitzCountry(
-                    UNIQUE_US_ZONE_SCENARIO1.createNitzData(),
-                    UNIQUE_US_ZONE_SCENARIO1.getNetworkCountryIsoCode());
+            OffsetResult expectedLookupResult =
+                    new OffsetResult(
+                            UNIQUE_US_ZONE_SCENARIO1.getTimeZone(),
+                            UNIQUE_US_ZONE_SCENARIO1.getNetworkCountryIsoCode(),
+                            true /* isOnlyMatch */);
+            OffsetResult actualLookupResult =
+                    mTimeZoneLookupHelper.lookupByNitzCountry(
+                            UNIQUE_US_ZONE_SCENARIO1.createNitzData(),
+                            UNIQUE_US_ZONE_SCENARIO1.getNetworkCountryIsoCode());
             assertEquals(expectedLookupResult, actualLookupResult);
         }
 
         // isOnlyMatch == true, so the combination of country + NITZ should be enough for a match.
         {
-            OffsetResult expectedLookupResult = new OffsetResult(
-                    UNIQUE_US_ZONE_SCENARIO2.getTimeZone(),
-                    UNIQUE_US_ZONE_SCENARIO2.getNetworkCountryIsoCode(),
-                    true /* isOnlyMatch */);
-            OffsetResult actualLookupResult = mTimeZoneLookupHelper.lookupByNitzCountry(
-                    UNIQUE_US_ZONE_SCENARIO2.createNitzData(),
-                    UNIQUE_US_ZONE_SCENARIO2.getNetworkCountryIsoCode());
+            OffsetResult expectedLookupResult =
+                    new OffsetResult(
+                            UNIQUE_US_ZONE_SCENARIO2.getTimeZone(),
+                            UNIQUE_US_ZONE_SCENARIO2.getNetworkCountryIsoCode(),
+                            true /* isOnlyMatch */);
+            OffsetResult actualLookupResult =
+                    mTimeZoneLookupHelper.lookupByNitzCountry(
+                            UNIQUE_US_ZONE_SCENARIO2.createNitzData(),
+                            UNIQUE_US_ZONE_SCENARIO2.getNetworkCountryIsoCode());
             assertEquals(expectedLookupResult, actualLookupResult);
         }
     }
@@ -114,9 +119,10 @@ public class NitzStateMachineTestSupportTest {
 
         // quality == QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS, therefore the country's default zone
         // shouldn't be considered a good match.
-        CountryResult expectedCountryLookupResult = new CountryResult(
-                US_COUNTRY_DEFAULT_ZONE_ID, US_COUNTRY_DEFAULT,
-                QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS, ARBITRARY_DEBUG_INFO);
+        CountryResult expectedCountryLookupResult =
+                new CountryResult(
+                        US_COUNTRY_DEFAULT_ZONE_ID, US_COUNTRY_DEFAULT,
+                        QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS, ARBITRARY_DEBUG_INFO);
         CountryResult actualCountryLookupResult =
                 mTimeZoneLookupHelper.lookupByCountry(
                         NON_UNIQUE_US_ZONE_SCENARIO.getNetworkCountryIsoCode(),
@@ -125,9 +131,10 @@ public class NitzStateMachineTestSupportTest {
 
         // By definition, there are multiple matching zones for the NON_UNIQUE_US_ZONE_SCENARIO.
         {
-            OffsetResult actualLookupResult = mTimeZoneLookupHelper.lookupByNitzCountry(
-                    NON_UNIQUE_US_ZONE_SCENARIO.createNitzData(),
-                    NON_UNIQUE_US_ZONE_SCENARIO.getNetworkCountryIsoCode());
+            OffsetResult actualLookupResult =
+                    mTimeZoneLookupHelper.lookupByNitzCountry(
+                            NON_UNIQUE_US_ZONE_SCENARIO.createNitzData(),
+                            NON_UNIQUE_US_ZONE_SCENARIO.getNetworkCountryIsoCode());
             List<String> possibleZones = Arrays.asList(NON_UNIQUE_US_ZONE_SCENARIO_ZONES);
             assertTrue(possibleZones.contains(actualLookupResult.getTimeZone().getID()));
             assertFalse(actualLookupResult.isOnlyMatch());
@@ -136,15 +143,17 @@ public class NitzStateMachineTestSupportTest {
 
     @Test
     public void test_unitedKingdom_assumptions() {
-        assertEquals(UNITED_KINGDOM_SCENARIO.getTimeZone().getID(),
+        assertEquals(
+                UNITED_KINGDOM_SCENARIO.getTimeZone().getID(),
                 UNITED_KINGDOM_COUNTRY_DEFAULT_ZONE_ID);
 
         // Check we'll get the expected behavior from TimeZoneLookupHelper.
 
         // quality == QUALITY_SINGLE_ZONE, so the default zone is a good match.
-        CountryResult expectedCountryLookupResult = new CountryResult(
-                UNITED_KINGDOM_COUNTRY_DEFAULT_ZONE_ID, UNITED_KINGDOM_COUNTRY_DEFAULT,
-                QUALITY_SINGLE_ZONE, ARBITRARY_DEBUG_INFO);
+        CountryResult expectedCountryLookupResult =
+                new CountryResult(
+                        UNITED_KINGDOM_COUNTRY_DEFAULT_ZONE_ID, UNITED_KINGDOM_COUNTRY_DEFAULT,
+                        QUALITY_SINGLE_ZONE, ARBITRARY_DEBUG_INFO);
         CountryResult actualCountryLookupResult =
                 mTimeZoneLookupHelper.lookupByCountry(
                         UNITED_KINGDOM_SCENARIO.getNetworkCountryIsoCode(),
@@ -152,27 +161,31 @@ public class NitzStateMachineTestSupportTest {
         assertEquals(expectedCountryLookupResult, actualCountryLookupResult);
 
         // isOnlyMatch == true, so the combination of country + NITZ should be enough for a match.
-        OffsetResult expectedLookupResult = new OffsetResult(
-                UNITED_KINGDOM_SCENARIO.getTimeZone(),
-                UNITED_KINGDOM_SCENARIO.getNetworkCountryIsoCode(),
-                true /* isOnlyMatch */);
-        OffsetResult actualLookupResult = mTimeZoneLookupHelper.lookupByNitzCountry(
-                UNITED_KINGDOM_SCENARIO.createNitzData(),
-                UNITED_KINGDOM_SCENARIO.getNetworkCountryIsoCode());
+        OffsetResult expectedLookupResult =
+                new OffsetResult(
+                        UNITED_KINGDOM_SCENARIO.getTimeZone(),
+                        UNITED_KINGDOM_SCENARIO.getNetworkCountryIsoCode(),
+                        true /* isOnlyMatch */);
+        OffsetResult actualLookupResult =
+                mTimeZoneLookupHelper.lookupByNitzCountry(
+                        UNITED_KINGDOM_SCENARIO.createNitzData(),
+                        UNITED_KINGDOM_SCENARIO.getNetworkCountryIsoCode());
         assertEquals(expectedLookupResult, actualLookupResult);
     }
 
     @Test
     public void test_newZealand_assumptions() {
-        assertEquals(NEW_ZEALAND_DEFAULT_SCENARIO.getTimeZone().getID(),
+        assertEquals(
+                NEW_ZEALAND_DEFAULT_SCENARIO.getTimeZone().getID(),
                 NEW_ZEALAND_COUNTRY_DEFAULT_ZONE_ID);
 
         // Check we'll get the expected behavior from TimeZoneLookupHelper.
 
         // quality == QUALITY_DEFAULT_BOOSTED, so the default zone is a good match.
-        CountryResult expectedCountryLookupResult = new CountryResult(
-                NEW_ZEALAND_COUNTRY_DEFAULT_ZONE_ID, NEW_ZEALAND_COUNTRY_DEFAULT,
-                QUALITY_DEFAULT_BOOSTED, ARBITRARY_DEBUG_INFO);
+        CountryResult expectedCountryLookupResult =
+                new CountryResult(
+                        NEW_ZEALAND_COUNTRY_DEFAULT_ZONE_ID, NEW_ZEALAND_COUNTRY_DEFAULT,
+                        QUALITY_DEFAULT_BOOSTED, ARBITRARY_DEBUG_INFO);
         CountryResult actualCountryLookupResult =
                 mTimeZoneLookupHelper.lookupByCountry(
                         NEW_ZEALAND_DEFAULT_SCENARIO.getNetworkCountryIsoCode(),
@@ -183,13 +196,15 @@ public class NitzStateMachineTestSupportTest {
         {
             // isOnlyMatch == true, so the combination of country + NITZ should be enough for a
             // match.
-            OffsetResult expectedLookupResult = new OffsetResult(
-                    NEW_ZEALAND_DEFAULT_SCENARIO.getTimeZone(),
-                    NEW_ZEALAND_DEFAULT_SCENARIO.getNetworkCountryIsoCode(),
-                    true /* isOnlyMatch */);
-            OffsetResult actualLookupResult = mTimeZoneLookupHelper.lookupByNitzCountry(
-                    NEW_ZEALAND_DEFAULT_SCENARIO.createNitzData(),
-                    NEW_ZEALAND_DEFAULT_SCENARIO.getNetworkCountryIsoCode());
+            OffsetResult expectedLookupResult =
+                    new OffsetResult(
+                            NEW_ZEALAND_DEFAULT_SCENARIO.getTimeZone(),
+                            NEW_ZEALAND_DEFAULT_SCENARIO.getNetworkCountryIsoCode(),
+                            true /* isOnlyMatch */);
+            OffsetResult actualLookupResult =
+                    mTimeZoneLookupHelper.lookupByNitzCountry(
+                            NEW_ZEALAND_DEFAULT_SCENARIO.createNitzData(),
+                            NEW_ZEALAND_DEFAULT_SCENARIO.getNetworkCountryIsoCode());
             assertEquals(expectedLookupResult, actualLookupResult);
         }
 
@@ -197,13 +212,15 @@ public class NitzStateMachineTestSupportTest {
         {
             // isOnlyMatch == true, so the combination of country + NITZ should be enough for a
             // match.
-            OffsetResult expectedLookupResult = new OffsetResult(
-                    NEW_ZEALAND_OTHER_SCENARIO.getTimeZone(),
-                    NEW_ZEALAND_OTHER_SCENARIO.getNetworkCountryIsoCode(),
-                    true /* isOnlyMatch */);
-            OffsetResult actualLookupResult = mTimeZoneLookupHelper.lookupByNitzCountry(
-                    NEW_ZEALAND_OTHER_SCENARIO.createNitzData(),
-                    NEW_ZEALAND_OTHER_SCENARIO.getNetworkCountryIsoCode());
+            OffsetResult expectedLookupResult =
+                    new OffsetResult(
+                            NEW_ZEALAND_OTHER_SCENARIO.getTimeZone(),
+                            NEW_ZEALAND_OTHER_SCENARIO.getNetworkCountryIsoCode(),
+                            true /* isOnlyMatch */);
+            OffsetResult actualLookupResult =
+                    mTimeZoneLookupHelper.lookupByNitzCountry(
+                            NEW_ZEALAND_OTHER_SCENARIO.createNitzData(),
+                            NEW_ZEALAND_OTHER_SCENARIO.getNetworkCountryIsoCode());
             assertEquals(expectedLookupResult, actualLookupResult);
         }
     }
@@ -213,22 +230,27 @@ public class NitzStateMachineTestSupportTest {
         assertEquals(CZECHIA_SCENARIO.getTimeZone().getID(), CZECHIA_COUNTRY_DEFAULT_ZONE_ID);
 
         // quality == QUALITY_SINGLE_ZONE, so the default zone is a good match.
-        CountryResult expectedCountryLookupResult = new CountryResult(
-                CZECHIA_COUNTRY_DEFAULT_ZONE_ID, CZECHIA_COUNTRY_DEFAULT, QUALITY_SINGLE_ZONE,
-                ARBITRARY_DEBUG_INFO);
+        CountryResult expectedCountryLookupResult =
+                new CountryResult(
+                        CZECHIA_COUNTRY_DEFAULT_ZONE_ID,
+                        CZECHIA_COUNTRY_DEFAULT,
+                        QUALITY_SINGLE_ZONE,
+                        ARBITRARY_DEBUG_INFO);
         CountryResult actualCountryLookupResult =
                 mTimeZoneLookupHelper.lookupByCountry(
-                        CZECHIA_SCENARIO.getNetworkCountryIsoCode(),
-                        ARBITRARY_SYSTEM_CLOCK_TIME);
+                        CZECHIA_SCENARIO.getNetworkCountryIsoCode(), ARBITRARY_SYSTEM_CLOCK_TIME);
         assertEquals(expectedCountryLookupResult, actualCountryLookupResult);
 
         // isOnlyMatch == true, so the combination of country + NITZ should be enough for a match.
-        OffsetResult expectedLookupResult = new OffsetResult(
-                CZECHIA_SCENARIO.getTimeZone(), CZECHIA_SCENARIO.getNetworkCountryIsoCode(),
-                true /* isOnlyMatch */);
-        OffsetResult actualLookupResult = mTimeZoneLookupHelper.lookupByNitzCountry(
-                CZECHIA_SCENARIO.createNitzData(),
-                CZECHIA_SCENARIO.getNetworkCountryIsoCode());
+        OffsetResult expectedLookupResult =
+                new OffsetResult(
+                        CZECHIA_SCENARIO.getTimeZone(),
+                        CZECHIA_SCENARIO.getNetworkCountryIsoCode(),
+                        true /* isOnlyMatch */);
+        OffsetResult actualLookupResult =
+                mTimeZoneLookupHelper.lookupByNitzCountry(
+                        CZECHIA_SCENARIO.createNitzData(),
+                        CZECHIA_SCENARIO.getNetworkCountryIsoCode());
         assertEquals(expectedLookupResult, actualLookupResult);
     }
 }

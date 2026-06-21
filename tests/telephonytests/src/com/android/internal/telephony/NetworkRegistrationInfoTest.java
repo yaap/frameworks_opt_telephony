@@ -16,6 +16,9 @@
 
 package com.android.internal.telephony;
 
+import static android.telephony.satellite.SatelliteManager.NT_RADIO_TECHNOLOGY_LTE_DTC;
+import static android.telephony.satellite.SatelliteManager.NT_RADIO_TECHNOLOGY_UNKNOWN;
+
 import static com.google.common.truth.Truth.assertThat;
 
 import static junit.framework.Assert.assertEquals;
@@ -24,6 +27,7 @@ import static junit.framework.Assert.assertNotSame;
 
 import android.compat.testing.PlatformCompatChangeRule;
 import android.os.Parcel;
+import android.platform.test.annotations.RequiresFlagsEnabled;
 import android.telephony.AccessNetworkConstants;
 import android.telephony.CellIdentityLte;
 import android.telephony.CellInfo;
@@ -32,6 +36,8 @@ import android.telephony.ServiceState;
 import android.telephony.TelephonyManager;
 
 import androidx.test.filters.SmallTest;
+
+import com.android.internal.telephony.flags.Flags;
 
 import libcore.junit.util.compat.CoreCompatChangeRule.DisableCompatChanges;
 import libcore.junit.util.compat.CoreCompatChangeRule.EnableCompatChanges;
@@ -154,6 +160,16 @@ public class NetworkRegistrationInfoTest {
         NetworkRegistrationInfo nri = new NetworkRegistrationInfo.Builder().build();
         nri.setIsNonTerrestrialNetwork(true);
         assertThat(nri.isNonTerrestrialNetwork()).isEqualTo(true);
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_SATELLITE_26Q2_APIS)
+    public void testSetSatelliteTechnology() {
+        NetworkRegistrationInfo nri = new NetworkRegistrationInfo.Builder().build();
+        assertThat(nri.getSatelliteTechnology()).isEqualTo(NT_RADIO_TECHNOLOGY_UNKNOWN);
+
+        nri.setSatelliteTechnology(NT_RADIO_TECHNOLOGY_LTE_DTC);
+        assertThat(nri.getSatelliteTechnology()).isEqualTo(NT_RADIO_TECHNOLOGY_LTE_DTC);
     }
 
     @Test

@@ -33,9 +33,7 @@ import com.android.internal.util.IndentingPrintWriter;
 import java.io.PrintWriter;
 import java.util.Objects;
 
-/**
- * The real implementation of {@link TimeServiceHelper}.
- */
+/** The real implementation of {@link TimeServiceHelper}. */
 public final class TimeServiceHelperImpl implements TimeServiceHelper {
 
     private final int mSlotIndex;
@@ -50,8 +48,7 @@ public final class TimeServiceHelperImpl implements TimeServiceHelper {
      * the time zone service. The value can be {@code null} to indicate no previous suggestion has
      * been made.
      */
-    @NonNull
-    private TelephonyTimeZoneSuggestion mLastSuggestedTimeZone;
+    @NonNull private TelephonyTimeZoneSuggestion mLastSuggestedTimeZone;
 
     public TimeServiceHelperImpl(@NonNull Phone phone) {
         mSlotIndex = phone.getPhoneId();

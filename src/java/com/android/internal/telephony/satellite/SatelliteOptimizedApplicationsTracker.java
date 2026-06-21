@@ -24,6 +24,7 @@ import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
 import android.content.pm.UserInfo;
 import android.os.Bundle;
 import android.os.Handler;
@@ -109,23 +110,24 @@ public class SatelliteOptimizedApplicationsTracker {
             new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
-                    loge("new user added");
+                    logd("new user added");
                     // Recalculate all cached services to pick up ones that have just been enabled
                     // since new user is added
                     mCurrentHandler.obtainMessage(ACTION_USER_ADDED, null).sendToTarget();
                 }
             };
 
-    private ApplicationInfo getApplicationInfo(String packageName) {
+    private PackageInfo getPackageInfo(String packageName) {
         mPackageManager = mContext.getPackageManager();
         try {
+            int flags = getTrackerPackageFlags();
             PackageInfo packageInfo =
-                    mPackageManager.getPackageInfo(packageName, PackageManager.GET_META_DATA);
+                    mPackageManager.getPackageInfo(packageName, flags);
             if (packageInfo == null) {
-                loge("packageInfo is NULL");
+                logd("packageInfo is NULL");
                 return null;
             }
-            return packageInfo.applicationInfo;
+            return packageInfo;
         } catch (PackageManager.NameNotFoundException exp) {
             loge(
                     "Exception while reading packageInfo [ "
@@ -167,13 +169,43 @@ public class SatelliteOptimizedApplicationsTracker {
     }
 
     private void handlePackageMonitor(String packageName) {
-        ApplicationInfo applicationInfo = getApplicationInfo(packageName);
-        if (applicationInfo != null) {
-            if (isOptimizedSatelliteApplication(applicationInfo, packageName)) {
+        PackageInfo packageInfo = getPackageInfo(packageName);
+        if (packageInfo != null) {
+            if (isOptimizedSatelliteAppOrService(packageInfo)) {
                 addCacheOptimizedSatelliteApplication(packageName);
             } else {
                 removeCacheOptimizedSatelliteApplication(packageName);
             }
+        }
+    }
+
+    private boolean isOptimizedSatelliteAppOrService(@NonNull PackageInfo packageInfo) {
+        try {
+            boolean isOptimized = packageInfo.applicationInfo != null
+                    && isOptimizedSatelliteApplication(packageInfo.applicationInfo,
+                    packageInfo.packageName);
+
+            // check service metadata
+            if (!isOptimized && packageInfo.services != null) {
+                Bundle metadata;
+                String value;
+                ServiceInfo serviceInfo;
+                for (int i = 0; i < packageInfo.services.length; i++) {
+                    serviceInfo = packageInfo.services[i];
+                    metadata = serviceInfo.metaData;
+                    if (metadata != null) {
+                        value = metadata.getString(APP_PROPERTY);
+                        if (value != null && TextUtils.equals(value, serviceInfo.packageName)) {
+                            logd("serviceInfo: " + serviceInfo.packageName + " is optimized");
+                            return true;
+                        }
+                    }
+                }
+            }
+            return isOptimized;
+        } catch (Exception e) {
+            loge(e.toString());
+            return false;
         }
     }
 
@@ -184,14 +216,18 @@ public class SatelliteOptimizedApplicationsTracker {
                 int userId = user.getUserHandle().getIdentifier();
                 mSatelliteApplications.putIfAbsent(userId, new HashSet<>());
             }
+            int flags = getTrackerPackageFlags();
             // Get a list of installed packages
             List<PackageInfo> packages =
-                    mPackageManager.getInstalledPackages(PackageManager.GET_META_DATA);
+                    mPackageManager.getInstalledPackages(flags);
+            PackageInfo servicePackageInfo;
+            PackageInfo packageInfo;
             // Iterate through the packages
-            for (PackageInfo packageInfo : packages) {
-                if (packageInfo.applicationInfo != null
-                        && isOptimizedSatelliteApplication(packageInfo.applicationInfo,
-                        packageInfo.packageName)) {
+            for (int i = 0; i < packages.size(); i++) {
+                packageInfo = packages.get(i);
+                servicePackageInfo = getPackageInfo(packageInfo.packageName);
+                if (servicePackageInfo != null
+                        && isOptimizedSatelliteAppOrService(servicePackageInfo)) {
                     addCacheOptimizedSatelliteApplication(packageInfo.packageName);
                 }
             }
@@ -205,21 +241,24 @@ public class SatelliteOptimizedApplicationsTracker {
         }
     }
 
+    private int getTrackerPackageFlags() {
+        return PackageManager.GET_META_DATA | PackageManager.GET_SERVICES
+                | PackageManager.MATCH_DISABLED_COMPONENTS;
+    }
+
     private boolean isOptimizedSatelliteApplication(@NonNull ApplicationInfo applicationInfo,
             @NonNull String packageName) {
         // Get the application's metadata
         Bundle metadata = applicationInfo.metaData;
         if (metadata != null) {
             try {
-                final Object value = metadata.get(APP_PROPERTY);
-                loge(String.format("packageName: %s, value: %s",
-                        packageName,
-                        (value == null ? null : value.toString())));
+                String value = metadata.getString(APP_PROPERTY);
+                logd("packageName: " + packageName + ", value: "
+                        + ((value == null) ? "null" : value));
                 if (value == null) return false; // No expected meta-data.
 
                 // Check if the retrieved object is a matched String.
-                return value instanceof String
-                        && TextUtils.equals((String) value, packageName);
+                return TextUtils.equals(value, packageName);
             } catch (Exception e) {
                 loge("Exception while reading metadata [ "
                         + packageName
@@ -290,5 +329,9 @@ public class SatelliteOptimizedApplicationsTracker {
 
     private void loge(String str) {
         Log.e(TAG, str);
+    }
+
+    private void logd(String str) {
+        Log.d(TAG, str);
     }
 }

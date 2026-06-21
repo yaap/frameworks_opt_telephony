@@ -21,6 +21,8 @@ import static android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_GONE;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.app.ActivityManager;
+import android.app.ActivityOptions;
+import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
@@ -28,6 +30,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.AsyncResult;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -39,6 +42,7 @@ import android.telephony.PersistentLogger;
 import android.telephony.SubscriptionManager;
 import android.telephony.satellite.ISatelliteTransmissionUpdateCallback;
 import android.telephony.satellite.PointingInfo;
+import android.telephony.satellite.PointingUiAppLaunchIntentAttributes;
 import android.telephony.satellite.SatelliteManager;
 import android.text.TextUtils;
 import android.util.Log;
@@ -448,31 +452,12 @@ public class PointingAppController extends Handler {
 
     private void handleRequestStartPointingUI(boolean needFullScreenPointingUI, boolean isDemoMode,
             boolean isEmergency) {
-        String packageName = getPointingUiPackageName();
-        if (TextUtils.isEmpty(packageName)) {
-            plogd("startPointingUI: config_pointing_ui_package is not set. Ignore the request");
-            return;
-        }
-
-        Intent launchIntent;
-        String className = getPointingUiClassName();
-        if (!TextUtils.isEmpty(className)) {
-            launchIntent = new Intent()
-                    .setComponent(new ComponentName(packageName, className))
-                    .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        } else {
-            launchIntent = mContext.getPackageManager().getLaunchIntentForPackage(packageName);
-        }
+        Intent launchIntent = createLaunchIntentForPointingUiApp(needFullScreenPointingUI,
+                isDemoMode, isEmergency);
         if (launchIntent == null) {
-            ploge("startPointingUI: launchIntent is null");
+            plogd("handleRequestStartPointingUI: launchIntent is null");
             return;
         }
-        plogd("startPointingUI: needFullScreenPointingUI: " + needFullScreenPointingUI
-                + ", isDemoMode: " + isDemoMode + ", isEmergency: " + isEmergency);
-        launchIntent.putExtra("needFullScreen", needFullScreenPointingUI);
-        launchIntent.putExtra("isDemoMode", isDemoMode);
-        launchIntent.putExtra("isEmergency", isEmergency);
-        launchIntent.setFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION);
 
         try {
             if (!mListenerForPointingUIRegistered.get()) {
@@ -567,8 +552,6 @@ public class PointingAppController extends Handler {
                     SatelliteTransmissionUpdateHandler.EVENT_RECEIVE_DATAGRAM_STATE_CHANGED,
                     request);
             msg.sendToTarget();
-        } else {
-            ploge(" SatelliteTransmissionUpdateHandler not found for subId: " + subId);
         }
     }
 
@@ -623,8 +606,67 @@ public class PointingAppController extends Handler {
                 R.string.config_pointing_ui_class));
     }
 
+    @Nullable private Intent createLaunchIntentForPointingUiApp(boolean needFullScreen,
+            boolean isDemoMode, boolean isEmergencyMode) {
+        String packageName = getPointingUiPackageName();
+        if (TextUtils.isEmpty(packageName)) {
+            plogd("createLaunchIntentForPointingUiApp: config_pointing_ui_package is not set");
+            return null;
+        }
+
+        Intent launchIntent;
+        String className = getPointingUiClassName();
+        if (!TextUtils.isEmpty(className)) {
+            launchIntent = new Intent()
+                    .setComponent(new ComponentName(packageName, className));
+        } else {
+            launchIntent = mContext.getPackageManager().getLaunchIntentForPackage(packageName);
+        }
+        if (launchIntent == null) {
+            ploge("createLaunchIntentForPointingUiApp: launchIntent is null");
+            return null;
+        }
+        plogd("createLaunchIntentForPointingUiApp: needFullScreenPointingUI: "
+                + needFullScreen + ", isDemoMode: " + isDemoMode
+                + ", isEmergency: " + isEmergencyMode);
+        launchIntent.putExtra("needFullScreen", needFullScreen);
+        launchIntent.putExtra("isDemoMode", isDemoMode);
+        launchIntent.putExtra("isEmergency", isEmergencyMode);
+        launchIntent.setFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        return launchIntent;
+    }
+
+
+    /**
+     * Create the PendingIntent for launching the PointingUI app.
+     *
+     * @param attributes The attributes to create the PendingIntent.
+     * @return The PendingIntent for launching the PointingUI app.
+     */
+    @Nullable public PendingIntent createPointingUiAppPendingIntent(
+            @NonNull PointingUiAppLaunchIntentAttributes attributes) {
+        if (!mFeatureFlags.systemSelectionSpecifierEnhancement()) {
+            plogd("createPointingUiAppPendingIntent: systemSelectionSpecifierEnhancement is not "
+                    + "enabled");
+            return null;
+        }
+
+        Intent launchIntent = createLaunchIntentForPointingUiApp(attributes.isFullScreen(),
+                attributes.isDemoMode(), attributes.isEmergencyMode());
+        if (launchIntent == null) {
+            plogd("createPointingUiAppPendingIntent: failed to create launchIntent");
+            return null;
+        }
+        Bundle activityOptions = ActivityOptions.makeBasic()
+                .setPendingIntentCreatorBackgroundActivityStartMode(
+                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS)
+                .toBundle();
+        return PendingIntent.getActivity(mContext, 0, launchIntent,
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_ONE_SHOT, activityOptions);
+    }
+
     private boolean isMockModemAllowed() {
-        return (DEBUG || SystemProperties.getBoolean(ALLOW_MOCK_MODEM_PROPERTY, false));
+        return (DEBUG || SystemProperties.getBoolean(ALLOW_MOCK_MODEM_PROPERTY, true));
     }
 
     private static void logd(@NonNull String log) {

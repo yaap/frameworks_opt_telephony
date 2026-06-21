@@ -21,6 +21,7 @@ import android.annotation.Nullable;
 import android.hardware.radio.V1_4.DataRegStateResult.VopsInfo.hidl_discriminator;
 import android.hardware.radio.V1_6.RegStateResult.AccessTechnologySpecificInfo;
 import android.hardware.radio.network.RegState;
+import android.hardware.radio.network.SatelliteTechnology;
 import android.os.AsyncResult;
 import android.os.Handler;
 import android.os.Looper;
@@ -48,10 +49,12 @@ import android.telephony.SmsManager;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.telephony.VopsSupportInfo;
+import android.telephony.satellite.SatelliteManager;
 import android.text.TextUtils;
 import android.util.ArrayMap;
 
 import com.android.internal.annotations.VisibleForTesting;
+import com.android.internal.telephony.flags.Flags;
 import com.android.telephony.Rlog;
 
 import java.util.ArrayList;
@@ -480,6 +483,7 @@ public class CellularNetworkService extends NetworkService {
             VopsSupportInfo vopsInfo = null;
             int lteAttachResultType = 0;
             int lteAttachExtraInfo = 0;
+            int satelliteTechnology = SatelliteManager.NT_RADIO_TECHNOLOGY_UNKNOWN;
 
             android.hardware.radio.network.AccessTechnologySpecificInfo info =
                     regResult.accessTechnologySpecificInfo;
@@ -500,11 +504,42 @@ public class CellularNetworkService extends NetworkService {
                             info.getEutranInfo().lteVopsInfo.isEmcBearerSupported);
                     lteAttachResultType = info.getEutranInfo().lteAttachResultType;
                     lteAttachExtraInfo = info.getEutranInfo().extraInfo;
+                    if (Flags.nrNtn()) {
+                        if (info.getEutranInfo().satelliteTechnology
+                                == SatelliteTechnology.SAT_TECH_DTC) {
+                            satelliteTechnology = SatelliteManager.NT_RADIO_TECHNOLOGY_LTE_DTC;
+                        } else if (info.getEutranInfo().satelliteTechnology
+                                == SatelliteTechnology.SAT_TECH_NB_IOT_NTN) {
+                            satelliteTechnology = SatelliteManager.NT_RADIO_TECHNOLOGY_NB_IOT_NTN;
+                        } else if (info.getEutranInfo().satelliteTechnology
+                                != SatelliteTechnology.SAT_TECH_NONE) {
+                            logw("Not supported satellite technology for LTE: "
+                                    + satelliteTechnology);
+                        }
+                    }
                     break;
                 case android.hardware.radio.network.AccessTechnologySpecificInfo.ngranNrVopsInfo:
                     vopsInfo = new NrVopsSupportInfo(info.getNgranNrVopsInfo().vopsSupported,
                             info.getNgranNrVopsInfo().emcSupported,
                             info.getNgranNrVopsInfo().emfSupported);
+                    break;
+                case android.hardware.radio.network.AccessTechnologySpecificInfo.nrInfo:
+                    vopsInfo = new NrVopsSupportInfo(info.getNrInfo().nrVopsInfo.vopsSupported,
+                            info.getNrInfo().nrVopsInfo.emcSupported,
+                            info.getNrInfo().nrVopsInfo.emfSupported);
+                    if (Flags.nrNtn()) {
+                        if (info.getNrInfo().satelliteTechnology
+                                == SatelliteTechnology.SAT_TECH_DTC) {
+                            satelliteTechnology = SatelliteManager.NT_RADIO_TECHNOLOGY_NR_DTC;
+                        } else if (info.getNrInfo().satelliteTechnology
+                                == SatelliteTechnology.SAT_TECH_3GPP_NTN) {
+                            satelliteTechnology = SatelliteManager.NT_RADIO_TECHNOLOGY_NR_NTN;
+                        } else if (info.getNrInfo().satelliteTechnology
+                                != SatelliteTechnology.SAT_TECH_NONE) {
+                            logw("Not supported satellite technology for NR: "
+                                    + satelliteTechnology);
+                        }
+                    }
                     break;
                 case android.hardware.radio.network.AccessTechnologySpecificInfo.geranDtmSupported:
                     cssSupported = info.getGeranDtmSupported();
@@ -535,6 +570,9 @@ public class CellularNetworkService extends NetworkService {
                         .setAvailableServices(availableServices)
                         .setCellIdentity(cellIdentity)
                         .setRegisteredPlmn(rplmn)
+                        .setSatelliteTechnology(satelliteTechnology)
+                        .setIsNonTerrestrialNetwork(satelliteTechnology
+                                != SatelliteManager.NT_RADIO_TECHNOLOGY_UNKNOWN)
                         .setDataSpecificInfo(
                                 new DataSpecificRegistrationInfo.Builder(MAX_DATA_CALLS)
                                      .setDcNrRestricted(isDcNrRestricted)

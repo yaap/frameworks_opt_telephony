@@ -19,6 +19,8 @@ package com.android.internal.telephony;
 import static com.android.internal.telephony.RILConstants.REQUEST_NOT_SUPPORTED;
 
 import android.annotation.NonNull;
+import android.hardware.radio.network.PrioritizedNetworkScanRequest;
+import android.hardware.radio.network.SatelliteNetworkInfo;
 import android.os.AsyncResult;
 import android.os.Message;
 import android.os.RemoteException;
@@ -984,6 +986,74 @@ public class RadioNetworkProxy extends RadioServiceProxy {
         if (isEmpty()) return;
         if (isAidl()) {
             mNetworkProxy.isSatelliteEnabledForCarrier(serial);
+        }
+        // Only supported on AIDL.
+    }
+
+    /**
+     * Set the non-terrestrial network info with lower priority than terrestrial networks.
+     *
+     * @param serial Serial number of request.
+     * @param satelliteNetworkInfo The list of roaming network info used for connecting to satellite
+     *                             networks supported by user subscription.
+     */
+    public void setSatelliteNetworkInfo(int serial, SatelliteNetworkInfo satelliteNetworkInfo)
+            throws RemoteException {
+        if (isEmpty()) return;
+        if (isAidl()) {
+            mNetworkProxy.setSatelliteNetworkInfo(serial, satelliteNetworkInfo);
+        }
+        // Only supported on AIDL.
+    }
+
+    /**
+     * Enable a prioritized, aggressive scanning mode for specific networks.
+     * <p>The modem must actively and repeatedly scan for the
+     * target networks, ignoring standard power-saving back-off timers, until
+     * either attached or this mode is explicitly disabled.
+     *
+     * <p>If the device is already attached to a different network, it should
+     * detach and attempt to attach to the target networks.
+     *
+     * @param serial Serial number of request.
+     * @param prioritizedNetworkScanRequest The list of roaming PLMN used for connecting to
+     *                                      satellite networks supported by user subscription.
+     */
+    public void enablePrioritizedNetworkScan(
+            int serial, PrioritizedNetworkScanRequest prioritizedNetworkScanRequest)
+            throws RemoteException {
+        if (isEmpty()) return;
+        if (isAidl()) {
+            mNetworkProxy.enablePrioritizedNetworkScan(serial, prioritizedNetworkScanRequest);
+        }
+        // Only supported on AIDL.
+    }
+
+    /**
+     * Disable a prioritized, aggressive scanning mode for specific networks
+     * <p>If the device is already attached to a prioritized network provided by
+     * startPrioritizedNetworkScan, it should detach from it.
+     *
+     * @param serial Serial number of request.
+     */
+    public void disablePrioritizedNetworkScan(int serial) throws RemoteException {
+        if (isEmpty()) return;
+        if (isAidl()) {
+            mNetworkProxy.disablePrioritizedNetworkScan(serial);
+        }
+        // Only supported on AIDL.
+    }
+
+    /**
+     * Get the supported network alert categories.
+     *
+     * @param serial Serial number of request.
+     */
+    public void getSupportedNetworkAlertCategories(int serial)
+            throws RemoteException {
+        if (isEmpty()) return;
+        if (isAidl()) {
+            mNetworkProxy.getSupportedNetworkAlertCategories(serial);
         }
         // Only supported on AIDL.
     }

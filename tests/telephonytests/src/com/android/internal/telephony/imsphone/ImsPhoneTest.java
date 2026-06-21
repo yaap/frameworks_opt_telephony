@@ -1192,37 +1192,6 @@ public class ImsPhoneTest extends TelephonyTest {
 
     @Test
     @SmallTest
-    public void testClearPhoneNumberForSourceIms() {
-        doReturn(true).when(mFeatureFlags)
-                .clearCachedImsPhoneNumberWhenDeviceLostImsRegistration();
-
-        // In reality the method under test runs in phone process so has MODIFY_PHONE_STATE
-        mContextFixture.addCallingOrSelfPermission(MODIFY_PHONE_STATE);
-        int subId = 1;
-        doReturn(subId).when(mPhone).getSubId();
-        doReturn(new SubscriptionInfoInternal.Builder().setId(subId).setSimSlotIndex(0)
-                .setCountryIso("gb").build()).when(mSubscriptionManagerService)
-                .getSubscriptionInfoInternal(subId);
-
-        // 1. Two valid phone number; 1st is set.
-        Uri[] associatedUris = new Uri[] {
-                Uri.parse("sip:+447539447777@ims.x.com"),
-                Uri.parse("tel:+447539446666")
-        };
-        mImsPhoneUT.setPhoneNumberForSourceIms(associatedUris);
-
-        verify(mSubscriptionManagerService).setNumberFromIms(subId, "+447539447777");
-
-        mImsPhoneUT.clearPhoneNumberForSourceIms();
-
-        verify(mSubscriptionManagerService).setNumberFromIms(subId, "");
-
-        // Clean up
-        mContextFixture.addCallingOrSelfPermission("");
-    }
-
-    @Test
-    @SmallTest
     public void testParsePhoneNumberUsingApi() {
         doReturn(true).when(mFeatureFlags).enablePhoneNumberParsingApi();
         mImsPhoneUT.setPhoneNumberManager(mPhoneNumberManager);
@@ -1246,8 +1215,8 @@ public class ImsPhoneTest extends TelephonyTest {
         mImsPhoneUT.setPhoneNumberForSourceIms(associatedUris);
 
         verify(mPhoneNumberManager).parsePhoneNumber(any(), eq("gb"));
-        // PhoneNumberManager returns error, but existing implementation should be performed.
-        verify(mSubscriptionManagerService).setNumberFromIms(subId, "+447539447777");
+        // PhoneNumberManager returns error, do not save the number
+        verify(mSubscriptionManagerService, never()).setNumberFromIms(subId, "+447539447777");
         clearInvocations(mPhoneNumberManager);
         clearInvocations(mSubscriptionManagerService);
 
@@ -1726,6 +1695,47 @@ public class ImsPhoneTest extends TelephonyTest {
 
     @Test
     @SmallTest
+    public void testImsNrSaModeHandlerNormalRegInteraction() {
+        // Get normal registration callback
+        RegistrationManager.RegistrationCallback callback =
+                mImsPhoneUT.getImsMmTelRegistrationCallback();
+
+        ImsRegistrationAttributes attributes = new ImsRegistrationAttributes.Builder(
+                ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN).build();
+        callback.onRegistered(attributes);
+        verify(mImsNrSaModeHandler).onImsRegistered(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN));
+
+        ImsReasonInfo info = new ImsReasonInfo(
+                ImsReasonInfo.CODE_LOCAL_ENDED_BY_CONFERENCE_MERGE, 0);
+        callback.onUnregistered(info, RegistrationManager.SUGGESTED_ACTION_NONE,
+                ImsRegistrationImplBase.REGISTRATION_TECH_LTE);
+        verify(mImsNrSaModeHandler).onImsUnregistered(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_LTE));
+    }
+
+    @Test
+    @SmallTest
+    public void testImsNrSaModeHandlerEmergencyRegInteraction() {
+        // Get emergency registration callback
+        RegistrationManager.RegistrationCallback emergencyCallback =
+                mImsPhoneUT.getImsMmTelEmergencyRegistrationCallback();
+
+        ImsRegistrationAttributes attributes = new ImsRegistrationAttributes.Builder(
+                ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN).build();
+        emergencyCallback.onRegistered(attributes);
+        verify(mImsNrSaModeHandler).onImsEmergencyRegistered(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN));
+
+        ImsReasonInfo info = new ImsReasonInfo(ImsReasonInfo.CODE_UNSPECIFIED, 0);
+        emergencyCallback.onUnregistered(info, RegistrationManager.SUGGESTED_ACTION_NONE,
+                ImsRegistrationImplBase.REGISTRATION_TECH_LTE);
+        verify(mImsNrSaModeHandler).onImsEmergencyUnregistered(
+                eq(ImsRegistrationImplBase.REGISTRATION_TECH_LTE));
+    }
+
+    @Test
+    @SmallTest
     public void testImsDialArgsBuilderFromForAlternateService() {
         ImsPhone.ImsDialArgs dialArgs = new ImsPhone.ImsDialArgs.Builder()
                 .setIsEmergency(true)
@@ -1749,6 +1759,23 @@ public class ImsPhoneTest extends TelephonyTest {
 
         assertTrue(mImsPhoneUT.canMakeWifiCall());
     }
+
+    @Test
+    public void updateRoamingState_idle_shouldOverrideNtn_updatesStateOnly() throws Exception {
+        doReturn(true).when(mImsManager).shouldOverrideWfcRoamingModeWhileUsingNTN();
+        doReturn(PhoneConstants.State.IDLE).when(mImsCT).getState();
+        doReturn(true).when(mPhone).isRadioOn();
+
+        //roaming - voice and data registration on LTE
+        Message m = getServiceStateChangedMessage(getServiceStateDataAndVoice(
+                ServiceState.RIL_RADIO_TECHNOLOGY_LTE, ServiceState.STATE_IN_SERVICE, true));
+        // Inject the message synchronously instead of waiting for the thread to do it.
+        mImsPhoneUT.handleMessage(m);
+
+        assertTrue(mImsPhoneUT.getLastKnownRoamingState());
+        verify(mImsManager, never()).setWfcMode(anyInt(), anyBoolean());
+    }
+
 
     private ServiceState getServiceStateDataAndVoice(int rat, int regState, boolean isRoaming) {
         ServiceState ss = new ServiceState();

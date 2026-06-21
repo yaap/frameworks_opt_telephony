@@ -268,7 +268,7 @@ public class ServiceStateTracker extends Handler {
     protected static final int EVENT_IMS_STATE_DONE                    = 47;
     protected static final int EVENT_IMS_CAPABILITY_CHANGED            = 48;
     protected static final int EVENT_ALL_DATA_DISCONNECTED             = 49;
-    protected static final int EVENT_PHONE_TYPE_SWITCHED               = 50;
+    protected static final int EVENT_POLL_STATE_INITIAL                = 50;
     protected static final int EVENT_RADIO_POWER_FROM_CARRIER          = 51;
     protected static final int EVENT_IMS_SERVICE_STATE_CHANGED         = 53;
     protected static final int EVENT_RADIO_POWER_OFF_DONE              = 54;
@@ -346,6 +346,7 @@ public class ServiceStateTracker extends Handler {
 
     @NonNull
     private final FeatureFlags mFeatureFlags;
+    private boolean mIsSimReadyForDisplay = false;
 
     private class SstSubscriptionsChangedListener extends OnSubscriptionsChangedListener {
 
@@ -735,7 +736,7 @@ public class ServiceStateTracker extends Handler {
         context.registerReceiver(mIntentReceiver, filter);
 
         mCi.setOnRestrictedStateChanged(this, EVENT_RESTRICTED_STATE_CHANGED, null);
-        updatePhoneType();
+        requestInitialPollState();
 
         mCSST = new CarrierServiceStateTracker(phone, this, featureFlags);
 
@@ -788,7 +789,7 @@ public class ServiceStateTracker extends Handler {
     }
 
     @VisibleForTesting
-    public void updatePhoneType() {
+    public void requestInitialPollState() {
 
         // If we are previously voice roaming, we need to notify that roaming status changed before
         // we change back to non-roaming.
@@ -848,9 +849,9 @@ public class ServiceStateTracker extends Handler {
         // information might come late or even never come. This will get the accurate signal
         // strength information displayed on the UI.
         mPhone.getSignalStrengthController().getSignalStrengthFromCi();
-        sendMessage(obtainMessage(EVENT_PHONE_TYPE_SWITCHED));
+        sendMessage(obtainMessage(EVENT_POLL_STATE_INITIAL));
 
-        logPhoneTypeChange();
+        logPhoneType();
 
         // Tell everybody that the registration state and RAT have changed.
         notifyVoiceRegStateRilRadioTechnologyChanged();
@@ -1305,6 +1306,7 @@ public class ServiceStateTracker extends Handler {
 
             // GSM
             case EVENT_SIM_READY:
+                mIsSimReadyForDisplay = false;
                 // Reset the mPrevSubId so we treat a SIM power bounce
                 // as a first boot.  See b/19194287
                 mPrevSubId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
@@ -1314,10 +1316,13 @@ public class ServiceStateTracker extends Handler {
 
             case EVENT_RADIO_STATE_CHANGED:
                 RadioPowerStateStats.onRadioStateChanged(mCi.getRadioState());
-                // fall through, the code above only logs metrics when radio state changes
-            case EVENT_PHONE_TYPE_SWITCHED:
                 // This will do nothing in the 'radio not available' case
                 setPowerStateToDesired();
+                // These events are modem triggered, so pollState() needs to be forced
+                pollStateInternal(true);
+                break;
+
+            case EVENT_POLL_STATE_INITIAL:
                 // These events are modem triggered, so pollState() needs to be forced
                 pollStateInternal(true);
                 break;
@@ -1373,7 +1378,8 @@ public class ServiceStateTracker extends Handler {
             case EVENT_SIM_RECORDS_LOADED:
                 log("EVENT_SIM_RECORDS_LOADED: what=" + msg.what);
                 mCdnr.updateEfFromUsim((SIMRecords) mIccRecords);
-                updateCarrierDisplayName();
+                pollState(); // This poll will fetch the operator name.
+                updateCarrierDisplayName(); // Hides the stale name (since flag is still false)
                 break;
 
             case EVENT_LOCATION_UPDATES_ENABLED:
@@ -1864,16 +1870,30 @@ public class ServiceStateTracker extends Handler {
                 String[] opNames = (String[]) ar.result;
 
                 if (opNames != null && opNames.length >= 3) {
-                    mNewSS.setOperatorAlphaLongRaw(opNames[0]);
-                    mNewSS.setOperatorAlphaShortRaw(opNames[1]);
-                    // FIXME: Giving brandOverride higher precedence, is this desired?
-                    String brandOverride = getOperatorBrandOverride();
-                    mCdnr.updateEfForBrandOverride(brandOverride);
-                    if (brandOverride != null) {
-                        log("EVENT_POLL_STATE_OPERATOR: use brandOverride=" + brandOverride);
-                        mNewSS.setOperatorName(brandOverride, brandOverride, opNames[2]);
+                    // Check if the carrier config has been loaded
+                    if (showOperatorName()) {
+                        // If the config IS loaded, we proceed with the normal logic.
+                        log("EVENT_POLL_STATE_OPERATOR: carrier config loaded, "
+                                + "setting network name");
+                        mNewSS.setOperatorAlphaLongRaw(opNames[0]);
+                        mNewSS.setOperatorAlphaShortRaw(opNames[1]);
+                        // FIXME: Giving brandOverride higher precedence, is this desired?
+                        String brandOverride = getOperatorBrandOverride();
+                        mCdnr.updateEfForBrandOverride(brandOverride);
+                        if (brandOverride != null) {
+                            log("EVENT_POLL_STATE_OPERATOR: use brandOverride=" + brandOverride);
+                            mNewSS.setOperatorName(brandOverride, brandOverride, opNames[2]);
+                        } else {
+                            mNewSS.setOperatorName(opNames[0], opNames[1], opNames[2]);
+                        }
                     } else {
-                        mNewSS.setOperatorName(opNames[0], opNames[1], opNames[2]);
+                        // If the config is NOT loaded, we intentionally discard the network name.
+                        // Poll State will be triggered again when the config is loaded.
+                        // This prevents the default operator name from ever being set in the
+                        // ServiceState that gets broadcast to the System UI.
+                        mNewSS.setOperatorName(null, null, opNames[2]);
+                        log("EVENT_POLL_STATE_OPERATOR: carrier config not loaded, "
+                                + "discarding network name");
                     }
                 }
                 break;
@@ -2297,8 +2317,11 @@ public class ServiceStateTracker extends Handler {
 
         String satellitePlmn = null;
         SatelliteModemStateListener satelliteModemStateListener = getSatelliteModemStateListener();
-        if (satelliteModemStateListener != null
-                && satelliteModemStateListener.isInConnectedState()) {
+        boolean shouldOverrideSatellitePlmnForNtnViaCarrier = mFeatureFlags.vzwAstSkyloFallback()
+                && SatelliteController.getInstance()
+                .isUsingNonTerrestrialNetworkViaCarrier(mPhone.getSubId());
+        if (shouldOverrideSatellitePlmnForNtnViaCarrier || (satelliteModemStateListener != null
+                && satelliteModemStateListener.isInConnectedState())) {
             satellitePlmn = getSatelliteDisplayName();
         }
         log("updateCarrierDisplayName: satellitePlmn=" + satellitePlmn);
@@ -2347,9 +2370,14 @@ public class ServiceStateTracker extends Handler {
         } else if (combinedRegState == ServiceState.STATE_IN_SERVICE) {
             // In either home or roaming service
             plmn = mSS.getOperatorAlpha();
-            showPlmn = !TextUtils.isEmpty(plmn)
+            if (!showOperatorName()) {
+                showPlmn = false;
+                plmn = null;
+            } else {
+                showPlmn = !TextUtils.isEmpty(plmn)
                     && ((rule & CARRIER_NAME_DISPLAY_BITMASK_SHOW_PLMN)
                     == CARRIER_NAME_DISPLAY_BITMASK_SHOW_PLMN);
+            }
             if (DBG) log("updateCarrierDisplayName: rawPlmn = " + plmn);
         } else {
             // Power off state, such as airplane mode, show plmn as null
@@ -2366,6 +2394,10 @@ public class ServiceStateTracker extends Handler {
         //    EXTRA_SPN = spn
         //    EXTRA_DATA_SPN = dataSpn
         spn = getServiceProviderName();
+        if (!showOperatorName()) {
+            showSpn = false;
+            spn = null;
+        }
         dataSpn = spn;
         showSpn = !noService && !TextUtils.isEmpty(spn)
                 && ((rule & CARRIER_NAME_DISPLAY_BITMASK_SHOW_SPN)
@@ -2456,7 +2488,8 @@ public class ServiceStateTracker extends Handler {
             // override satellite display name
             mNewSS.setOperatorName(
                     satelliteDisplayName, satelliteDisplayName, mNewSS.getOperatorNumeric());
-            log("Override satellite display name to " + satelliteDisplayName);
+            log("updateSatelliteDisplayOverride: Override satellite display name to "
+                    + satelliteDisplayName);
         }
     }
 
@@ -2473,6 +2506,8 @@ public class ServiceStateTracker extends Handler {
                     == SatelliteManager.SATELLITE_RESULT_SUCCESS) {
                 mSatelliteModemStateListener = listener;
                 log("created SatelliteModemStateListener");
+            } else {
+                sc.unregisterForModemStateChanged(listener);
             }
         }
         return mSatelliteModemStateListener;
@@ -2527,11 +2562,9 @@ public class ServiceStateTracker extends Handler {
         // If we want it on and it's off, turn it on
         if (mDesiredPowerState && mRadioPowerOffReasons.isEmpty()
                 && (forceApply || mCi.getRadioState() == TelephonyManager.RADIO_POWER_OFF
-                  // When dynamic_modem_shutdown feature is enabled, allow turn on the modem at
-                  // RADIO_POWER_UNAVAILABLE state.
-                     || (mFeatureFlags.dynamicModemShutdown()
-                             && mCi.getRadioState()
-                                     == TelephonyManager.RADIO_POWER_UNAVAILABLE))) {
+                     // Allow turn on the modem at RADIO_POWER_UNAVAILABLE state.
+                     || mCi.getRadioState()
+                                     == TelephonyManager.RADIO_POWER_UNAVAILABLE)) {
             mCi.setRadioPower(true, forEmergencyCall, isSelectedPhoneForEmergencyCall, null);
         } else if ((!mDesiredPowerState || !mRadioPowerOffReasons.isEmpty()) && mCi.getRadioState()
                 == TelephonyManager.RADIO_POWER_ON) {
@@ -2566,7 +2599,7 @@ public class ServiceStateTracker extends Handler {
         UiccCardApplication newUiccApplication = getUiccCardApplication();
 
         if (mUiccApplication != newUiccApplication) {
-
+            mIsSimReadyForDisplay = false;
             // Remove the EF records that come from UICC
             if (mIccRecords instanceof SIMRecords) {
                 mCdnr.updateEfFromUsim(null /* usim */);
@@ -2605,7 +2638,7 @@ public class ServiceStateTracker extends Handler {
         mAttachLog.log(mSS.toString());
     }
 
-    private void logPhoneTypeChange() {
+    private void logPhoneType() {
         mPhoneTypeLog.log(Integer.toString(mPhone.getPhoneType()));
     }
 
@@ -2719,9 +2752,7 @@ public class ServiceStateTracker extends Handler {
         switch (mCi.getRadioState()) {
             case TelephonyManager.RADIO_POWER_UNAVAILABLE:
                 handlePollStateInternalForRadioOffOrUnavailable(false);
-                if (mFeatureFlags.dynamicModemShutdown()) {
-                    mDeviceShuttingDown = false;
-                }
+                mDeviceShuttingDown = false;
                 pollStateDone();
                 break;
 
@@ -2814,7 +2845,24 @@ public class ServiceStateTracker extends Handler {
             .collect(Collectors.toList());
     }
 
+    private boolean updateSimReadyForDisplay() {
+        boolean updateCarrierNameAfterSimReady = mFeatureFlags.updateCarrierNameAfterSimReady();
+        if (updateCarrierNameAfterSimReady) {
+            boolean recordsLoaded = mIccRecords != null && mIccRecords.getRecordsLoaded();
+            if (recordsLoaded != mIsSimReadyForDisplay) {
+                log("updateSimReadyForDisplay: IsSimReadyForDisplay changed to " + recordsLoaded);
+                mIsSimReadyForDisplay = recordsLoaded;
+                return true;
+            }
+        } else if (!mIsSimReadyForDisplay) {
+            mIsSimReadyForDisplay = true;
+            return true;
+        }
+        return false;
+    }
+
     private void pollStateDone() {
+
         if (TelephonyUtils.IS_DEBUGGABLE
                 && SystemProperties.getBoolean(PROP_FORCE_ROAMING, false)) {
             mNewSS.setRoaming(true);
@@ -3094,10 +3142,12 @@ public class ServiceStateTracker extends Handler {
             setNotification(CS_REJECT_CAUSE_ENABLED);
         }
 
+        boolean simReadyChanged = updateSimReadyForDisplay();
         // Trigger updateCarrierDisplayName when
         // 1. Service state is changed.
         // 2. phone type is Cdma or CdmaLte and ERI text has changed.
-        if (hasChanged || hasSatelliteConnectionChanged) {
+        // 3. SIM is ready and carrier name is empty.
+        if (hasChanged || hasSatelliteConnectionChanged || simReadyChanged) {
             updateCarrierDisplayName();
         }
 
@@ -4244,7 +4294,6 @@ public class ServiceStateTracker extends Handler {
 
     private void onCarrierConfigurationChanged(int slotIndex) {
         if (slotIndex != mPhone.getPhoneId()) return;
-
         mCarrierConfig = getCarrierConfig();
         log("CarrierConfigChange " + mCarrierConfig);
 
@@ -4709,6 +4758,52 @@ public class ServiceStateTracker extends Handler {
             }
         }
         return regState;
+    }
+
+    /**
+     * Checks if we should wait for carrier config to be loaded.
+     *
+     * <p>For some carriers, we need to wait for carrier config to be loaded before displaying the
+     * operator name. This is controlled by a resource overlay {@code
+     * config_update_operator_name_after_carrier_config_loaded}.
+     *
+     * @return {@code true} if we can proceed with setting operator name, {@code false} if we need
+     * to wait for carrier config to be loaded.
+     */
+    @VisibleForTesting
+    public boolean showOperatorName() {
+        // Allows overriding the carrier config loaded check via device overlay for
+        // specific operators.
+        // If config_update_operator_name_after_carrier_config_loaded is true then
+        // only use this configuration.
+        boolean forceWaitForCarrierConfig = mPhone.getContext().getResources()
+                .getBoolean(com.android.internal.R.bool
+                        .config_update_operator_name_after_carrier_config_loaded);
+        if (!forceWaitForCarrierConfig) {
+            return true;
+        }
+
+        if (mFeatureFlags.updateCarrierNameAfterSimReady()) {
+            if (!mIsSimReadyForDisplay && mIccRecords != null && mIccRecords.getRecordsLoaded()) {
+                mIsSimReadyForDisplay = true;
+            }
+            if (!mIsSimReadyForDisplay) {
+                return false;
+            }
+        }
+
+        return isCarrierConfigApplied() && !isSimAbsent();
+    }
+
+    /**
+     * @return {@code true} if carrier config is applied.
+     */
+    private boolean isCarrierConfigApplied() {
+        if (mCarrierConfig == null) {
+            return false;
+        }
+        return mCarrierConfig.getBoolean(
+                CarrierConfigManager.KEY_CARRIER_CONFIG_APPLIED_BOOL, false);
     }
 
     /**

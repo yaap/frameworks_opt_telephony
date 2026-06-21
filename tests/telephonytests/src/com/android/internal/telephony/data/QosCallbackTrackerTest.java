@@ -29,6 +29,7 @@ import static org.mockito.Mockito.verify;
 import android.annotation.NonNull;
 import android.net.INetworkAgentRegistry;
 import android.net.InetAddresses;
+import android.net.IpPrefix;
 import android.net.LinkAddress;
 import android.net.Network;
 import android.net.NetworkAgent;
@@ -76,19 +77,23 @@ public class QosCallbackTrackerTest extends TelephonyTest {
             this.mRemoteAddress = remoteAddress;
         }
 
-        public boolean matchesLocalAddress(final @NonNull InetAddress address,
+        public boolean matchesLocalAddress(final @NonNull InetAddress address, int prefixLength,
                 final int startPort, final int endPort) {
+            IpPrefix ipPrefix = new IpPrefix(address, prefixLength);
             return startPort <= mLocalAddress.getPort()
                     && endPort >= mLocalAddress.getPort()
-                    && (address.isAnyLocalAddress() || mLocalAddress.getAddress().equals(address));
+                    && (address.isAnyLocalAddress()
+                            || ipPrefix.contains(mLocalAddress.getAddress()));
         }
 
-        public boolean matchesRemoteAddress(final @NonNull InetAddress address,
+        public boolean matchesRemoteAddress(final @NonNull InetAddress address, int prefixLength,
                 final int startPort, final int endPort) {
+            IpPrefix ipPrefix = new IpPrefix(address, prefixLength);
             return mRemoteAddress != null
                     && startPort <= mRemoteAddress.getPort()
                     && endPort >= mRemoteAddress.getPort()
-                    && (address.isAnyLocalAddress() || mRemoteAddress.getAddress().equals(address));
+                    && (address.isAnyLocalAddress()
+                            || ipPrefix.contains(mRemoteAddress.getAddress()));
         }
 
         public boolean matchesProtocol(int protocol) {
@@ -174,6 +179,28 @@ public class QosCallbackTrackerTest extends TelephonyTest {
         if (localAddress != null) {
             remoteAddresses.add(
                     new LinkAddress(InetAddresses.parseNumericAddress(remoteAddress), 32));
+        }
+        return new QosBearerFilter(
+                localAddresses, remoteAddresses, localPort, remotePort,
+                protocol, 7, 987, 678,
+                QosBearerFilter.QOS_FILTER_DIRECTION_BIDIRECTIONAL, precedence);
+    }
+
+    private static QosBearerFilter createIpv4QosFilter(String localAddress, int localPrefixLength,
+            String remoteAddress, int remotePrefixLength,
+            QosBearerFilter.PortRange localPort, QosBearerFilter.PortRange remotePort,
+            int protocol, int precedence) {
+        ArrayList<LinkAddress> localAddresses = new ArrayList<>();
+        if (localAddress != null) {
+            localAddresses.add(
+                    new LinkAddress(
+                            InetAddresses.parseNumericAddress(localAddress), localPrefixLength));
+        }
+        ArrayList<LinkAddress> remoteAddresses = new ArrayList<>();
+        if (localAddress != null) {
+            remoteAddresses.add(
+                    new LinkAddress(
+                            InetAddresses.parseNumericAddress(remoteAddress), remotePrefixLength));
         }
         return new QosBearerFilter(
                 localAddresses, remoteAddresses, localPort, remotePort,
@@ -620,6 +647,38 @@ public class QosCallbackTrackerTest extends TelephonyTest {
         qosSessions.remove(0);
         mQosCallbackTracker.updateSessions(qosSessions);
         processAllMessages();
+        verify(mINetworkAgentRegistry, times(1)).sendQosSessionLost(eq(1), any(QosSession.class));
+    }
+
+    @Test
+    public void testQosSessionFilterAddressRange() throws Exception {
+        ArrayList<QosBearerFilter> qosFilters1 = new ArrayList<>();
+        qosFilters1.add(createIpv4QosFilter("155.55.55.0", 24,
+                "144.44.0.0", 16,
+                new QosBearerFilter.PortRange(2222, 2222),
+                new QosBearerFilter.PortRange(2223, 2223),
+                QosBearerFilter.QOS_PROTOCOL_TCP, 45));
+
+        ArrayList<QosBearerSession> qosSessions = new ArrayList<>();
+        qosSessions.add(new QosBearerSession(1234, createEpsQos(5, 6, 7, 8), qosFilters1));
+
+        mQosCallbackTracker.updateSessions(qosSessions);
+
+        // Add filter after updateSessions
+        Filter filter = new Filter(new InetSocketAddress(
+                InetAddresses.parseNumericAddress("155.55.55.10"), 2222),
+                new InetSocketAddress(InetAddresses.parseNumericAddress("144.44.177.73"), 2223));
+        mQosCallbackTracker.addFilter(1, filter);
+        processAllMessages();
+
+        verify(mINetworkAgentRegistry, times(1)).sendEpsQosSessionAvailable(eq(1),
+                any(QosSession.class), any(EpsBearerQosSessionAttributes.class));
+
+        // Remove the matching QosBearerFilter
+        qosSessions.remove(0);
+        mQosCallbackTracker.updateSessions(qosSessions);
+        processAllMessages();
+
         verify(mINetworkAgentRegistry, times(1)).sendQosSessionLost(eq(1), any(QosSession.class));
     }
 

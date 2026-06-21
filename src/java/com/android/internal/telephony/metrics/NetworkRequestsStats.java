@@ -23,6 +23,7 @@ import android.telephony.TelephonyManager;
 
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
+import com.android.internal.telephony.data.DataUtils;
 import com.android.internal.telephony.nano.PersistAtomsProto.NetworkRequestsV2;
 
 
@@ -47,6 +48,13 @@ public class NetworkRequestsStats {
         if (networkRequest.hasCapability(NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH)) {
             networkRequestsTemplate.capability =
                     NetworkRequestsV2.NetworkCapability.PRIORITIZE_BANDWIDTH;
+            storage.addNetworkRequestsV2(networkRequestsTemplate);
+        }
+
+        if (networkRequest.hasCapability(
+                DataUtils.NET_CAPABILITY_PRIORITIZE_UNIFIED_COMMUNICATIONS)) {
+            networkRequestsTemplate.capability =
+                    NetworkRequestsV2.NetworkCapability.PRIORITIZE_UNIFIED_COMMUNICATIONS;
             storage.addNetworkRequestsV2(networkRequestsTemplate);
         }
 

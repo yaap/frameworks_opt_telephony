@@ -71,6 +71,7 @@ public class CellularDataService extends DataService {
     private static final int SET_USER_DATA_ENABLED_COMPLETED        = 10;
     private static final int SET_USER_DATA_ROAMING_ENABLED_COMPLETED = 11;
     private static final int NOTIFY_IMS_DATA_NETWORK_COMPLETED        = 12;
+    private static final int DATA_CALL_LIST_UPDATED                  = 13;
 
     @SuppressWarnings("unchecked")
     private class CellularDataServiceProvider extends DataService.DataServiceProvider {
@@ -139,7 +140,14 @@ public class CellularDataService extends DataService {
                                     );
                             break;
                         case DATA_CALL_LIST_CHANGED:
-                            notifyDataCallListChanged((List<DataCallResponse>) ar.result);
+                            List<DataCallResponse> dataCallResponses;
+                            dataCallResponses = (List<DataCallResponse>) ar.result;
+                            notifyDataCallListChanged(dataCallResponses);
+                            break;
+                        case DATA_CALL_LIST_UPDATED:
+                            List<DataCallResponse> dataCallUpdatedResponses;
+                            dataCallUpdatedResponses = (List<DataCallResponse>) ar.result;
+                            notifyDataCallListUpdated(dataCallUpdatedResponses);
                             break;
                         case START_HANDOVER:
                             callback.onHandoverStarted(toResultCode(ar.exception));
@@ -171,6 +179,9 @@ public class CellularDataService extends DataService {
 
             if (DBG) log("Register for data call list changed.");
             mPhone.mCi.registerForDataCallListChanged(mHandler, DATA_CALL_LIST_CHANGED, null);
+
+            if (DBG) log("Register for data call list updated.");
+            mPhone.mCi.registerForDataCallListUpdated(mHandler, DATA_CALL_LIST_UPDATED, null);
 
             if (DBG) log("Register for apn unthrottled.");
             mPhone.mCi.registerForApnUnthrottled(mHandler, APN_UNTHROTTLED, null);
@@ -349,6 +360,7 @@ public class CellularDataService extends DataService {
         @Override
         public void close() {
             mPhone.mCi.unregisterForDataCallListChanged(mHandler);
+            mPhone.mCi.unregisterForDataCallListUpdated(mHandler);
         }
     }
 

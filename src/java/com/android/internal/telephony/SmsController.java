@@ -20,7 +20,6 @@ package com.android.internal.telephony;
 
 import static android.content.pm.PackageManager.FEATURE_TELEPHONY_MESSAGING;
 import static android.content.pm.PackageManager.PERMISSION_GRANTED;
-import static android.telephony.TelephonyManager.ENABLE_FEATURE_MAPPING;
 
 import static com.android.internal.telephony.util.TelephonyUtils.checkDumpPermission;
 
@@ -29,8 +28,8 @@ import android.annotation.Nullable;
 import android.app.ActivityManager;
 import android.app.AppOpsManager;
 import android.app.PendingIntent;
-import android.app.compat.CompatChanges;
 import android.compat.annotation.UnsupportedAppUsage;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -48,6 +47,7 @@ import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyFrameworkInitializer;
 import android.telephony.TelephonyManager;
+import android.util.Log;
 
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.flags.FeatureFlags;
@@ -72,20 +72,35 @@ public class SmsController extends ISmsImplBase {
     private final Context mContext;
     private final PackageManager mPackageManager;
     private final int mVendorApiLevel;
+    private static SmsController sInstance;
 
     @NonNull private final FeatureFlags mFlags;
+
+    /**
+     * Initialize the SmsController singleton instance and register to TelephonyServiceManager.
+     */
+    public static SmsController init(Context context, @NonNull FeatureFlags flags) {
+        synchronized (SmsController.class) {
+            if (sInstance == null) {
+                sInstance = new SmsController(context, flags);
+                ServiceRegisterer smsServiceRegisterer = TelephonyFrameworkInitializer
+                        .getTelephonyServiceManager()
+                        .getSmsServiceRegisterer();
+                if (smsServiceRegisterer.get() == null) {
+                    smsServiceRegisterer.register(sInstance);
+                }
+            } else {
+                Log.wtf(LOG_TAG, "SmsController already initialized");
+            }
+        }
+        return sInstance;
+    }
 
     @VisibleForTesting
     public SmsController(Context context, @NonNull FeatureFlags flags) {
         mContext = context;
         mFlags = flags;
         mPackageManager = context.getPackageManager();
-        ServiceRegisterer smsServiceRegisterer = TelephonyFrameworkInitializer
-                .getTelephonyServiceManager()
-                .getSmsServiceRegisterer();
-        if (smsServiceRegisterer.get() == null) {
-            smsServiceRegisterer.register(this);
-        }
 
         mVendorApiLevel = SystemProperties.getInt(
                 "ro.vendor.api_level", Build.VERSION.DEVICE_INITIAL_SDK_INT);
@@ -205,6 +220,55 @@ public class SmsController extends ISmsImplBase {
             Rlog.e(LOG_TAG, "sendDataForSubscriber iccSmsIntMgr is null for"
                     + " Subscription: " + subId);
             // TODO: Use a more specific error code to replace RESULT_ERROR_GENERIC_FAILURE.
+            sendErrorInPendingIntent(sentIntent, SmsManager.RESULT_ERROR_GENERIC_FAILURE);
+        }
+    }
+
+    /**
+     * Send a raw SMS PDU. Intended for STK App use only.
+     *
+     * @param subId Subscription Id
+     * @param callingPackage the package name of the caller
+     * @param destAddr the address to send the message to
+     * @param scAddr the service center address or null to use the current default SMSC
+     * @param pdu the raw SMS PDU to send
+     * @param sentIntent if not NULL this <code>PendingIntent</code> is
+     *  broadcast when the message is successfully sent, or failed.
+     *  The result code will be <code>Activity.RESULT_OK</code> for success, or relevant errors
+     *  the sentIntent may include the extra "errorCode" containing a radio technology specific
+     *  value, generally only useful for troubleshooting.
+     * @param deliveryIntent if not NULL this <code>PendingIntent</code> is
+     *  broadcast when the message is delivered to the recipient.  The
+     *  raw pdu of the status report is in the extended data ("pdu").
+     *
+     * @hide
+     */
+    @VisibleForTesting
+    public void sendRawPduForSubscriber(int subId, String callingPackage, String destAddr,
+            String scAddr, byte[] pdu, PendingIntent sentIntent, PendingIntent deliveryIntent) {
+        mContext.enforceCallingOrSelfPermission(android.Manifest.permission.SEND_SMS,
+                "Sending SMS message");
+        if (mFlags.skipStkShortCodeCheck()) {
+            mContext.enforceCallingOrSelfPermission(
+                    android.Manifest.permission.MODIFY_PHONE_STATE,
+                    "Sending SMS message");
+        }
+        if (callingPackage == null) {
+            callingPackage = getCallingPackage();
+        }
+        if (pdu == null) {
+            Rlog.e(LOG_TAG, "sendRawPduForSubscriber: pdu is null");
+            sendErrorInPendingIntent(sentIntent, SmsManager.RESULT_ERROR_NULL_PDU);
+            return;
+        }
+
+        IccSmsInterfaceManager iccSmsIntMgr = getIccSmsInterfaceManager(subId);
+        if (iccSmsIntMgr != null) {
+            iccSmsIntMgr.sendRawPdu(callingPackage, Binder.getCallingUserHandle().getIdentifier(),
+                    destAddr, scAddr, pdu, sentIntent, deliveryIntent, Binder.getCallingUid());
+        } else {
+            Rlog.e(LOG_TAG, "sendRawPduForSubscriber iccSmsIntMgr is null for Subscription: "
+                    + subId);
             sendErrorInPendingIntent(sentIntent, SmsManager.RESULT_ERROR_GENERIC_FAILURE);
         }
     }
@@ -739,14 +803,29 @@ public class SmsController extends ISmsImplBase {
     public void sendStoredText(int subId, String callingPkg, String callingAttributionTag,
             Uri messageUri, String scAddress, PendingIntent sentIntent,
             PendingIntent deliveryIntent) {
+        logStoredMessageApiUsage(/* isMultipart= */ false);
         IccSmsInterfaceManager iccSmsIntMgr = getIccSmsInterfaceManager(subId);
         UserHandle callingUser = Binder.getCallingUserHandle();
         final int uid = Binder.getCallingUid();
-        if (!getCallingPackage().equals(callingPkg)) {
-            throw new SecurityException("sendStoredText: Package " + callingPkg
-                    + "does not belong to " + uid);
-        }
+//        TODO(b/489085982): Fix check for package name.
+//        if (!getCallingPackage().equals(callingPkg)) {
+//            throw new SecurityException("sendStoredText: Package " + callingPkg
+//                    + "does not belong to " + uid);
+//        }
+        callingPkg = getCallingPackage();
         Rlog.d(LOG_TAG, "sendStoredText caller=" + callingPkg);
+
+        String destAddr = getDestAddress(iccSmsIntMgr, messageUri);
+        // Check if user is associated with the subscription
+        if (!TelephonyPermissions.checkSubscriptionAssociatedWithUser(mContext, subId,
+            callingUser, destAddr)) {
+            TelephonyUtils.showSwitchToManagedProfileDialogIfAppropriate(mContext, subId,
+                uid, callingPkg);
+            Rlog.d(LOG_TAG, "sendStoredText: user is not associated with subscription subId="
+                + subId + " callingUser=" + callingUser);
+            sendErrorInPendingIntent(sentIntent, SmsManager.RESULT_USER_NOT_ALLOWED);
+            return;
+        }
 
         if (iccSmsIntMgr != null) {
             iccSmsIntMgr.sendStoredText(callingPkg, callingUser.getIdentifier(),
@@ -761,15 +840,29 @@ public class SmsController extends ISmsImplBase {
     public void sendStoredMultipartText(int subId, String callingPkg, String callingAttributionTag,
             Uri messageUri, String scAddress, List<PendingIntent> sentIntents,
             List<PendingIntent> deliveryIntents) {
+        logStoredMessageApiUsage(/* isMultipart= */ true);
         IccSmsInterfaceManager iccSmsIntMgr = getIccSmsInterfaceManager(subId);
         UserHandle callingUser = Binder.getCallingUserHandle();
         final int uid = Binder.getCallingUid();
-
-        if (!getCallingPackage().equals(callingPkg)) {
-            throw new SecurityException("sendStoredMultipartText: Package " + callingPkg
-                    + " does not belong to " + uid);
-        }
+//        TODO(b/489085982): Fix check for package name.
+//        if (!getCallingPackage().equals(callingPkg)) {
+//            throw new SecurityException("sendStoredText: Package " + callingPkg
+//                    + "does not belong to " + uid);
+//        }
+        callingPkg = getCallingPackage();
         Rlog.d(LOG_TAG, "sendStoredMultipartText caller=" + callingPkg);
+
+        String destAddr = getDestAddress(iccSmsIntMgr, messageUri);
+        // Check if user is associated with the subscription
+        if (!TelephonyPermissions.checkSubscriptionAssociatedWithUser(mContext, subId,
+            callingUser, destAddr)) {
+            TelephonyUtils.showSwitchToManagedProfileDialogIfAppropriate(mContext, subId,
+                uid, callingPkg);
+            Rlog.d(LOG_TAG, "sendStoredMultipartText: user is not associated with subscription"
+                + " subId=" + subId + " callingUser=" + callingUser);
+            sendErrorInPendingIntents(sentIntents, SmsManager.RESULT_USER_NOT_ALLOWED);
+            return;
+        }
 
         if (iccSmsIntMgr != null) {
             iccSmsIntMgr.sendStoredMultipartText(callingPkg, callingUser.getIdentifier(),
@@ -780,6 +873,24 @@ public class SmsController extends ISmsImplBase {
                     + subId);
             sendErrorInPendingIntents(sentIntents, SmsManager.RESULT_ERROR_GENERIC_FAILURE);
         }
+    }
+
+    @Nullable
+    private String getDestAddress(IccSmsInterfaceManager iccSmsIntMgr, Uri messageUri) {
+        if (iccSmsIntMgr == null) {
+            Rlog.d(LOG_TAG, "getDestAddress - iccSmsIntMgr is null");
+            return null;
+        }
+
+        ContentResolver resolver = mContext.getContentResolver();
+        String[] textAndAddress = iccSmsIntMgr.loadTextAndAddress(resolver, messageUri);
+
+        if (textAndAddress == null) {
+            Rlog.d(LOG_TAG, "getDestAddress - textAndAddress is null");
+            return null;
+        }
+
+        return textAndAddress[1];
     }
 
     @Override
@@ -906,6 +1017,12 @@ public class SmsController extends ISmsImplBase {
         filtered.putBoolean(
                 SmsManager.MMS_CONFIG_SUPPORT_HTTP_CHARSET_HEADER,
                 config.getBoolean(SmsManager.MMS_CONFIG_SUPPORT_HTTP_CHARSET_HEADER));
+        filtered.putInt(
+                CarrierConfigManager.KEY_MMS_MAX_NTN_PAYLOAD_SIZE_BYTES_INT,
+                config.getInt(CarrierConfigManager.KEY_MMS_MAX_NTN_PAYLOAD_SIZE_BYTES_INT));
+        filtered.putInt(
+                CarrierConfigManager.KEY_MMS_NETWORK_RELEASE_TIMEOUT_MILLIS_INT,
+                config.getInt(CarrierConfigManager.KEY_MMS_NETWORK_RELEASE_TIMEOUT_MILLIS_INT));
         return filtered;
     }
 
@@ -1256,22 +1373,24 @@ public class SmsController extends ISmsImplBase {
      */
     private void enforceTelephonyFeatureWithException(@Nullable String callingPackage,
             @NonNull String methodName) {
-        if (callingPackage == null || mPackageManager == null) {
-            return;
-        }
+        TelephonyUtils.enforceTelephonyFeatureWithException(callingPackage, mPackageManager,
+                mVendorApiLevel, FEATURE_TELEPHONY_MESSAGING, methodName);
+    }
 
-        if (!CompatChanges.isChangeEnabled(ENABLE_FEATURE_MAPPING, callingPackage,
-                Binder.getCallingUserHandle())
-                || mVendorApiLevel < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            // Skip to check associated telephony feature,
-            // if compatibility change is not enabled for the current process or
-            // the SDK version of vendor partition is less than Android V.
-            return;
-        }
-
-        if (!mPackageManager.hasSystemFeature(FEATURE_TELEPHONY_MESSAGING)) {
-            throw new UnsupportedOperationException(
-                    methodName + " is unsupported without " + FEATURE_TELEPHONY_MESSAGING);
-        }
+    /*
+     * Helper function to log sendStored message API usage.
+     */
+    private void logStoredMessageApiUsage(boolean isMultipart) {
+        int callingUid = Binder.getCallingUid();
+        int apiType = isMultipart
+                ? TelephonyStatsLog
+                .STORED_MESSAGE_SEND_REQUESTED__MESSAGE_TYPE__ORIGINAL_MESSAGE_TYPE_SMS_MULTIPART
+                : TelephonyStatsLog
+                        .STORED_MESSAGE_SEND_REQUESTED__MESSAGE_TYPE__ORIGINAL_MESSAGE_TYPE_SMS;
+        TelephonyStatsLog.write(
+                TelephonyStatsLog.STORED_MESSAGE_SEND_REQUESTED,
+                callingUid,
+                apiType
+        );
     }
 }

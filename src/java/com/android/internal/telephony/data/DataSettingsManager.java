@@ -29,7 +29,6 @@ import android.provider.Settings;
 import android.sysprop.TelephonyProperties;
 import android.telephony.CarrierConfigManager;
 import android.telephony.SubscriptionManager;
-import android.telephony.SubscriptionManager.OnSubscriptionsChangedListener;
 import android.telephony.TelephonyManager;
 import android.telephony.TelephonyManager.MobileDataPolicy;
 import android.telephony.TelephonyRegistryManager;
@@ -75,8 +74,6 @@ public class DataSettingsManager extends Handler {
 
     /** Event for call state changed. */
     private static final int EVENT_CALL_STATE_CHANGED = 2;
-    /** Event for subscriptions updated. */
-    private static final int EVENT_SUBSCRIPTIONS_CHANGED = 4;
     /** Event for set data enabled for reason. */
     private static final int EVENT_SET_DATA_ENABLED_FOR_REASON = 5;
     /** Event for set data roaming enabled. */
@@ -227,14 +224,7 @@ public class DataSettingsManager extends Handler {
                 updateDataEnabledAndNotify(TelephonyManager.DATA_ENABLED_REASON_OVERRIDE);
                 break;
             }
-            case EVENT_SUBSCRIPTIONS_CHANGED: {
-                refreshEnabledMobileDataPolicy();
-                updateDataEnabledAndNotify(TelephonyManager.DATA_ENABLED_REASON_USER,
-                        mPhone.getContext().getOpPackageName(),
-                        SubscriptionManager.isValidSubscriptionId(mSubId));
-                mPhone.notifyUserMobileDataStateChanged(isUserDataEnabled());
-                break;
-            }
+
             case EVENT_SET_DATA_ENABLED_FOR_REASON: {
                 String callingPackage = (String) msg.obj;
                 boolean enabled = msg.arg2 == 1;
@@ -273,6 +263,7 @@ public class DataSettingsManager extends Handler {
             case EVENT_PROVISIONED_CHANGED:
             case EVENT_PROVISIONING_DATA_ENABLED_CHANGED: {
                 updateDataEnabledAndNotify(TelephonyManager.DATA_ENABLED_REASON_UNKNOWN);
+                notifyDataServiceUserDataEnabled(isUserDataEnabled());
                 break;
             }
             case EVENT_INITIALIZE: {
@@ -316,18 +307,6 @@ public class DataSettingsManager extends Handler {
             mPhone.getImsPhone().getCallTracker().registerForVoiceCallEnded(
                     this, EVENT_CALL_STATE_CHANGED, null);
         }
-        mPhone.getContext().getSystemService(TelephonyRegistryManager.class)
-                .addOnSubscriptionsChangedListener(new OnSubscriptionsChangedListener() {
-                    @Override
-                    public void onSubscriptionsChanged() {
-                        if (mSubId != mPhone.getSubId()) {
-                            log("onSubscriptionsChanged: " + mSubId + " to " + mPhone.getSubId());
-                            mSubId = mPhone.getSubId();
-                            obtainMessage(EVENT_SUBSCRIPTIONS_CHANGED, mPhone.getSubId())
-                                    .sendToTarget();
-                        }
-                    }
-                }, Runnable::run);
         // some overall mobile data override policy depend on whether DDS is user data enabled.
         for (Phone phone : PhoneFactory.getPhones()) {
             if (phone.getPhoneId() != mPhone.getPhoneId()) {
@@ -353,6 +332,11 @@ public class DataSettingsManager extends Handler {
                                 + " default data sub, reevaluating mobile data policies");
                         DataSettingsManager.this.updateDataEnabledAndNotify(
                                 TelephonyManager.DATA_ENABLED_REASON_OVERRIDE);
+                    }
+
+                    @Override
+                    public void onSubscriptionChanged(int subId) {
+                        DataSettingsManager.this.handleSubscriptionChanged(subId);
                     }
                 });
         updateDataEnabledAndNotify(TelephonyManager.DATA_ENABLED_REASON_UNKNOWN);
@@ -387,6 +371,23 @@ public class DataSettingsManager extends Handler {
                                 null);
                     }
                 });
+    }
+
+    private void handleSubscriptionChanged(int subId) {
+        int phoneSubId = mPhone.getSubId();
+        if (mSubId != phoneSubId) {
+            log("handleSubscriptionChanged: phone sub id changed from " + mSubId + " to "
+                    + phoneSubId);
+            mSubId = phoneSubId;
+            refreshEnabledMobileDataPolicy();
+            updateDataEnabledAndNotify(TelephonyManager.DATA_ENABLED_REASON_USER,
+                    mPhone.getContext().getOpPackageName(),
+                    SubscriptionManager.isValidSubscriptionId(mSubId));
+            mPhone.notifyUserMobileDataStateChanged(isUserDataEnabled());
+        } else if (subId == mSubId) {
+            log("handleSubscriptionChanged: " + subId + " reevaluating data enabled");
+            updateDataEnabledAndNotify(TelephonyManager.DATA_ENABLED_REASON_OVERRIDE);
+        }
     }
 
     /**

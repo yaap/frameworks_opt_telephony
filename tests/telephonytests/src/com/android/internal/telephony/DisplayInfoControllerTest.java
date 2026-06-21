@@ -22,6 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import android.os.AsyncResult;
@@ -35,7 +36,6 @@ import android.telephony.CellIdentityLte;
 import android.telephony.LteVopsSupportInfo;
 import android.telephony.NetworkRegistrationInfo;
 import android.telephony.ServiceState;
-import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyDisplayInfo;
 import android.telephony.TelephonyManager;
 import android.testing.AndroidTestingRunner;
@@ -103,7 +103,7 @@ public class DisplayInfoControllerTest extends TelephonyTest {
 
     private void sendCarrierConfigUpdate() {
         mCarrierConfigChangeListener.onCarrierConfigChanged(PHONE_ID,
-                SubscriptionManager.INVALID_SUBSCRIPTION_ID, TelephonyManager.UNKNOWN_CARRIER_ID,
+                mPhone.getSubId(), TelephonyManager.UNKNOWN_CARRIER_ID,
                 TelephonyManager.UNKNOWN_CARRIER_ID);
         processAllMessages();
     }
@@ -270,5 +270,34 @@ public class DisplayInfoControllerTest extends TelephonyTest {
         TelephonyDisplayInfo tdi = mDic.getTelephonyDisplayInfo();
 
         assertFalse(tdi.isRoaming()); // display override
+    }
+
+    @Test
+    public void testConstructor_offloadStartupBinderCalls() {
+        doReturn(true).when(mFeatureFlags).offloadStartupBinderCalls();
+        // Clear invocations from setUp()
+        org.mockito.Mockito.clearInvocations(mCarrierConfigManager);
+        mDic = new DisplayInfoController(mPhone, mFeatureFlags);
+
+        // Verify that registerCarrierConfigChangeListener is NOT called immediately
+        verify(mCarrierConfigManager, times(0)).registerCarrierConfigChangeListener(any(), any());
+
+        // Process messages
+        processAllMessages();
+
+        // Verify that registerCarrierConfigChangeListener IS called (by DIC and
+        // NetworkTypeController)
+        verify(mCarrierConfigManager, atLeast(1)).registerCarrierConfigChangeListener(any(), any());
+    }
+
+    @Test
+    public void testConstructor_noOffloadStartupBinderCalls() {
+        doReturn(false).when(mFeatureFlags).offloadStartupBinderCalls();
+        // Clear invocations from setUp()
+        org.mockito.Mockito.clearInvocations(mCarrierConfigManager);
+        mDic = new DisplayInfoController(mPhone, mFeatureFlags);
+
+        // Verify that registerCarrierConfigChangeListener IS called immediately
+        verify(mCarrierConfigManager, atLeast(1)).registerCarrierConfigChangeListener(any(), any());
     }
 }

@@ -28,6 +28,7 @@ import android.telephony.CellInfo;
 import android.telephony.CellularIdentifierDisclosure;
 import android.telephony.LinkCapacityEstimate;
 import android.telephony.NetworkRegistrationInfo;
+import android.telephony.NetworkSecurityEvent;
 import android.telephony.PhoneCapability;
 import android.telephony.PhysicalChannelConfig;
 import android.telephony.PreciseCallState;
@@ -35,7 +36,9 @@ import android.telephony.PreciseDataConnectionState;
 import android.telephony.SecurityAlgorithmUpdate;
 import android.telephony.ServiceState;
 import android.telephony.TelephonyDisplayInfo;
+import android.telephony.TelephonyManager;
 import android.telephony.TelephonyManager.DataEnabledReason;
+import android.telephony.TelephonyManager.DomainSelectionEmergencyType;
 import android.telephony.TelephonyManager.EmergencyCallbackModeStopReason;
 import android.telephony.TelephonyManager.EmergencyCallbackModeType;
 import android.telephony.TelephonyRegistryManager;
@@ -353,9 +356,14 @@ public class DefaultPhoneNotifier implements PhoneNotifier {
     }
 
     @Override
-    public void notifySecurityAlgorithmsChanged(Phone sender, SecurityAlgorithmUpdate update) {
-        if (!mFeatureFlags.securityAlgorithmsUpdateIndications()) return;
+    public void notifySatellitePurchaseModeChanged(Phone sender, boolean isEnabled,
+            @TelephonyManager.SatellitePurchaseModeState int purchaseModeState) {
+        mTelephonyRegistryMgr.notifySatellitePurchaseModeChanged(
+                sender.getSubId(), isEnabled, purchaseModeState);
+    }
 
+    @Override
+    public void notifySecurityAlgorithmsChanged(Phone sender, SecurityAlgorithmUpdate update) {
         mTelephonyRegistryMgr.notifySecurityAlgorithmsChanged(sender.getPhoneId(),
                 sender.getSubId(), update);
     }
@@ -363,10 +371,36 @@ public class DefaultPhoneNotifier implements PhoneNotifier {
     @Override
     public void notifyCellularIdentifierDisclosedChanged(Phone sender,
             CellularIdentifierDisclosure disclosure) {
-        if (!mFeatureFlags.cellularIdentifierDisclosureIndications()) return;
-
         mTelephonyRegistryMgr.notifyCellularIdentifierDisclosedChanged(sender.getPhoneId(),
                 sender.getSubId(), disclosure);
+    }
+
+    @Override
+    public void notifyDomainSelectionEmergencyModeEntered(Phone sender,
+            @DomainSelectionEmergencyType int type) {
+        if (!mFeatureFlags.domainSelectionEmergencyModeNotification()) return;
+
+        mTelephonyRegistryMgr.notifyDomainSelectionEmergencyModeEntered(
+                sender.getPhoneId(), sender.getSubId(), type);
+    }
+
+    @Override
+    public void notifyDomainSelectionEmergencyModeExited(Phone sender,
+            @DomainSelectionEmergencyType int type) {
+        if (!mFeatureFlags.domainSelectionEmergencyModeNotification()) return;
+
+        mTelephonyRegistryMgr.notifyDomainSelectionEmergencyModeExited(
+                sender.getPhoneId(), sender.getSubId(), type);
+    }
+
+
+    @Override
+    public void notifyNetworkSecurityEvents(Phone sender,
+            Set<NetworkSecurityEvent> events) {
+        if (!mFeatureFlags.networkSecurityEventIndications()) return;
+
+        mTelephonyRegistryMgr.notifyNetworkSecurityEvents(sender.getPhoneId(),
+                sender.getSubId(), events);
     }
 
     /**

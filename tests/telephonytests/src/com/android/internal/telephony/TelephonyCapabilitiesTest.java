@@ -18,26 +18,16 @@ package com.android.internal.telephony;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 
 import android.content.pm.PackageManager;
 import android.os.Build;
-import android.platform.test.annotations.DisableFlags;
-import android.platform.test.annotations.EnableFlags;
-import android.platform.test.flag.junit.SetFlagsRule;
-
-import com.android.internal.telephony.flags.Flags;
 
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
 
 public class TelephonyCapabilitiesTest extends TelephonyTest {
-
-    @Rule
-    public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
 
     @Before
     public void setUp() throws Exception {
@@ -128,11 +118,7 @@ public class TelephonyCapabilitiesTest extends TelephonyTest {
     }
 
     @Test
-    @EnableFlags(Flags.FLAG_MINIMAL_TELEPHONY_CDM_CHECK_BOARD_API_LEVEL)
     public void testSupportsTelephonyFeatures_apiLevelUpdated_boardApiLevel() throws Exception {
-        // EnableFlags doesn't work with mFeatureFlags
-        doReturn(true).when(mFeatureFlags).minimalTelephonyCdmCheckBoardApiLevel();
-
         // A device that was originally released with API level 34, and which was later upgraded
         // with a newer vendor partition introducing the new C/D/M feature flags.
         int vendorApiLevel = Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
@@ -183,31 +169,5 @@ public class TelephonyCapabilitiesTest extends TelephonyTest {
         assertTrue(TelephonyCapabilities.supportsTelephonyCalling(mFeatureFlags, mContext));
         assertTrue(TelephonyCapabilities.supportsTelephonyMessaging(mFeatureFlags, mContext));
         assertFalse(TelephonyCapabilities.supportsTelephonyData(mFeatureFlags, mContext));
-    }
-
-    @Test
-    @DisableFlags(Flags.FLAG_MINIMAL_TELEPHONY_CDM_CHECK_BOARD_API_LEVEL)
-    public void testSupportsTelephonyFeatures_apiLevelUpdated_vendorApiLevel() throws Exception {
-        // DisableFlags doesn't work with mFeatureFlags
-        doReturn(false).when(mFeatureFlags).minimalTelephonyCdmCheckBoardApiLevel();
-
-        // A device that was originally released with API level 34, and which was later upgraded
-        // with a newer vendor partition introducing the new C/D/M feature flags.
-        int vendorApiLevel = Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
-        replaceInstance(TelephonyCapabilities.class, "VENDOR_API_LEVEL", null, vendorApiLevel);
-        int boardApiLevel = Build.VERSION_CODES.VANILLA_ICE_CREAM;
-        replaceInstance(TelephonyCapabilities.class, "BOARD_API_LEVEL", null, boardApiLevel);
-
-        when(mPackageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_CALLING))
-                .thenReturn(false);
-        when(mPackageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING))
-                .thenReturn(false);
-        when(mPackageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_DATA))
-                .thenReturn(false);
-
-        // The C/D/M flags are ignored, still reports all calling/messaging/data support.
-        assertTrue(TelephonyCapabilities.supportsTelephonyCalling(mFeatureFlags, mContext));
-        assertTrue(TelephonyCapabilities.supportsTelephonyMessaging(mFeatureFlags, mContext));
-        assertTrue(TelephonyCapabilities.supportsTelephonyData(mFeatureFlags, mContext));
     }
 }

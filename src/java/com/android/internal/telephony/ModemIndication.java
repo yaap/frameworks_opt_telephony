@@ -27,6 +27,7 @@ import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RIL_CONNECTE
 
 import android.hardware.radio.modem.IRadioModemIndication;
 import android.hardware.radio.modem.ImeiInfo;
+import android.hardware.radio.modem.RadioState;
 import android.os.AsyncResult;
 
 import java.util.ArrayList;
@@ -103,7 +104,8 @@ public class ModemIndication extends IRadioModemIndication.Stub {
         int state = RILUtils.convertHalRadioState(radioState);
         if (mRil.isLogOrTrace()) {
             mRil.unsljLogMore(
-                    RIL_UNSOL_RESPONSE_RADIO_STATE_CHANGED, "radioStateChanged: " + state);
+                    RIL_UNSOL_RESPONSE_RADIO_STATE_CHANGED, "radioStateChanged: "
+                            + RadioState.$.toString(radioState));
         }
 
         mRil.setRadioState(state, false /* forceNotifyRegistrants */);

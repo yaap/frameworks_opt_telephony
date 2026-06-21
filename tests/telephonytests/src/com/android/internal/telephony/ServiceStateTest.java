@@ -32,8 +32,6 @@ import android.util.Pair;
 
 import androidx.test.filters.SmallTest;
 
-import com.android.internal.telephony.flags.Flags;
-
 import junit.framework.TestCase;
 
 import java.util.ArrayList;
@@ -397,16 +395,8 @@ public class ServiceStateTest extends TestCase {
                 .setDomain(NetworkRegistrationInfo.DOMAIN_PS)
                 .build();
         ss.addNetworkRegistrationInfo(nri);
-
-        if (!Flags.duplexModeForNgran()) {
-            // Even if AccessNetwork is NR, getDuplexMode will be return FDD if the band is
-            // set to the FDD LTE band because there was no duplex implementation for NR.
-            ss.setChannelNumber(2400); // lte band 5
-            assertEquals(ServiceState.DUPLEX_MODE_FDD, ss.getDuplexMode());
-        } else {
-            ss.setChannelNumber(144400); // band n29, SDL
-            assertEquals(ServiceState.DUPLEX_MODE_UNKNOWN, ss.getDuplexMode());
-        }
+        ss.setChannelNumber(144400); // band n29, SDL
+        assertEquals(ServiceState.DUPLEX_MODE_UNKNOWN, ss.getDuplexMode());
     }
 
     @SmallTest
@@ -420,11 +410,7 @@ public class ServiceStateTest extends TestCase {
         ss.addNetworkRegistrationInfo(nri);
         ss.setChannelNumber(432000); // band n1
 
-        if (!Flags.duplexModeForNgran()) {
-            assertEquals(ServiceState.DUPLEX_MODE_UNKNOWN, ss.getDuplexMode());
-        } else {
-            assertEquals(ServiceState.DUPLEX_MODE_FDD, ss.getDuplexMode());
-        }
+        assertEquals(ServiceState.DUPLEX_MODE_FDD, ss.getDuplexMode());
     }
 
     @SmallTest
@@ -438,11 +424,7 @@ public class ServiceStateTest extends TestCase {
         ss.addNetworkRegistrationInfo(nri);
         ss.setChannelNumber(402000); // band n34
 
-        if (!Flags.duplexModeForNgran()) {
-            assertEquals(ServiceState.DUPLEX_MODE_UNKNOWN, ss.getDuplexMode());
-        } else {
-            assertEquals(ServiceState.DUPLEX_MODE_TDD, ss.getDuplexMode());
-        }
+        assertEquals(ServiceState.DUPLEX_MODE_TDD, ss.getDuplexMode());
     }
 
     @SmallTest

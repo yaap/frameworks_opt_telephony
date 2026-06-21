@@ -43,6 +43,7 @@ import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_IMS
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_NETWORK_STATE_CHANGED;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_NEW_BROADCAST_SMS;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_NEW_SMS;
+import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_NEW_SECURE_SMS;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_NEW_SMS_ON_SIM;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_NEW_SMS_STATUS_REPORT;
 import static com.android.internal.telephony.RILConstants.RIL_UNSOL_RESPONSE_RADIO_STATE_CHANGED;
@@ -73,11 +74,13 @@ import android.hardware.radio.V1_0.CdmaSmsMessage;
 import android.hardware.radio.V1_0.CfData;
 import android.hardware.radio.V1_0.LceDataInfo;
 import android.hardware.radio.V1_0.PcoDataInfo;
+import android.hardware.radio.V1_0.RadioState;
 import android.hardware.radio.V1_0.SimRefreshResult;
 import android.hardware.radio.V1_0.SsInfoData;
 import android.hardware.radio.V1_0.StkCcUnsolSsResult;
 import android.hardware.radio.V1_0.SuppSvcNotification;
 import android.hardware.radio.V1_6.IRadioIndication;
+import android.hardware.radio.network.NetworkSecurityEvent;
 import android.hardware.radio.V1_6.PhonebookRecordInfo;
 import android.hardware.radio.V1_6.PhysicalChannelConfig.Band;
 import android.os.AsyncResult;
@@ -99,6 +102,7 @@ import android.telephony.emergency.EmergencyNumber;
 import android.text.TextUtils;
 
 import com.android.internal.telephony.data.KeepaliveStatus;
+import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.gsm.SsData;
 import com.android.internal.telephony.gsm.SuppServiceNotification;
 import com.android.internal.telephony.uicc.IccRefreshResponse;
@@ -128,7 +132,8 @@ public class RadioIndication extends IRadioIndication.Stub {
         int state = RILUtils.convertHalRadioState(radioState);
         if (mRil.isLogOrTrace()) {
             mRil.unsljLogMore(
-                    RIL_UNSOL_RESPONSE_RADIO_STATE_CHANGED, "radioStateChanged: " + state);
+                    RIL_UNSOL_RESPONSE_RADIO_STATE_CHANGED, "radioStateChanged: "
+                            + RadioState.toString(radioState));
         }
 
         mRil.setRadioState(state, false /* forceNotifyRegistrants */);
@@ -509,6 +514,30 @@ public class RadioIndication extends IRadioIndication.Stub {
         SmsMessage sms = new SmsMessage(RILUtils.convertHalCdmaSmsMessage(msg));
         if (mRil.mCdmaSmsRegistrant != null) {
             mRil.mCdmaSmsRegistrant.notifyRegistrant(new AsyncResult(null, sms, null));
+        }
+    }
+
+    public void newSecureSms(int indicationType, ArrayList<Byte> pdu,
+            NetworkSecurityEvent event) {
+        if (!Flags.smsNetworkSecurityEvents()) {
+            if (mRil.isLogOrTrace()) {
+                mRil.riljLog("newSecureSms: secure sms feature is disabled.");
+            }
+            newSms(indicationType, pdu);
+        }
+        mRil.processIndication(HAL_SERVICE_RADIO, indicationType);
+
+        byte[] pduArray = RILUtils.arrayListToPrimitiveArray(pdu);
+        if (mRil.isLogOrTrace()) mRil.unsljLog(RIL_UNSOL_RESPONSE_NEW_SECURE_SMS);
+
+        android.telephony.NetworkSecurityEvent neworkSecurityEvent =
+                RILUtils.convertHalNetworkSecurityEvent(event);
+        SmsMessageBase smsb =
+                com.android.internal.telephony.gsm.SmsMessage.createFromPdu(pduArray,
+                        neworkSecurityEvent);
+        if (mRil.mGsmSmsRegistrant != null) {
+            mRil.mGsmSmsRegistrant.notifyRegistrant(
+                    new AsyncResult(null, smsb == null ? null : new SmsMessage(smsb), null));
         }
     }
 

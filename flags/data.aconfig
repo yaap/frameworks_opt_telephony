@@ -41,23 +41,13 @@ flag {
   }
 }
 
-# OWNER=nagendranb TARGET=25Q2
-flag {
-  name: "data_service_check"
-  namespace: "telephony"
-  description: "Support data service check based on nri available services."
-  bug:"381338283"
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-}
-
 # OWNER=kuenyuet TARGET=26Q2
 flag {
   name: "data_service_user_data_toggle_notify"
   namespace: "telephony"
   description: "Support notify data services when user data and user data roaming is toggled."
   bug:"389120182"
+  is_exported: true
 }
 
 # OWNER=rambowang TARGET=25Q4
@@ -69,44 +59,125 @@ flag {
     bug:"401006757"
 }
 
-# OWNER=rambowang TARGET=25Q4
-flag {
-  name: "monitor_carrier_config_change_for_auto_data_switch"
-  namespace: "telephony"
-  description: "This flag lets AutoDataSwitchController monitor carrier config changes and update the policy accordingly."
-  bug:"436856439"
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-}
-
-
-
 # OWNER=gwenlin TARGET=26Q2
 flag {
   name: "data_service_notify_ims_data_network"
   namespace: "telephony"
   description: "Support notifying IMS data network"
   bug:"389103112"
+  is_exported: true
 }
 
-# OWNER=melhuishj TARGET=25Q4
+# OWNER=rambowang TARGET=26Q2
 flag {
-  name: "inactive_data_network_is_not_stalled"
+  name: "expose_oppt_auto_data_switch_policies"
+  is_exported: true
   namespace: "telephony"
-  description: "A DataNetwork that is not the active DataNetwork should not broadcast a data stall"
-  bug:"430976119"
+  description: "This flag exposes auto data switch policies APIs for opportunistic network switch."
+  bug:"448973795"
+}
+
+# OWNER=willycwhu TARGET=26Q2
+flag {
+  name: "enable_data_stall_recovery_randomization"
+  namespace: "telephony"
+  description: "Enables adding a random offset to data stall recovery timers to prevent network overload issues."
+  bug: "478980391"
   metadata {
     purpose: PURPOSE_BUGFIX
   }
 }
 
-# OWNER=melhuishj TARGET=25Q4
+# OWNER=sangyun TARGET=26Q2
 flag {
-  name: "ignore_initial_data_stall_recovered"
+  name: "enable_traffic_descriptor_connection_capability"
   namespace: "telephony"
-  description: "Prevent DataStallRecoveryManager from broadcasting a data stall event during initial setup when no data stall has occurred"
-  bug:"432293174"
+  description: "Enables support for including Connection Capabilities in the TrafficDescriptor for URSP (UE Route Selection Policy) matching, as defined in 3GPP TS 24.526."
+  bug:"417753705"
+  is_exported: true
+}
+
+# OWNER=navaldubey TARGET=26Q2
+flag {
+    name: "enable_carrier_config_apn_string_restriction"
+    is_exported: true
+    namespace: "telephony"
+    description: "If the APN contains a specific string that the carrier does not allow, show error message and prevents saving."
+    bug: "192926118"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=navaldubey TARGET=26Q2
+flag {
+    name: "skip_connectivity_manager_captive_portal_check"
+    namespace: "telephony"
+    description: "Controls the removal of a deprecated API call in CarrierDefaultApp's CaptivePortalActivity."
+    bug: "451378239"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=hongbozeng TARGET=26Q2
+flag {
+  name: "remove_tethering_condition_when_enabling_indications"
+  namespace: "telephony"
+  description: "Remove tethering condition when enabling indications"
+  bug:"455450987"
+}
+
+# OWNER=navaldubey TARGET=26Q2
+flag {
+    name: "support_explicit_data_disconnect"
+    namespace: "telephony"
+    description: "Controls if explicit disconnect HAL behaviour should be supported or not."
+    bug: "438335285"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=rambowang TARGET=26Q2
+flag {
+  name: "ads_respect_owners_preference"
+  namespace: "telephony"
+  description: "Controls if ADSC respects owner's preferred data network instead of default one"
+  bug:"481016179"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+# OWNER=sangyun TARGET=26Q2
+flag {
+  name: "fix_data_setup_retry_race_condition"
+  namespace: "telephony"
+  description: "Fix race condition between setup throttle and unthrottle."
+  bug:"474435447"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+# OWNER=ysnam TARGET=26Q3
+flag {
+  name: "allow_non_standalone_opportunistic_ads_policy"
+  namespace: "telephony"
+  description: "Allow ADS policy for non-standalone opportunistic subscriptions."
+  bug:"488053557"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+# OWNER=jayachandranc TARGET=26Q3
+flag {
+  name: "ignore_inactive_data_calls_in_poll"
+  namespace: "telephony"
+  description: "Ignore inactive data calls when comparing polled data call list with the last known list."
+  bug:"493615414"
   metadata {
     purpose: PURPOSE_BUGFIX
   }

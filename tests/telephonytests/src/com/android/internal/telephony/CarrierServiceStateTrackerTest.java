@@ -18,7 +18,9 @@ package com.android.internal.telephony;
 
 import static com.android.internal.telephony.CarrierServiceStateTracker.ACTION_NEVER_ASK_AGAIN;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
@@ -34,6 +36,7 @@ import static org.mockito.Mockito.when;
 
 import android.app.Notification;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -305,6 +308,51 @@ public class CarrierServiceStateTrackerTest extends TelephonyTest {
         verify(mNotificationManager, times(1)).notify(
                 eq(CarrierServiceStateTracker.EMERGENCY_NOTIFICATION_TAG),
                 eq(SUB_ID), isA(Notification.class));
+    }
+
+    @Test
+    @SmallTest
+    public void testEmergencyNotificationActionIntentIsExplicit() {
+        // Setup
+        when(mFeatureFlags.stopSpammingEmergencyNotification()).thenReturn(true);
+        String packageName = "com.android.internal.telephony.test";
+        when(mContext.getPackageName()).thenReturn(packageName);
+        when(mPhone.getContext()).thenReturn(mContext);
+
+        // Make notification sendable
+        mCarrierConfigChangeListener.onCarrierConfigChanged(0 /* slotIndex */, SUB_ID,
+                TelephonyManager.UNKNOWN_CARRIER_ID, TelephonyManager.UNKNOWN_CARRIER_ID);
+        processAllMessages();
+
+        // Mock dependencies for sending notification
+        doReturn(mNotificationManager).when(mSpyCarrierSST).getNotificationManager(any());
+        doReturn(true).when(mPhone).isWifiCallingEnabled();
+
+        // Trigger
+        Message notificationMsg = mSpyCarrierSST.obtainMessage(
+                CarrierServiceStateTracker.CARRIER_EVENT_IMS_CAPABILITIES_CHANGED, null);
+        mSpyCarrierSST.handleMessage(notificationMsg);
+        processAllMessages();
+
+        // Verify
+        ArgumentCaptor<Notification> notificationCaptor =
+                ArgumentCaptor.forClass(Notification.class);
+        verify(mNotificationManager).notify(
+                eq(CarrierServiceStateTracker.EMERGENCY_NOTIFICATION_TAG),
+                eq(SUB_ID), notificationCaptor.capture());
+
+        Notification notification = notificationCaptor.getValue();
+        assertNotNull(notification.actions);
+        assertEquals(1, notification.actions.length);
+        PendingIntent pendingIntent = notification.actions[0].actionIntent;
+        Intent expectedIntent = new Intent(ACTION_NEVER_ASK_AGAIN);
+        expectedIntent.setPackage(packageName);
+        PendingIntent expectedPendingIntent = PendingIntent.getBroadcast(
+                mContext,
+                0,
+                expectedIntent,
+                PendingIntent.FLAG_IMMUTABLE);
+        assertEquals(expectedPendingIntent, pendingIntent);
     }
 
 

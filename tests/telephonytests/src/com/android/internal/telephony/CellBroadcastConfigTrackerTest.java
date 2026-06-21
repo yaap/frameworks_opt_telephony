@@ -26,6 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -332,6 +333,57 @@ public final class CellBroadcastConfigTrackerTest extends TelephonyTest {
         verify(mSpyCi, times(0)).setCdmaBroadcastActivation(anyBoolean(), any());
 
         assertEquals(mPhone.getCellBroadcastIdRanges(), ranges3gpp);
+    }
+
+    @Test
+    public void testSetCellBroadcastIdRangesRuntimeException() throws Exception {
+        List<CellBroadcastIdRange> ranges = new ArrayList<>();
+        ranges.add(new CellBroadcastIdRange(0, 999, SmsCbMessage.MESSAGE_FORMAT_3GPP, true));
+
+        doAnswer(invocation -> {
+            Message msg = invocation.getArgument(1);
+            AsyncResult.forMessage(msg, null, null);
+            msg.sendToTarget();
+            throw new RuntimeException("Simulated exception after dispatching message");
+        }).when(mSpyCi).setGsmBroadcastConfig(any(), any(Message.class));
+
+        mPhone.setCellBroadcastIdRanges(ranges, r -> assertEquals(
+                TelephonyManager.CELL_BROADCAST_RESULT_FAIL_CONFIG, (int) r));
+        processAllMessages();
+
+        verify(mSpyCi, times(1)).setGsmBroadcastConfig(any(), any());
+        verify(mSpyCi, times(0)).setGsmBroadcastActivation(anyBoolean(), any());
+        assertTrue(mPhone.getCellBroadcastIdRanges().isEmpty());
+    }
+
+    @Test
+    public void testSetGsmBroadcastActivationRuntimeException() throws Exception {
+        List<CellBroadcastIdRange> ranges = new ArrayList<>();
+        ranges.add(new CellBroadcastIdRange(0, 999, SmsCbMessage.MESSAGE_FORMAT_3GPP, true));
+
+        // 1st mock: normal flow
+        doAnswer(invocation -> {
+            Message msg = invocation.getArgument(1);
+            AsyncResult.forMessage(msg, null, null);
+            msg.sendToTarget();
+            return null;
+        }).when(mSpyCi).setGsmBroadcastConfig(any(), any(Message.class));
+
+        // 2nd mock: throw exception after dispatching message
+        doAnswer(invocation -> {
+            Message msg = invocation.getArgument(1);
+            AsyncResult.forMessage(msg, null, null);
+            msg.sendToTarget();
+            throw new RuntimeException("Simulated exception after dispatching message");
+        }).when(mSpyCi).setGsmBroadcastActivation(anyBoolean(), any(Message.class));
+
+        mPhone.setCellBroadcastIdRanges(ranges, r -> assertEquals(
+                TelephonyManager.CELL_BROADCAST_RESULT_FAIL_ACTIVATION, (int) r));
+        processAllMessages();
+
+        verify(mSpyCi, times(1)).setGsmBroadcastConfig(any(), any());
+        verify(mSpyCi, times(1)).setGsmBroadcastActivation(anyBoolean(), any());
+        assertTrue(mPhone.getCellBroadcastIdRanges().isEmpty());
     }
 
     @Test

@@ -53,7 +53,8 @@ public class CellularIdentifierDisclosureNotifierTest {
     private static final long WINDOW_CLOSE_ADVANCE_MILLIS = (15 * 60 * 1000) + 100;
     private static final int SUB_ID_1 = 1;
     private static final int SUB_ID_2 = 2;
-    private CellularIdentifierDisclosure mDislosure;
+    private CellularIdentifierDisclosure mDisclosureNonBenign;
+    private CellularIdentifierDisclosure mDisclosureBenign;
     private CellularNetworkSecuritySafetySource mSafetySource;
     private CellularSecurityTransparencyStats mStats;
     private TestExecutorService mExecutor;
@@ -63,9 +64,15 @@ public class CellularIdentifierDisclosureNotifierTest {
 
     @Before
     public void setUp() {
-        mDislosure =
+        mDisclosureBenign =
                 new CellularIdentifierDisclosure(
                         CellularIdentifierDisclosure.NAS_PROTOCOL_MESSAGE_ATTACH_REQUEST,
+                        CellularIdentifierDisclosure.CELLULAR_IDENTIFIER_IMSI,
+                        "001001",
+                        false);
+        mDisclosureNonBenign =
+                new CellularIdentifierDisclosure(
+                        CellularIdentifierDisclosure.NAS_PROTOCOL_MESSAGE_THREAT_IDENTIFIER_TRUE,
                         CellularIdentifierDisclosure.CELLULAR_IDENTIFIER_IMSI,
                         "001001",
                         false);
@@ -86,11 +93,11 @@ public class CellularIdentifierDisclosureNotifierTest {
     }
 
     @Test
-    public void testDisableAddDisclosureNop() {
+    public void testDisableAddNonBenignDisclosureNop() {
         CellularIdentifierDisclosureNotifier notifier = getNotifier();
 
         assertFalse(notifier.isEnabled());
-        notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
         assertEquals(0, notifier.getCurrentDisclosureCount(SUB_ID_1));
         verify(mSafetySource, never())
                 .setIdentifierDisclosure(any(), anyInt(), any(), anyInt(), any(), any());
@@ -159,7 +166,7 @@ public class CellularIdentifierDisclosureNotifierTest {
         notifier.enable(mContext);
 
         for (int i = 0; i < 3; i++) {
-            notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
+            notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
         }
 
         assertEquals(3, notifier.getCurrentDisclosureCount(SUB_ID_1));
@@ -176,7 +183,7 @@ public class CellularIdentifierDisclosureNotifierTest {
         CellularIdentifierDisclosureNotifier notifier = getNotifier();
         notifier.enable(mContext);
 
-        notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
 
         assertEquals(1, notifier.getCurrentDisclosureCount(SUB_ID_1));
         Assert.assertEquals(notifier.getFirstOpen(SUB_ID_1), notifier.getCurrentEnd(SUB_ID_1));
@@ -189,13 +196,13 @@ public class CellularIdentifierDisclosureNotifierTest {
         CellularIdentifierDisclosureNotifier notifier = getNotifier();
         notifier.enable(mContext);
 
-        notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
         try {
             Thread.sleep(50);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-        notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
 
         assertEquals(2, notifier.getCurrentDisclosureCount(SUB_ID_1));
         assertTrue(notifier.getFirstOpen(SUB_ID_1).isBefore(notifier.getCurrentEnd(SUB_ID_1)));
@@ -209,8 +216,8 @@ public class CellularIdentifierDisclosureNotifierTest {
 
         // One round of disclosures
         notifier.enable(mContext);
-        notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
-        notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
         assertEquals(2, notifier.getCurrentDisclosureCount(SUB_ID_1));
         mInOrder.verify(mSafetySource, times(1))
                 .setIdentifierDisclosure(any(), eq(SUB_ID_1), any(), eq(1), any(), any());
@@ -222,7 +229,7 @@ public class CellularIdentifierDisclosureNotifierTest {
         assertEquals(0, notifier.getCurrentDisclosureCount(SUB_ID_1));
 
         // A new disclosure should increment as normal
-        notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
         assertEquals(1, notifier.getCurrentDisclosureCount(SUB_ID_1));
         mInOrder.verify(mSafetySource, times(1))
                 .setIdentifierDisclosure(any(), eq(SUB_ID_1), any(), eq(1), any(), any());
@@ -234,8 +241,8 @@ public class CellularIdentifierDisclosureNotifierTest {
 
         // One round of disclosures
         notifier.enable(mContext);
-        notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
-        notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
         assertEquals(2, notifier.getCurrentDisclosureCount(SUB_ID_1));
         mInOrder.verify(mSafetySource, times(1))
                 .setIdentifierDisclosure(any(), eq(SUB_ID_1), any(), eq(1), any(), any());
@@ -248,7 +255,7 @@ public class CellularIdentifierDisclosureNotifierTest {
                 .setIdentifierDisclosureIssueEnabled(any(), eq(false));
 
         // We're disabled now so no disclosures should open the disclosure window
-        notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
         assertEquals(0, notifier.getCurrentDisclosureCount(SUB_ID_1));
         mInOrder.verifyNoMoreInteractions();
     }
@@ -259,7 +266,7 @@ public class CellularIdentifierDisclosureNotifierTest {
 
         notifier.enable(mContext);
         for (int i = 0; i < 3; i++) {
-            notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
+            notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
         }
         mInOrder.verify(mSafetySource, times(1))
                 .setIdentifierDisclosure(any(), eq(SUB_ID_1), any(), eq(1), any(), any());
@@ -269,7 +276,7 @@ public class CellularIdentifierDisclosureNotifierTest {
                 .setIdentifierDisclosure(any(), eq(SUB_ID_1), any(), eq(3), any(), any());
 
         for (int i = 0; i < 4; i++) {
-            notifier.addDisclosure(mContext, SUB_ID_2, mDislosure);
+            notifier.addDisclosure(mContext, SUB_ID_2, mDisclosureNonBenign);
         }
         mInOrder.verify(mSafetySource, times(1))
                 .setIdentifierDisclosure(any(), eq(SUB_ID_2), any(), eq(1), any(), any());
@@ -285,7 +292,7 @@ public class CellularIdentifierDisclosureNotifierTest {
     }
 
     @Test
-    public void testLogDisclsoure() {
+    public void testLogDisclosure() {
         String mcc = "100";
         String mnc = "200";
 
@@ -296,10 +303,13 @@ public class CellularIdentifierDisclosureNotifierTest {
         when(subInfoMock.getMcc()).thenReturn(mcc);
         when(subInfoMock.getMnc()).thenReturn(mnc);
 
-        notifier.addDisclosure(mContext, SUB_ID_1, mDislosure);
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureNonBenign);
+        verify(mStats, times(1)).logIdentifierDisclosure(mDisclosureNonBenign, mcc, mnc,
+                mDisclosureNonBenign.isEmergency());
 
-        verify(mStats, times(1)).logIdentifierDisclosure(mDislosure, mcc, mnc,
-                mDislosure.isEmergency());
+        notifier.addDisclosure(mContext, SUB_ID_1, mDisclosureBenign);
+        verify(mStats, times(1)).logIdentifierDisclosure(mDisclosureBenign, mcc, mnc,
+                mDisclosureBenign.isEmergency());
     }
 
     private CellularIdentifierDisclosureNotifier getNotifier() {

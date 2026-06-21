@@ -27,7 +27,6 @@ import android.telephony.TelephonyManager;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.RadioInterfaceCapabilityController;
-import com.android.internal.telephony.flags.Flags;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -440,9 +439,7 @@ public class SimPhonebookRecordCache extends Handler {
                 mIsCacheInvalidated.set(true);
                 fillCacheWithoutWaiting();
             } else if (newCapacity.isSimValid()) {
-                if(Flags.simPhonebookCacheFix()) {
-                    mIsCacheInvalidated.set(false);
-                }
+                mIsCacheInvalidated.set(false);
                 notifyAdnLoadingWaiters();
                 tryFireUpdatePendingList();
             } else {

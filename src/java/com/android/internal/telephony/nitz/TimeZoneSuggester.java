@@ -32,26 +32,26 @@ import com.android.internal.telephony.NitzSignal;
 public interface TimeZoneSuggester {
 
     /**
-     * Generates a {@link TelephonyTimeZoneSuggestion} given the information available. This
-     * method must always return a non-null {@link TelephonyTimeZoneSuggestion} but that object
-     * does not have to contain a time zone if the available information is not sufficient to
-     * determine one. {@link TelephonyTimeZoneSuggestion#getDebugInfo()} provides debugging /
-     * logging information explaining the choice.
+     * Generates a {@link TelephonyTimeZoneSuggestion} given the information available. This method
+     * must always return a non-null {@link TelephonyTimeZoneSuggestion} but that object does not
+     * have to contain a time zone if the available information is not sufficient to determine one.
+     * {@link TelephonyTimeZoneSuggestion#getDebugInfo()} provides debugging / logging information
+     * explaining the choice.
      */
     @NonNull
     TelephonyTimeZoneSuggestion getTimeZoneSuggestion(
-            int slotIndex, @Nullable String countryIsoCode,
-            @Nullable NitzSignal nitzSignal);
+            int slotIndex, @Nullable String countryIsoCode, @Nullable NitzSignal nitzSignal);
 
     /**
-     * Generates a {@link TelephonyTimeZoneSuggestion} given the information available. This
-     * method must always return a non-null {@link TelephonyTimeZoneSuggestion} but that object
-     * does not have to contain a time zone if the available information is not sufficient to
-     * determine one. {@link TelephonyTimeZoneSuggestion#getDebugInfo()} provides debugging /
-     * logging information explaining the choice.
+     * Generates a {@link TelephonyTimeZoneSuggestion} given the information available. This method
+     * must always return a non-null {@link TelephonyTimeZoneSuggestion} but that object does not
+     * have to contain a time zone if the available information is not sufficient to determine one.
+     * {@link TelephonyTimeZoneSuggestion#getDebugInfo()} provides debugging / logging information
+     * explaining the choice.
      */
     @NonNull
     TelephonyTimeZoneSuggestion getTimeZoneSuggestion(
-            int slotIndex, @Nullable MobileCountries mobileCountries,
+            int slotIndex,
+            @Nullable MobileCountries mobileCountries,
             @Nullable NitzSignal nitzSignal);
 }

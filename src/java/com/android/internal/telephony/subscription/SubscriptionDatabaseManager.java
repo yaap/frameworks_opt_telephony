@@ -268,6 +268,9 @@ public class SubscriptionDatabaseManager extends Handler {
                     SimInfo.COLUMN_PHONE_NUMBER_SOURCE_IMS,
                     SubscriptionInfoInternal::getNumberFromIms),
             new AbstractMap.SimpleImmutableEntry<>(
+                    SimInfo.COLUMN_PHONE_NUMBER_SOURCE_TS43,
+                    SubscriptionInfoInternal::getNumberFromTs43),
+            new AbstractMap.SimpleImmutableEntry<>(
                     SimInfo.COLUMN_PORT_INDEX,
                     SubscriptionInfoInternal::getPortIndex),
             new AbstractMap.SimpleImmutableEntry<>(
@@ -307,6 +310,9 @@ public class SubscriptionDatabaseManager extends Handler {
                     SimInfo.COLUMN_IS_SATELLITE_PROVISIONED_FOR_NON_IP_DATAGRAM,
                     SubscriptionInfoInternal::getIsSatelliteProvisionedForNonIpDatagram),
             new AbstractMap.SimpleImmutableEntry<>(
+                    SimInfo.COLUMN_IS_PRIVATE_NETWORK,
+                    SubscriptionInfoInternal::getIsPrivateNetwork),
+            new AbstractMap.SimpleImmutableEntry<>(
                     SimInfo.COLUMN_SATELLITE_ENTITLEMENT_BARRED_PLMNS,
                     SubscriptionInfoInternal::getSatelliteEntitlementBarredPlmnsList),
             new AbstractMap.SimpleImmutableEntry<>(
@@ -320,7 +326,13 @@ public class SubscriptionDatabaseManager extends Handler {
                     SubscriptionInfoInternal::getSatellitePlmnsDataServicePolicy),
             new AbstractMap.SimpleImmutableEntry<>(
                     SimInfo.COLUMN_SATELLITE_ENTITLEMENT_VOICE_SERVICE_POLICY,
-                    SubscriptionInfoInternal::getSatellitePlmnsVoiceServicePolicy)
+                    SubscriptionInfoInternal::getSatellitePlmnsVoiceServicePolicy),
+            new AbstractMap.SimpleImmutableEntry<>(
+                    SimInfo.COLUMN_STREAMING_APP_MAX_DOWNLINK_KBPS,
+                    SubscriptionInfoInternal::getStreamingAppMaxDownlinkKbps),
+            new AbstractMap.SimpleImmutableEntry<>(
+                    SimInfo.COLUMN_STREAMING_APP_MAX_UPLINK_KBPS,
+                    SubscriptionInfoInternal::getStreamingAppMaxUplinkKbps)
     );
 
     /**
@@ -466,7 +478,24 @@ public class SubscriptionDatabaseManager extends Handler {
                     SubscriptionDatabaseManager::setSatelliteESOSSupported),
             new AbstractMap.SimpleImmutableEntry<>(
                     SimInfo.COLUMN_IS_SATELLITE_PROVISIONED_FOR_NON_IP_DATAGRAM,
-                    SubscriptionDatabaseManager::setIsSatelliteProvisionedForNonIpDatagram)
+                    SubscriptionDatabaseManager::setIsSatelliteProvisionedForNonIpDatagram),
+            new AbstractMap.SimpleImmutableEntry<>(
+                    SimInfo.COLUMN_IS_PRIVATE_NETWORK,
+                    SubscriptionDatabaseManager::setIsPrivateNetwork)
+    );
+
+    /**
+     * The mapping from columns in {@link android.provider.Telephony.SimInfo} table to
+     * {@link SubscriptionDatabaseManager} setting long methods.
+     */
+    private static final Map<String, TriConsumer<SubscriptionDatabaseManager, Integer, Long>>
+            SUBSCRIPTION_SET_LONG_METHOD_MAP = Map.ofEntries(
+            new AbstractMap.SimpleImmutableEntry<>(
+                    SimInfo.COLUMN_STREAMING_APP_MAX_DOWNLINK_KBPS,
+                    SubscriptionDatabaseManager::setStreamingAppMaxDownlinkKbps),
+            new AbstractMap.SimpleImmutableEntry<>(
+                    SimInfo.COLUMN_STREAMING_APP_MAX_UPLINK_KBPS,
+                    SubscriptionDatabaseManager::setStreamingAppMaxUplinkKbps)
     );
 
     /**
@@ -529,6 +558,9 @@ public class SubscriptionDatabaseManager extends Handler {
             new AbstractMap.SimpleImmutableEntry<>(
                     SimInfo.COLUMN_PHONE_NUMBER_SOURCE_IMS,
                     SubscriptionDatabaseManager::setNumberFromIms),
+            new AbstractMap.SimpleImmutableEntry<>(
+                    SimInfo.COLUMN_PHONE_NUMBER_SOURCE_TS43,
+                    SubscriptionDatabaseManager::setNumberFromTs43),
             new AbstractMap.SimpleImmutableEntry<>(
                     SimInfo.COLUMN_SATELLITE_ENTITLEMENT_PLMNS,
                     SubscriptionDatabaseManager::setSatelliteEntitlementPlmns),
@@ -595,7 +627,9 @@ public class SubscriptionDatabaseManager extends Handler {
             SimInfo.COLUMN_NR_ADVANCED_CALLING_ENABLED,
             SimInfo.COLUMN_USER_HANDLE,
             SimInfo.COLUMN_SATELLITE_ENABLED,
-            SimInfo.COLUMN_SATELLITE_ATTACH_ENABLED_FOR_CARRIER
+            SimInfo.COLUMN_SATELLITE_ATTACH_ENABLED_FOR_CARRIER,
+            SimInfo.COLUMN_STREAMING_APP_MAX_DOWNLINK_KBPS,
+            SimInfo.COLUMN_STREAMING_APP_MAX_UPLINK_KBPS
     );
 
     /**
@@ -806,6 +840,18 @@ public class SubscriptionDatabaseManager extends Handler {
         } else if (SUBSCRIPTION_SET_STRING_METHOD_MAP.containsKey(columnName)) {
             // For string type columns. Will throw exception if value is not string type.
             SUBSCRIPTION_SET_STRING_METHOD_MAP.get(columnName).accept(this, subId, (String) value);
+        } else if (SUBSCRIPTION_SET_LONG_METHOD_MAP.containsKey(columnName)) {
+            // NEW LOGIC FOR LONG
+            long longValue;
+            if (value instanceof String) {
+                longValue = Long.parseLong((String) value);
+            } else if (value instanceof Number) {
+                longValue = ((Number) value).longValue();
+            } else {
+                throw new ClassCastException("columnName=" + columnName + ", cannot cast "
+                        + value.getClass() + " to long.");
+            }
+            SUBSCRIPTION_SET_LONG_METHOD_MAP.get(columnName).accept(this, subId, longValue);
         } else if (SUBSCRIPTION_SET_BYTE_ARRAY_METHOD_MAP.containsKey(columnName)) {
             // For byte array type columns, accepting both byte[] and string that can be converted
             // to byte[] using base 64 encoding/decoding.
@@ -2015,6 +2061,20 @@ public class SubscriptionDatabaseManager extends Handler {
     }
 
     /**
+     * Set the phone number retrieved from TS43.
+     *
+     * @param subId Subscription id.
+     * @param numberFromTs43 The phone number retrieved from TS43.
+     *
+     * @throws IllegalArgumentException if the subscription does not exist.
+     */
+    public void setNumberFromTs43(int subId, @NonNull String numberFromTs43) {
+        Objects.requireNonNull(numberFromTs43);
+        writeDatabaseAndCacheHelper(subId, SimInfo.COLUMN_PHONE_NUMBER_SOURCE_TS43,
+                numberFromTs43, SubscriptionInfoInternal.Builder::setNumberFromTs43);
+    }
+
+    /**
      * Set the port index of the Uicc card.
      *
      * @param subId Subscription id.
@@ -2275,6 +2335,21 @@ public class SubscriptionDatabaseManager extends Handler {
     }
 
     /**
+     * Set whether the subscription is for private network.
+     *
+     * @param subId Subscription id.
+     * @param isPrivateNetwork {@code 1} if the subscription is for private network.
+     *
+     * @throws IllegalArgumentException if the subscription does not exist.
+     */
+    public void setIsPrivateNetwork(int subId, int isPrivateNetwork) {
+        if (mFeatureFlags.enableIsPrivateNetworkApi()) {
+            writeDatabaseAndCacheHelper(subId, SimInfo.COLUMN_IS_PRIVATE_NETWORK, isPrivateNetwork,
+                    SubscriptionInfoInternal.Builder::setIsPrivateNetwork);
+        }
+    }
+
+    /**
      * Set satellite entitlement barred plmns list by entitlement query result.
      *
      * @param subId Subscription id.
@@ -2347,6 +2422,41 @@ public class SubscriptionDatabaseManager extends Handler {
                 SimInfo.COLUMN_SATELLITE_ENTITLEMENT_VOICE_SERVICE_POLICY,
                 satellitePlmnsVoiceServicePolicy,
                 SubscriptionInfoInternal.Builder::setSatellitePlmnsVoiceServicePolicy);
+    }
+
+    /**
+     * Set the maximum downlink data rate in Kbps for streaming applications.
+     *
+     * @param subId Subscription id.
+     * @param streamingAppMaxDownlinkKbps The maximum downlink data rate in Kbps.
+     * @throws IllegalArgumentException if the subscription does not exist.
+     */
+    public void setStreamingAppMaxDownlinkKbps(int subId,
+            long streamingAppMaxDownlinkKbps) {
+        if (mFeatureFlags.subscriptionPlanEnhancement()) {
+            writeDatabaseAndCacheHelper(subId,
+                    SimInfo.COLUMN_STREAMING_APP_MAX_DOWNLINK_KBPS,
+                    streamingAppMaxDownlinkKbps,
+                    SubscriptionInfoInternal
+                            .Builder::setStreamingAppMaxDownlinkKbps);
+        }
+    }
+
+    /**
+     * Set the maximum uplink data rate in Kbps for streaming applications.
+     *
+     * @param subId Subscription id.
+     * @param streamingAppMaxUplinkKbps The maximum uplink data rate in Kbps.
+     * @throws IllegalArgumentException if the subscription does not exist.
+     */
+    public void setStreamingAppMaxUplinkKbps(int subId, long streamingAppMaxUplinkKbps) {
+        if (mFeatureFlags.subscriptionPlanEnhancement()) {
+            writeDatabaseAndCacheHelper(subId,
+                    SimInfo.COLUMN_STREAMING_APP_MAX_UPLINK_KBPS,
+                    streamingAppMaxUplinkKbps,
+                    SubscriptionInfoInternal
+                            .Builder::setStreamingAppMaxUplinkKbps);
+        }
     }
 
     /**
@@ -2612,8 +2722,24 @@ public class SubscriptionDatabaseManager extends Handler {
             builder.setTransferStatus(cursor.getInt(cursor.getColumnIndexOrThrow(
                     SimInfo.COLUMN_TRANSFER_STATUS)));
         }
+        if (mFeatureFlags.getPhoneNumberTs43Api()) {
+            builder.setNumberFromTs43(TextUtils.emptyIfNull(cursor.getString(
+                    cursor.getColumnIndexOrThrow(
+                            SimInfo.COLUMN_PHONE_NUMBER_SOURCE_TS43))));
+        }
         builder.setSatelliteESOSSupported(cursor.getInt(
                 cursor.getColumnIndexOrThrow(SimInfo.COLUMN_SATELLITE_ESOS_SUPPORTED)));
+        builder.setIsPrivateNetwork(cursor.getInt(
+                cursor.getColumnIndexOrThrow(SimInfo.COLUMN_IS_PRIVATE_NETWORK)));
+        if (mFeatureFlags.subscriptionPlanEnhancement()) {
+            builder.setStreamingAppMaxDownlinkKbps(
+                    cursor.getLong(cursor.getColumnIndexOrThrow(
+                            SimInfo.COLUMN_STREAMING_APP_MAX_DOWNLINK_KBPS)))
+                    .setStreamingAppMaxUplinkKbps(
+                            cursor.getLong(cursor.getColumnIndexOrThrow(
+                                    SimInfo.COLUMN_STREAMING_APP_MAX_UPLINK_KBPS))
+                    );
+        }
         return builder.build();
     }
 

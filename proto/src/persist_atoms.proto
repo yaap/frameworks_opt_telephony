@@ -275,6 +275,10 @@ message PersistAtoms {
     repeated OtpRedactionEvent otp_redaction_event = 84;
 
     optional int64 otp_redaction_event_pull_timestamp_millis = 85;
+
+    repeated MessagingReadRestrictionEvent messaging_read_restriction_event = 86;
+
+    optional int64 messaging_read_restriction_event_pull_timestamp_millis = 87;
 }
 
 // The canonical versions of the following enums live in:
@@ -362,6 +366,7 @@ message IncomingSms {
     optional bool is_emergency = 18;
     optional bool is_nb_iot_ntn = 19;
     optional int32 pdu_length = 20;
+    optional string plmn = 21;
 
     // Internal use only
     optional int32 hashCode = 10001;
@@ -393,6 +398,8 @@ message OutgoingSms {
     optional int32 pdu_length = 23;
     optional string calling_package_name = 24;
     optional int32 app_uid = 25;
+    optional string plmn = 26;
+    optional int32 satellite_message_trigger = 27;
 
     // Internal use only
     optional int32 hashCode = 10001;
@@ -433,6 +440,9 @@ message DataCallSession {
     optional bool is_satellite_transport = 25;
     optional bool is_provisioning_profile = 26;
     optional bool is_nb_iot_ntn = 27;
+    optional int32 slice_capability = 28;
+    optional string plmn = 29;
+    optional int32 connection_capability = 30;
 }
 
 message CellularServiceState {
@@ -454,6 +464,7 @@ message CellularServiceState {
     optional bool is_ntn = 16;
     optional bool is_nb_iot_ntn = 17;
     optional bool is_opportunistic = 18;
+    optional string plmn = 19;
 
     // Internal use only
     optional int64 last_used_millis = 10001;
@@ -531,6 +542,7 @@ message NetworkRequestsV2 {
         SATELLITE_XCAP_RESTRICTED = 8;
         SATELLITE_EIMS_RESTRICTED = 9;
         SATELLITE_SUPL_RESTRICTED =10;
+        PRIORITIZE_UNIFIED_COMMUNICATIONS = 11;
     }
     optional int32 carrier_id = 1;
     optional NetworkCapability capability = 2;
@@ -780,6 +792,12 @@ message SatelliteSession {
     optional int32 max_inactivity_duration_sec = 20;
     optional int32 supported_connection_mode = 21;
     optional int32 session_connection_mode = 22;
+    optional string plmn = 23;
+    optional int32 screen_on_time_sec = 24;
+    optional int32 battery_level_drop_percent = 25;
+    optional bool was_charging_during_session = 26;
+    optional int32 battery_design_capacity_mah = 27;
+    optional int64 energy_consumed_nwh = 28;
 }
 
 message SatelliteIncomingDatagram {
@@ -791,6 +809,7 @@ message SatelliteIncomingDatagram {
     optional bool is_ntn_only_carrier = 6;
     optional int32 supported_connection_mode = 7;
     optional int32 session_connection_mode = 8;
+  optional string plmn = 9;
 }
 
 message SatelliteOutgoingDatagram {
@@ -803,6 +822,7 @@ message SatelliteOutgoingDatagram {
     optional bool is_ntn_only_carrier = 7;
     optional int32 supported_connection_mode = 8;
     optional int32 session_connection_mode = 9;
+  optional string plmn = 10;
 }
 
 message SatelliteProvision {
@@ -829,6 +849,10 @@ message SatelliteSosMessageRecommender {
     optional bool is_ntn_only_carrier = 11;
     optional int32 supported_connection_mode = 12;
     optional int32 session_connection_mode = 13;
+    optional string plmn = 14;
+    optional bool is_in_carrier_roaming_ntn_mode = 15;
+    optional int32 carrier_roaming_satellite_emergency_messaging_provider = 16;
+    optional int32 emergency_number_source_used_in_handover_intent = 17;
 }
 
 message DataNetworkValidation {
@@ -878,6 +902,28 @@ message CarrierRoamingSatelliteSession {
     repeated int64 per_app_satellite_data_consumed_bytes = 34;
     optional int32 supported_connection_mode = 35;
     optional int32 session_connection_mode = 36;
+    optional string plmn = 37;
+    optional bool is_wifi_enabled = 38;
+    optional bool is_wfc_enabled = 39;
+    optional bool is_wfc_registered = 40;
+    optional int32 screen_on_time_sec = 41;
+    optional int32 battery_level_drop_percent = 42;
+    optional bool was_charging_during_session = 43;
+    optional int32 battery_design_capacity_mah = 44;
+    optional int64 energy_consumed_nwh = 45;
+    optional int32 eligibility_source = 46;
+    optional bool is_wifi_connected = 47;
+    optional int32 count_of_non_emergency_dialer_dialog_displayed = 48;
+    optional int32 count_of_emergency_dialer_button_displayed = 49;
+    optional int32 count_of_satellite_notification_displayed = 50;
+    /** Total RX data consumed per satellite session. */
+    optional int64 total_rx_data_bytes = 51;
+    /** Total TX data consumed per satellite session. */
+    optional int64 total_tx_data_bytes = 52;
+    /** RX data consumed by top 5 satellite network applications. */
+    repeated int64 per_app_rx_data_bytes = 53;
+    /** TX data consumed by top 5 satellite network applications. */
+    repeated int64 per_app_tx_data_bytes = 54;
 }
 
 message CarrierRoamingSatelliteControllerStats {
@@ -897,6 +943,9 @@ message CarrierRoamingSatelliteControllerStats {
     optional int32 count_of_session_connection_mode_automatic = 14;
     optional int32 count_of_session_connection_mode_manual = 15;
     optional int32 service_data_policy = 16;
+    optional int32 total_session_duration_sec = 17;
+    optional bool satellite_attach_supported = 18;
+    optional int32 eligibility_source = 19;
 }
 
 message SatelliteEntitlement {
@@ -910,6 +959,7 @@ message SatelliteEntitlement {
     optional int32 entitlement_data_policy = 8;
     optional int32 supported_connection_mode = 9;
     optional int32 http_status_code = 10;
+    optional int32 trigger_event = 11;
 }
 
 message SatelliteConfigUpdater {
@@ -945,3 +995,12 @@ message OtpRedactionEvent {
     optional int32 uid = 1;
     optional int32 count = 4;
 }
+
+message MessagingReadRestrictionEvent {
+    optional int32 caller_uid = 1;
+    optional int32 content_provider = 2;
+    optional int32 event_type = 3;
+    optional int32 read_restricted_messages_app_op_mode = 4;
+    optional int32 count = 5;
+}
+

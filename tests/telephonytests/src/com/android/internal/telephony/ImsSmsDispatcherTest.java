@@ -18,6 +18,7 @@ package com.android.internal.telephony;
 
 import static com.android.internal.telephony.TelephonyTestUtils.waitForMs;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -27,8 +28,11 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -38,6 +42,8 @@ import android.os.Binder;
 import android.os.PersistableBundle;
 import android.os.Process;
 import android.telephony.CarrierConfigManager;
+import android.telephony.PhoneNumberUtils;
+import android.telephony.SmsManager;
 import android.telephony.SmsMessage;
 import android.telephony.ims.stub.ImsSmsImplBase;
 import android.testing.AndroidTestingRunner;
@@ -54,6 +60,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.mockito.stubbing.Answer;
 
 import java.util.HashMap;
@@ -325,6 +332,49 @@ public class ImsSmsDispatcherTest extends TelephonyTest {
     }
 
     @Test
+    @SmallTest
+    public void testSendRawPdu() throws Exception {
+        String callingPackage = "com.example.test";
+        byte[] pdu = new byte[] {0x01, 0x02};
+        ImsSmsDispatcher imsSmsDispatcher = spy(mImsSmsDispatcher);
+        doNothing().when(imsSmsDispatcher).sendSms(any());
+        doReturn(mSmsUsageMonitor).when(mSmsDispatchersController).getUsageMonitor();
+
+        imsSmsDispatcher.sendRawPdu(callingPackage, mCallingUserId, "5551212", null, pdu, null,
+                null, 0);
+
+        ArgumentCaptor<SMSDispatcher.SmsTracker> captor =
+                ArgumentCaptor.forClass(SMSDispatcher.SmsTracker.class);
+        verify(imsSmsDispatcher).sendSms(captor.capture());
+        SMSDispatcher.SmsTracker smsTracker = captor.getValue();
+        assertEquals(pdu, smsTracker.getData().get("pdu"));
+    }
+
+    @Test
+    @SmallTest
+    public void testSendRawPdu_skipStkShortCodeCheck() throws Exception {
+        String callingPackage = "com.example.test";
+        byte[] pdu = new byte[] {0x01, 0x02};
+        doReturn(true).when(mFeatureFlags).skipStkShortCodeCheck();
+
+        ImsSmsDispatcher imsSmsDispatcher = spy(mImsSmsDispatcher);
+        doNothing().when(imsSmsDispatcher).sendSms(any());
+        doReturn(mSmsUsageMonitor).when(mSmsDispatchersController).getUsageMonitor();
+
+        imsSmsDispatcher.sendRawPdu(callingPackage, mCallingUserId, "5551212", null, pdu, null,
+                null, 0);
+
+        verify(mSmsUsageMonitor, never()).checkDestination(any(), any());
+        verify(mSmsUsageMonitor, never()).getPremiumSmsPermission(any());
+
+        ArgumentCaptor<SMSDispatcher.SmsTracker> captor =
+                ArgumentCaptor.forClass(SMSDispatcher.SmsTracker.class);
+        verify(imsSmsDispatcher).sendSms(captor.capture());
+        SMSDispatcher.SmsTracker smsTracker = captor.getValue();
+        assertEquals(pdu, smsTracker.getData().get("pdu"));
+    }
+
+    @Test
     public void testSendSmswithMessageRef() throws Exception {
         int token = mImsSmsDispatcher.mNextToken.get();
         int messageRef = mImsSmsDispatcher.nextMessageRef();
@@ -473,4 +523,29 @@ public class ImsSmsDispatcherTest extends TelephonyTest {
         assertNotNull(captor.getValue());
         assertTrue(captor.getValue().mRetryCount > 0);
     }
+
+    @Test
+    @SmallTest
+    public void testFdnCheckFailure() throws Exception {
+        final int token = 1;
+        mTrackerData.put("pdu", com.android.internal.telephony.gsm.SmsMessage.getSubmitPdu(null,
+                "+15555551212", "Test", false).encodedMessage);
+        when(mImsManager.getSmsFormat()).thenReturn(SmsMessage.FORMAT_3GPP);
+        mImsSmsDispatcher.mTrackers.put(token, mSmsTracker);
+        when(mPhone.getPhoneType()).thenReturn(PhoneConstants.PHONE_TYPE_GSM);
+
+        // Simulate FDN check failure with an error status
+        mImsSmsDispatcher.getSmsListener().onSendSmsResult(token, 0,
+                ImsSmsImplBase.SEND_STATUS_ERROR,
+                SmsManager.RESULT_ERROR_FDN_CHECK_FAILURE,
+                SmsResponse.NO_ERROR_CODE);
+
+        // onFailed should be called with same RESULT_ERROR_FDN_CHECK_FAILURE error
+        verify(mSmsTracker).onFailed(any(Context.class),
+                eq(SmsManager.RESULT_ERROR_FDN_CHECK_FAILURE), eq(SmsResponse.NO_ERROR_CODE));
+
+        // Retry shouldn't be called for SEND_STATUS_ERROR
+        verify(mSmsDispatchersController, times(0)).sendRetrySms(any());
+    }
+
 }

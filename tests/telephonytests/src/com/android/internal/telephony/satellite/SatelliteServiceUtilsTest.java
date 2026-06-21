@@ -16,6 +16,13 @@
 
 package com.android.internal.telephony.satellite;
 
+import static android.telephony.satellite.SatelliteManager.NT_RADIO_TECHNOLOGY_EMTC_NTN;
+import static android.telephony.satellite.SatelliteManager.NT_RADIO_TECHNOLOGY_LTE_DTC;
+import static android.telephony.satellite.SatelliteManager.NT_RADIO_TECHNOLOGY_NB_IOT_NTN;
+import static android.telephony.satellite.SatelliteManager.NT_RADIO_TECHNOLOGY_NR_DTC;
+import static android.telephony.satellite.SatelliteManager.NT_RADIO_TECHNOLOGY_NR_NTN;
+import static android.telephony.satellite.SatelliteManager.NT_RADIO_TECHNOLOGY_PROPRIETARY;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -27,6 +34,7 @@ import android.os.PersistableBundle;
 import android.telephony.AccessNetworkConstants;
 import android.telephony.NetworkRegistrationInfo;
 import android.telephony.ServiceState;
+import android.telephony.satellite.stub.NTRadioTechnology;
 import android.testing.AndroidTestingRunner;
 import android.testing.TestableLooper;
 
@@ -184,14 +192,26 @@ public class SatelliteServiceUtilsTest extends TelephonyTest {
     }
 
     @Test
+    public void testIsSatelliteTechSupported() {
+        assertTrue(SatelliteServiceUtils.isSatelliteTechSupported(NT_RADIO_TECHNOLOGY_NB_IOT_NTN));
+        assertTrue(SatelliteServiceUtils.isSatelliteTechSupported(NT_RADIO_TECHNOLOGY_LTE_DTC));
+        assertTrue(SatelliteServiceUtils.isSatelliteTechSupported(NT_RADIO_TECHNOLOGY_NR_DTC));
+        assertTrue(SatelliteServiceUtils.isSatelliteTechSupported(NT_RADIO_TECHNOLOGY_NR_NTN));
+        assertFalse(
+                SatelliteServiceUtils.isSatelliteTechSupported(NT_RADIO_TECHNOLOGY_PROPRIETARY));
+        assertFalse(SatelliteServiceUtils.isSatelliteTechSupported(NT_RADIO_TECHNOLOGY_EMTC_NTN));
+        assertFalse(SatelliteServiceUtils.isSatelliteTechSupported(NT_RADIO_TECHNOLOGY_EMTC_NTN));
+    }
+
+    @Test
     public void testIsSatellitePlmn() {
         int subId = 1;
-
+        logd("testIsSatellitePlmn: set all PLMN set empty");
         when(mMockSatelliteController.getAllPlmnSet())
                 .thenReturn(new HashSet<>(new ArrayList<>()));
         assertFalse(SatelliteServiceUtils.isSatellitePlmn(subId, mServiceState));
 
-        // registered PLMN is null
+        logd("testIsSatellitePlmn: registered PLMN is null");
         NetworkRegistrationInfo nri = new NetworkRegistrationInfo.Builder()
                 .setRegisteredPlmn(null)
                 .build();
@@ -200,7 +220,7 @@ public class SatelliteServiceUtilsTest extends TelephonyTest {
                 .thenReturn(List.of(nri));
         assertFalse(SatelliteServiceUtils.isSatellitePlmn(subId, mServiceState));
 
-        // cell identity is null
+        logd("testIsSatellitePlmn: cell identity is null");
         when(mMockSatelliteController.getAllPlmnSet()).thenReturn(
                 new HashSet<>(List.of("120260")));
         nri = new NetworkRegistrationInfo.Builder()
@@ -212,7 +232,7 @@ public class SatelliteServiceUtilsTest extends TelephonyTest {
                 .thenReturn(List.of(nri));
         assertFalse(SatelliteServiceUtils.isSatellitePlmn(subId, mServiceState));
 
-        // mcc and mnc are null
+        logd("testIsSatellitePlmn: mcc and mnc are null");
         when(mCellIdentity.getMccString()).thenReturn(null);
         when(mCellIdentity.getMncString()).thenReturn(null);
         nri = new NetworkRegistrationInfo.Builder()
@@ -224,7 +244,19 @@ public class SatelliteServiceUtilsTest extends TelephonyTest {
                 .thenReturn(List.of(nri));
         assertFalse(SatelliteServiceUtils.isSatellitePlmn(subId, mServiceState));
 
-        // mccmnc equal to satellite PLMN
+        logd("testIsSatellitePlmn: cell identity and registered PLMN are null "
+                + "but non-terrestrial network is true");
+        nri = new NetworkRegistrationInfo.Builder()
+                .setRegisteredPlmn(null)
+                .setCellIdentity(null)
+                .setIsNonTerrestrialNetwork(true)
+                .build();
+        when(mServiceState.getNetworkRegistrationInfoListForTransportType(
+                eq(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)))
+                .thenReturn(List.of(nri));
+        assertTrue(SatelliteServiceUtils.isSatellitePlmn(subId, mServiceState));
+
+        logd("testIsSatellitePlmn: mccmnc equal to satellite PLMN");
         when(mCellIdentity.getMccString()).thenReturn("120");
         when(mCellIdentity.getMncString()).thenReturn("260");
         nri = new NetworkRegistrationInfo.Builder()
@@ -236,7 +268,7 @@ public class SatelliteServiceUtilsTest extends TelephonyTest {
                 .thenReturn(List.of(nri));
         assertTrue(SatelliteServiceUtils.isSatellitePlmn(subId, mServiceState));
 
-        // registered PLMN equal to satellite PLMN
+        logd("testIsSatellitePlmn: registered PLMN equal to satellite PLMN");
         when(mCellIdentity.getMccString()).thenReturn("123");
         when(mCellIdentity.getMncString()).thenReturn("456");
         nri = new NetworkRegistrationInfo.Builder()
@@ -247,5 +279,36 @@ public class SatelliteServiceUtilsTest extends TelephonyTest {
                 eq(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)))
                 .thenReturn(List.of(nri));
         assertTrue(SatelliteServiceUtils.isSatellitePlmn(subId, mServiceState));
+    }
+
+    @Test
+    public void testToStubSatelliteTechnology() {
+        android.hardware.radio.network.NetworkInfo halNetworkInfo =
+                new android.hardware.radio.network.NetworkInfo();
+
+        halNetworkInfo.satelliteTechnology =
+                android.hardware.radio.network.SatelliteTechnology.SAT_TECH_NB_IOT_NTN;
+        assertEquals(NTRadioTechnology.NB_IOT_NTN,
+                SatelliteServiceUtils.toStubSatelliteTechnology(halNetworkInfo));
+
+        halNetworkInfo.satelliteTechnology =
+                android.hardware.radio.network.SatelliteTechnology.SAT_TECH_3GPP_NTN;
+        assertEquals(NTRadioTechnology.NR_NTN,
+                SatelliteServiceUtils.toStubSatelliteTechnology(halNetworkInfo));
+
+        halNetworkInfo.satelliteTechnology =
+                android.hardware.radio.network.SatelliteTechnology.SAT_TECH_DTC;
+        halNetworkInfo.accessNetwork = AccessNetworkConstants.AccessNetworkType.EUTRAN;
+        assertEquals(NTRadioTechnology.LTE_DTC,
+                SatelliteServiceUtils.toStubSatelliteTechnology(halNetworkInfo));
+
+        halNetworkInfo.accessNetwork = AccessNetworkConstants.AccessNetworkType.NGRAN;
+        assertEquals(NTRadioTechnology.NR_DTC,
+                SatelliteServiceUtils.toStubSatelliteTechnology(halNetworkInfo));
+
+        halNetworkInfo.satelliteTechnology =
+                android.hardware.radio.network.SatelliteTechnology.SAT_TECH_NONE;
+        assertEquals(NTRadioTechnology.UNKNOWN,
+                SatelliteServiceUtils.toStubSatelliteTechnology(halNetworkInfo));
     }
 }

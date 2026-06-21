@@ -52,6 +52,8 @@ public class DataIndication extends IRadioDataIndication.Stub {
      * @param dcList List of SetupDataCallResult identical to that returned by getDataCallList.
      *        It is the complete list of current data contexts including new contexts that have
      *        been activated.
+     *
+     * @deprecated use IRadioDataResponse.dataCallListUpdated() instead.
      */
     public void dataCallListChanged(int indicationType,
             android.hardware.radio.data.SetupDataCallResult[] dcList) {

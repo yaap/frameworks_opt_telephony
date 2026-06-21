@@ -33,7 +33,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+
 import android.annotation.NonNull;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -44,6 +48,7 @@ import android.os.Message;
 import android.os.UserHandle;
 import android.telephony.satellite.ISatelliteTransmissionUpdateCallback;
 import android.telephony.satellite.PointingInfo;
+import android.telephony.satellite.PointingUiAppLaunchIntentAttributes;
 import android.telephony.satellite.SatelliteManager;
 import android.telephony.satellite.SatelliteManager.SatelliteException;
 import android.testing.AndroidTestingRunner;
@@ -453,6 +458,52 @@ public class PointingAppControllerTest extends TelephonyTest {
         mInOrder.verify(mMockSatelliteModemInterface).unregisterForDatagramTransferStateChanged(
                 any(Handler.class));
         mInOrder = null;
+    }
+
+    @Test
+    public void testCreatePointingUiAppPendingIntent_success() {
+        doReturn(true).when(mFeatureFlags).systemSelectionSpecifierEnhancement();
+        PointingUiAppLaunchIntentAttributes attributes = new PointingUiAppLaunchIntentAttributes(
+                true, true, true);
+        PendingIntent pendingIntent = mPointingAppController.createPointingUiAppPendingIntent(
+                attributes);
+        assertNotNull(pendingIntent);
+
+        Intent intent = pendingIntent.getIntent();
+        assertEquals(KEY_POINTING_UI_PACKAGE_NAME, intent.getComponent().getPackageName());
+        assertEquals(KEY_POINTING_UI_CLASS_NAME, intent.getComponent().getClassName());
+
+        Bundle b = intent.getExtras();
+        assertTrue(b.containsKey(KEY_NEED_FULL_SCREEN));
+        assertTrue(b.getBoolean(KEY_NEED_FULL_SCREEN));
+        assertTrue(b.containsKey(KEY_IS_DEMO_MODE));
+        assertTrue(b.getBoolean(KEY_IS_DEMO_MODE));
+        assertTrue(b.containsKey(KEY_IS_EMERGENCY));
+        assertTrue(b.getBoolean(KEY_IS_EMERGENCY));
+
+        assertEquals(Intent.FLAG_ACTIVITY_NO_USER_ACTION | Intent.FLAG_ACTIVITY_CLEAR_TOP,
+                intent.getFlags());
+    }
+
+    @Test
+    public void testCreatePointingUiAppPendingIntent_flagDisabled() {
+        doReturn(false).when(mFeatureFlags).systemSelectionSpecifierEnhancement();
+        PointingUiAppLaunchIntentAttributes attributes = new PointingUiAppLaunchIntentAttributes(
+                true, true, true);
+        PendingIntent pendingIntent = mPointingAppController.createPointingUiAppPendingIntent(
+                attributes);
+        assertNull(pendingIntent);
+    }
+
+    @Test
+    public void testCreatePointingUiAppPendingIntent_packageNull() {
+        doReturn(true).when(mFeatureFlags).systemSelectionSpecifierEnhancement();
+        mContextFixture.putResource(R.string.config_pointing_ui_package, null);
+        PointingUiAppLaunchIntentAttributes attributes = new PointingUiAppLaunchIntentAttributes(
+                true, true, true);
+        PendingIntent pendingIntent = mPointingAppController.createPointingUiAppPendingIntent(
+                attributes);
+        assertNull(pendingIntent);
     }
 
     private static void loge(String message) {

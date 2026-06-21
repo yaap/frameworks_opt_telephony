@@ -410,6 +410,12 @@ public class WapPushOverSms implements ServiceConnection {
         // Direct the intent to only the default MMS app. If we can't find a default MMS app
         // then sent it to all broadcast receivers.
         UserHandle userHandle = TelephonyUtils.getSubscriptionUserHandle(mContext, subId);
+
+        // In case of the default subscription association with userId -1000, assume that the
+        // subscription is associated with the main user.
+        if (userHandle == null) {
+            userHandle = mUserManager.getMainUser();
+        }
         ComponentName componentName = SmsApplication.getDefaultMmsApplicationAsUser(mContext,
                 true, userHandle);
 
@@ -430,13 +436,6 @@ public class WapPushOverSms implements ServiceConnection {
             options = bopts.toBundle();
         }
 
-        if (userHandle == null) {
-            if (mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()) {
-                userHandle = mUserManager.getMainUser();
-            } else {
-                userHandle = UserHandle.SYSTEM;
-            }
-        }
         handler.dispatchIntent(intent, getPermissionForType(result.mimeType),
                 getAppOpsStringPermissionForIntent(result.mimeType), options, receiver,
                 userHandle, subId);

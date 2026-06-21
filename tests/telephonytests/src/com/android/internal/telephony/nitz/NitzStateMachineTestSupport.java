@@ -29,9 +29,7 @@ import com.android.internal.telephony.NitzSignal;
 import com.android.internal.telephony.NitzStateMachine;
 import com.android.internal.telephony.NitzStateMachine.DeviceState;
 
-/**
- * An assortment of methods and classes for testing {@link NitzStateMachine} implementations.
- */
+/** An assortment of methods and classes for testing {@link NitzStateMachine} implementations. */
 final class NitzStateMachineTestSupport {
 
     /** Used to indicate that a NitzSignal ageMillis is unimportant for the test. */
@@ -44,18 +42,20 @@ final class NitzStateMachineTestSupport {
 
     // A country with a single zone : the zone can be guessed from the country.
     // The UK uses UTC for part of the year so it is not good for detecting bogus NITZ signals.
-    static final Scenario UNITED_KINGDOM_SCENARIO = new Scenario.Builder()
-            .setTimeZone("Europe/London")
-            .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
-            .setCountryIso("gb")
-            .buildFrozen();
+    static final Scenario UNITED_KINGDOM_SCENARIO =
+            new Scenario.Builder()
+                    .setTimeZone("Europe/London")
+                    .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
+                    .setCountryIso("gb")
+                    .buildFrozen();
 
     // A country with a single zone : the zone cannot be guessed from the MCC country.
-    static final Scenario FRENCH_GUIANA_SCENARIO = new Scenario.Builder()
-            .setTimeZone("America/Cayenne")
-            .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
-            .setCountryIso("gf")
-            .buildFrozen();
+    static final Scenario FRENCH_GUIANA_SCENARIO =
+            new Scenario.Builder()
+                    .setTimeZone("America/Cayenne")
+                    .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
+                    .setCountryIso("gf")
+                    .buildFrozen();
 
     static final String UNITED_KINGDOM_COUNTRY_DEFAULT = "gb";
 
@@ -65,28 +65,30 @@ final class NitzStateMachineTestSupport {
     // time in this scenario: the zone cannot be guessed from the country alone, but can be guessed
     // from the country + NITZ. The US never uses UTC so it can be used for testing bogus (zero'd
     // values) NITZ signals.
-    static final Scenario UNIQUE_US_ZONE_SCENARIO1 = new Scenario.Builder()
-            .setTimeZone("America/Los_Angeles")
-            .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
-            .setCountryIso("us")
-            .buildFrozen();
+    static final Scenario UNIQUE_US_ZONE_SCENARIO1 =
+            new Scenario.Builder()
+                    .setTimeZone("America/Los_Angeles")
+                    .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
+                    .setCountryIso("us")
+                    .buildFrozen();
 
     // An alternative US scenario which also provides a unique time zone answer.
-    static final Scenario UNIQUE_US_ZONE_SCENARIO2 = new Scenario.Builder()
-            .setTimeZone("America/Chicago")
-            .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
-            .setCountryIso("us")
-            .buildFrozen();
+    static final Scenario UNIQUE_US_ZONE_SCENARIO2 =
+            new Scenario.Builder()
+                    .setTimeZone("America/Chicago")
+                    .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
+                    .setCountryIso("us")
+                    .buildFrozen();
 
     // A non-unique US scenario: the offset information is ambiguous between America/Phoenix and
     // America/Denver during winter.
-    static final Scenario NON_UNIQUE_US_ZONE_SCENARIO = new Scenario.Builder()
-            .setTimeZone("America/Denver")
-            .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
-            .setCountryIso("us")
-            .buildFrozen();
-    static final String[] NON_UNIQUE_US_ZONE_SCENARIO_ZONES =
-            { "America/Denver", "America/Phoenix" };
+    static final Scenario NON_UNIQUE_US_ZONE_SCENARIO =
+            new Scenario.Builder()
+                    .setTimeZone("America/Denver")
+                    .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
+                    .setCountryIso("us")
+                    .buildFrozen();
+    static final String[] NON_UNIQUE_US_ZONE_SCENARIO_ZONES = {"America/Denver", "America/Phoenix"};
 
     static final String US_COUNTRY_DEFAULT = "us";
 
@@ -94,16 +96,18 @@ final class NitzStateMachineTestSupport {
 
     // New Zealand is a country with multiple zones, but the default zone has the "boost" modifier
     // which means that NITZ isn't required to find the zone.
-    static final Scenario NEW_ZEALAND_DEFAULT_SCENARIO = new Scenario.Builder()
-            .setTimeZone("Pacific/Auckland")
-            .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
-            .setCountryIso("nz")
-            .buildFrozen();
-    static final Scenario NEW_ZEALAND_OTHER_SCENARIO = new Scenario.Builder()
-            .setTimeZone("Pacific/Chatham")
-            .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
-            .setCountryIso("nz")
-            .buildFrozen();
+    static final Scenario NEW_ZEALAND_DEFAULT_SCENARIO =
+            new Scenario.Builder()
+                    .setTimeZone("Pacific/Auckland")
+                    .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
+                    .setCountryIso("nz")
+                    .buildFrozen();
+    static final Scenario NEW_ZEALAND_OTHER_SCENARIO =
+            new Scenario.Builder()
+                    .setTimeZone("Pacific/Chatham")
+                    .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
+                    .setCountryIso("nz")
+                    .buildFrozen();
 
     static final String NEW_ZEALAND_COUNTRY_DEFAULT = "nz";
 
@@ -111,19 +115,18 @@ final class NitzStateMachineTestSupport {
 
     // A country with a single zone: the zone can be guessed from the country alone. CZ never uses
     // UTC so it can be used for testing bogus NITZ signal handling.
-    static final Scenario CZECHIA_SCENARIO = new Scenario.Builder()
-            .setTimeZone("Europe/Prague")
-            .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
-            .setCountryIso("cz")
-            .buildFrozen();
+    static final Scenario CZECHIA_SCENARIO =
+            new Scenario.Builder()
+                    .setTimeZone("Europe/Prague")
+                    .setActualTimeUtc(2018, 1, 1, 12, 0, 0)
+                    .setCountryIso("cz")
+                    .buildFrozen();
 
     static final String CZECHIA_COUNTRY_DEFAULT = "cz";
 
     static final String CZECHIA_COUNTRY_DEFAULT_ZONE_ID = "Europe/Prague";
 
-    /**
-     * A scenario used during tests. Describes a fictional reality.
-     */
+    /** A scenario used during tests. Describes a fictional reality. */
     static class Scenario {
 
         private final boolean mFrozen;
@@ -151,7 +154,9 @@ final class NitzStateMachineTestSupport {
             mZone.getOffset(mActualTimeMillis, false /* local */, offsets);
             int zoneOffsetMillis = offsets[0] + offsets[1];
             return NitzData.createForTests(
-                    zoneOffsetMillis, offsets[1], mActualTimeMillis,
+                    zoneOffsetMillis,
+                    offsets[1],
+                    mActualTimeMillis,
                     null /* emulatorHostTimeZone */);
         }
 
@@ -197,10 +202,10 @@ final class NitzStateMachineTestSupport {
             private String mZoneId;
             private String mCountryIsoCode;
 
-            Builder setActualTimeUtc(int year, int monthInYear, int day, int hourOfDay,
-                    int minute, int second) {
-                mActualTimeMillis = createUnixEpochTime(year, monthInYear, day, hourOfDay, minute,
-                        second);
+            Builder setActualTimeUtc(
+                    int year, int monthInYear, int day, int hourOfDay, int minute, int second) {
+                mActualTimeMillis =
+                        createUnixEpochTime(year, monthInYear, day, hourOfDay, minute, second);
                 return this;
             }
 
@@ -289,13 +294,12 @@ final class NitzStateMachineTestSupport {
             elapsedRealtime += timeIncrementMillis;
             currentTimeMillis += timeIncrementMillis;
         }
-
     }
 
     private NitzStateMachineTestSupport() {}
 
-    private static long createUnixEpochTime(int year, int monthInYear, int day, int hourOfDay,
-            int minute, int second) {
+    private static long createUnixEpochTime(
+            int year, int monthInYear, int day, int hourOfDay, int minute, int second) {
         Calendar cal = new GregorianCalendar(zone("Etc/UTC"));
         cal.clear();
         cal.set(year, monthInYear - 1, day, hourOfDay, minute, second);
@@ -303,15 +307,11 @@ final class NitzStateMachineTestSupport {
     }
 
     static TelephonyTimeZoneSuggestion createEmptyTimeZoneSuggestion(int slotIndex) {
-        return new TelephonyTimeZoneSuggestion.Builder(slotIndex)
-                .addDebugInfo("Test")
-                .build();
+        return new TelephonyTimeZoneSuggestion.Builder(slotIndex).addDebugInfo("Test").build();
     }
 
     static TelephonyTimeSuggestion createEmptyTimeSuggestion(int slotIndex) {
-        return new TelephonyTimeSuggestion.Builder(slotIndex)
-                .addDebugInfo("Test")
-                .build();
+        return new TelephonyTimeSuggestion.Builder(slotIndex).addDebugInfo("Test").build();
     }
 
     static TelephonyTimeSuggestion createTimeSuggestionFromNitzSignal(

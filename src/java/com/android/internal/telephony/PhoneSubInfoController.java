@@ -20,12 +20,11 @@ package com.android.internal.telephony;
 
 import static android.Manifest.permission.MODIFY_PHONE_STATE;
 import static android.Manifest.permission.READ_PRIVILEGED_PHONE_STATE;
-import static android.telephony.TelephonyManager.ENABLE_FEATURE_MAPPING;
+import static android.Manifest.permission.USE_ICC_AUTH;
 
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.app.AppOpsManager;
-import android.app.compat.CompatChanges;
 import android.compat.annotation.UnsupportedAppUsage;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -45,15 +44,18 @@ import android.telephony.TelephonyFrameworkInitializer;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.EventLog;
+import android.util.Log;
 
 import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.flags.FeatureFlagsImpl;
+import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.subscription.SubscriptionInfoInternal;
 import com.android.internal.telephony.subscription.SubscriptionManagerService;
 import com.android.internal.telephony.uicc.IsimRecords;
 import com.android.internal.telephony.uicc.SIMRecords;
 import com.android.internal.telephony.uicc.UiccCardApplication;
 import com.android.internal.telephony.uicc.UiccPort;
+import com.android.internal.telephony.util.TelephonyUtils;
 import com.android.telephony.Rlog;
 
 import java.util.ArrayList;
@@ -73,18 +75,34 @@ public class PhoneSubInfoController extends IPhoneSubInfo.Stub {
     private FeatureFlags mFeatureFlags;
     private PackageManager mPackageManager;
     private final int mVendorApiLevel;
+    private static PhoneSubInfoController sInstance;
+
+    /**
+     * Initialize the PhoneSubInfoController singleton instance and register to
+     * TelephonyServiceManager
+     */
+    public static PhoneSubInfoController init(Context context) {
+        synchronized (PhoneSubInfoController.class) {
+            if (sInstance == null) {
+                sInstance = new PhoneSubInfoController(context);
+                ServiceRegisterer phoneSubServiceRegisterer = TelephonyFrameworkInitializer
+                        .getTelephonyServiceManager()
+                        .getPhoneSubServiceRegisterer();
+                if (phoneSubServiceRegisterer.get() == null) {
+                    phoneSubServiceRegisterer.register(sInstance);
+                }
+            } else {
+                Log.wtf(TAG, "PhoneSubInfoController is already initialized.");
+            }
+        }
+        return sInstance;
+    }
 
     public PhoneSubInfoController(Context context) {
         this(context, new FeatureFlagsImpl());
     }
 
     public PhoneSubInfoController(Context context, FeatureFlags featureFlags) {
-        ServiceRegisterer phoneSubServiceRegisterer = TelephonyFrameworkInitializer
-                .getTelephonyServiceManager()
-                .getPhoneSubServiceRegisterer();
-        if (phoneSubServiceRegisterer.get() == null) {
-            phoneSubServiceRegisterer.register(this);
-        }
         mAppOps = context.getSystemService(AppOpsManager.class);
         mContext = context;
         mPackageManager = context.getPackageManager();
@@ -365,11 +383,51 @@ public class PhoneSubInfoController extends IPhoneSubInfo.Stub {
             String callingPackage, String callingFeatureId, String message) {
         if (TelephonyPermissions.checkCallingOrSelfUseIccAuthWithDeviceIdentifier(context,
                 callingPackage, callingFeatureId, message)) {
+            logStackTrace("granted by UseIccAuthWithDeviceId");
             return true;
         }
         if (VDBG) log("No USE_ICC_AUTH_WITH_DEVICE_IDENTIFIER permission.");
-        enforcePrivilegedPermissionOrCarrierPrivilege(subId, message);
-        return true;
+        try {
+            if (Flags.newSimAuthPermission()) {
+                // need to disable requiring the new flag until we can propagate it to GMSC or
+                // we'll break things
+                // TODO(b/475363442)
+                try {
+                    enforceUseIccAuthPermissionOrCarrierPrivilege(subId, message);
+                    logStackTrace("granted by UseIccAuth or Carrier");
+                    return true;
+                } catch (SecurityException e) {
+                    enforcePrivilegedPermissionOrCarrierPrivilege(subId, message);
+                    logStackTrace("granted by privPermissionOrCarrier");
+                }
+            } else {
+                enforcePrivilegedPermissionOrCarrierPrivilege(subId, message);
+                logStackTrace("granted by unflagged");
+            }
+            return true;
+        } catch (SecurityException e) {
+            logStackTrace("not granted");
+            throw(e);
+        }
+    }
+
+    private void logStackTrace(String msg) {
+        Log.e(TAG, msg + " callingUID:" + Binder.getCallingUid(), new Exception());
+    }
+
+    /**
+     * Make sure caller has either USE_ICC_AUTH or carrier privilege.
+     *
+     * @throws SecurityException if the caller does not have the required permission/privilege
+     */
+    private void enforceUseIccAuthPermissionOrCarrierPrivilege(int subId, String message) {
+        int permissionResult = mContext.checkCallingOrSelfPermission(
+                USE_ICC_AUTH);
+        if (permissionResult == PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        if (VDBG) log("No USE_ICC_AUTH permission, check carrier privilege next.");
+        TelephonyPermissions.enforceCallingOrSelfCarrierPrivilege(mContext, subId, message);
     }
 
     /**
@@ -506,13 +564,15 @@ public class PhoneSubInfoController extends IPhoneSubInfo.Stub {
         IsimRecords isimRecords = phone.getIsimRecords();
         if (isimRecords != null) {
             String[] impus = isimRecords.getIsimImpu();
-            List<Uri> impuList = new ArrayList<>();
-            for (String impu : impus) {
-                if (impu != null && impu.trim().length() > 0) {
-                    impuList.add(Uri.parse(impu));
+            if (impus != null) {
+                List<Uri> impuList = new ArrayList<>();
+                for (String impu : impus) {
+                    if (impu != null && impu.trim().length() > 0) {
+                        impuList.add(Uri.parse(impu));
+                    }
                 }
+                return impuList;
             }
-            return impuList;
         }
         throw new IllegalStateException("ISIM is not loaded");
     }
@@ -561,9 +621,6 @@ public class PhoneSubInfoController extends IPhoneSubInfo.Stub {
      * @throws SecurityException if the caller does not have the required permission
      */
     public List<String> getImsPcscfAddresses(int subId, String callingPackage) {
-        if (!mFeatureFlags.supportIsimRecord()) {
-            return new ArrayList<>();
-        }
         if (!SubscriptionManager.isValidSubscriptionId(subId)) {
             throw new IllegalArgumentException("Invalid subscription: " + subId);
         }
@@ -579,12 +636,14 @@ public class PhoneSubInfoController extends IPhoneSubInfo.Stub {
         IsimRecords isimRecords = phone.getIsimRecords();
         if (isimRecords != null) {
             String[] pcscfs = isimRecords.getIsimPcscf();
-            List<String> pcscfList = Arrays.stream(pcscfs)
-                    .filter(u -> u != null)
-                    .map(u -> u.trim())
-                    .filter(u -> u.length() > 0)
-                    .collect(Collectors.toList());
-            return pcscfList;
+            if (pcscfs != null) {
+                List<String> pcscfList = Arrays.stream(pcscfs)
+                        .filter(u -> u != null)
+                        .map(u -> u.trim())
+                        .filter(u -> u.length() > 0)
+                        .collect(Collectors.toList());
+                return pcscfList;
+            }
         }
         throw new IllegalStateException("ISIM is not loaded");
     }
@@ -933,23 +992,8 @@ public class PhoneSubInfoController extends IPhoneSubInfo.Stub {
      */
     private void enforceTelephonyFeatureWithException(@Nullable String callingPackage,
             @NonNull String telephonyFeature, @NonNull String methodName) {
-        if (callingPackage == null || mPackageManager == null) {
-            return;
-        }
-
-        if (!CompatChanges.isChangeEnabled(ENABLE_FEATURE_MAPPING, callingPackage,
-                Binder.getCallingUserHandle())
-                || mVendorApiLevel < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            // Skip to check associated telephony feature,
-            // if compatibility change is not enabled for the current process or
-            // the SDK version of vendor partition is less than Android V.
-            return;
-        }
-
-        if (!mPackageManager.hasSystemFeature(telephonyFeature)) {
-            throw new UnsupportedOperationException(
-                    methodName + " is unsupported without " + telephonyFeature);
-        }
+        TelephonyUtils.enforceTelephonyFeatureWithException(callingPackage, mPackageManager,
+                mVendorApiLevel, telephonyFeature, methodName);
     }
 
     private void log(String s) {

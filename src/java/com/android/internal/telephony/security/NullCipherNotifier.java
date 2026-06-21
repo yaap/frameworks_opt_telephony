@@ -227,6 +227,9 @@ public class NullCipherNotifier {
             case SecurityAlgorithmUpdate.CONNECTION_EVENT_VOLTE_RTP_SOS:
             case SecurityAlgorithmUpdate.CONNECTION_EVENT_VONR_SIP_SOS:
             case SecurityAlgorithmUpdate.CONNECTION_EVENT_VONR_RTP_SOS:
+            // Ignore DRB updates until we have more data about their flakiness b/459136228
+            case SecurityAlgorithmUpdate.CONNECTION_EVENT_AS_SIGNALLING_LTE_DRB:
+            case SecurityAlgorithmUpdate.CONNECTION_EVENT_AS_SIGNALLING_5G_DRB:
                 return true;
             default:
                 return false;

@@ -17,12 +17,10 @@
 package com.android.internal.telephony.euicc;
 
 import static android.content.pm.PackageManager.FEATURE_TELEPHONY_EUICC;
-import static android.telephony.TelephonyManager.ENABLE_FEATURE_MAPPING;
 
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.app.AppOpsManager;
-import android.app.compat.CompatChanges;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -57,6 +55,7 @@ import com.android.internal.telephony.uicc.euicc.EuiccCard;
 import com.android.internal.telephony.uicc.euicc.EuiccCardErrorException;
 import com.android.internal.telephony.uicc.euicc.EuiccPort;
 import com.android.internal.telephony.uicc.euicc.async.AsyncResultCallback;
+import com.android.internal.telephony.util.TelephonyUtils;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -103,6 +102,9 @@ public class EuiccCardController extends IEuiccCardController.Stub {
         synchronized (EuiccCardController.class) {
             if (sInstance == null) {
                 sInstance = new EuiccCardController(context, featureFlags);
+                TelephonyFrameworkInitializer.getTelephonyServiceManager()
+                        .getEuiccCardControllerServiceRegisterer()
+                        .register(sInstance);
             } else {
                 Log.wtf(TAG, "init() called multiple times! sInstance = " + sInstance);
             }
@@ -125,10 +127,6 @@ public class EuiccCardController extends IEuiccCardController.Stub {
     private EuiccCardController(Context context, FeatureFlags featureFlags) {
         this(context, new Handler(), EuiccController.get(), UiccController.getInstance(),
                 featureFlags);
-        TelephonyFrameworkInitializer
-                .getTelephonyServiceManager()
-                .getEuiccCardControllerServiceRegisterer()
-                .register(this);
     }
 
     @VisibleForTesting(visibility = VisibleForTesting.Visibility.PRIVATE)
@@ -1540,23 +1538,8 @@ public class EuiccCardController extends IEuiccCardController.Stub {
      */
     private void enforceTelephonyFeatureWithException(@Nullable String callingPackage,
             @NonNull String methodName) {
-        if (callingPackage == null || mPackageManager == null) {
-            return;
-        }
-
-        if (!CompatChanges.isChangeEnabled(ENABLE_FEATURE_MAPPING, callingPackage,
-                Binder.getCallingUserHandle())
-                || mVendorApiLevel < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            // Skip to check associated telephony feature,
-            // if compatibility change is not enabled for the current process or
-            // the SDK version of vendor partition is less than Android V.
-            return;
-        }
-
-        if (!mPackageManager.hasSystemFeature(FEATURE_TELEPHONY_EUICC)) {
-            throw new UnsupportedOperationException(
-                    methodName + " is unsupported without " + FEATURE_TELEPHONY_EUICC);
-        }
+        TelephonyUtils.enforceTelephonyFeatureWithException(callingPackage, mPackageManager,
+                mVendorApiLevel, FEATURE_TELEPHONY_EUICC, methodName);
     }
 
     private static void loge(String message) {

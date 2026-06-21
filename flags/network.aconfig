@@ -19,24 +19,6 @@ flag {
   bug: "239730435"
 }
 
-# OWNER=yomna TARGET=25Q2
-flag {
-  name: "security_algorithms_update_indications"
-  is_exported: true
-  namespace: "telephony"
-  description: "guard system API onSecurityAlgorithmsChanged"
-  bug: "355062720"
-}
-
-# OWNER=yomna TARGET=25Q2
-flag {
-  name: "cellular_identifier_disclosure_indications"
-  is_exported: true
-  namespace: "telephony"
-  description: "guard system API onCellularIdentifierDisclosedChanged"
-  bug: "355062720"
-}
-
 # OWNER=yomna TARGET=25Q4
 flag {
     name: "vendor_specific_cellular_identifier_disclosure_indications"
@@ -58,13 +40,61 @@ flag {
     }
 }
 
-# OWNER=sangyun TARGET=26Q2
+# OWNER=jhyoon TARGET=26Q2
 flag {
-    name: "duplex_mode_for_ngran"
+    name: "get_service_state_for_slot"
     namespace: "telephony"
-    description: "NR Duplex Mode can be Calculated"
-    bug: "355284319"
+    description: "Allows access to API that get service state for slot."
+    bug:"440943082"
+    metadata {
+        purpose: PURPOSE_FEATURE
+    }
+    is_exported: true
+}
+
+# OWNER=braydenhass TARGET=26Q2
+flag {
+    name: "network_security_event_indications"
+    is_exported: true
+    namespace: "telephony"
+    description: "Guard system API for network security events"
+    bug: "411183432"
+    metadata {
+        purpose: PURPOSE_FEATURE
+    }
+}
+
+# OWNER=yomna TARGET=26Q2
+flag {
+    name: "key_carrier_2g_toggle"
+    namespace: "telephony"
+    description: "Guard carrier key API KEY_CARRIER_DEFAULT_2G_PROTECTION_ENABLED_BOOL"
+    bug: "411183432"
     metadata {
         purpose: PURPOSE_BUGFIX
     }
 }
+
+# OWNER=yomna TARGET=26Q2
+flag {
+    name: "drb_security_transparency"
+    is_exported: true
+    namespace: "telephony"
+    description: "Guard system API for DRB-specific security updates"
+    bug:"452486608"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=sanjeevmitt TARGET=26Q2
+flag {
+    name: "update_carrier_name_after_sim_ready"
+    namespace: "telephony"
+    description: "Ensure correct carrier name is displayed by waiting for SIM records and branding poll."
+    bug: "477934358"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+

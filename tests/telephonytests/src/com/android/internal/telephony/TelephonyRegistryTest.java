@@ -18,16 +18,22 @@ package com.android.internal.telephony;
 import static android.telephony.CellularIdentifierDisclosure.CELLULAR_IDENTIFIER_IMSI;
 import static android.telephony.CellularIdentifierDisclosure.NAS_PROTOCOL_MESSAGE_ATTACH_REQUEST;
 import static android.telephony.PhysicalChannelConfig.PHYSICAL_CELL_ID_UNKNOWN;
+import static android.telephony.NetworkSecurityEvent.ALERT_CATEGORY_DOWNGRADE;
+import static android.telephony.NetworkSecurityEvent.ALERT_STATUS_DETECTED;
+import static android.telephony.NetworkSecurityEvent.REASON_CODE_DOWNGRADE_FORCED_HANDOVER;
+import static android.telephony.SecurityAlgorithmUpdate.CONNECTION_EVENT_VOLTE_SIP;
 import static android.telephony.SecurityAlgorithmUpdate.CONNECTION_EVENT_VOLTE_SIP;
 import static android.telephony.SecurityAlgorithmUpdate.SECURITY_ALGORITHM_EEA2;
 import static android.telephony.SecurityAlgorithmUpdate.SECURITY_ALGORITHM_HMAC_SHA1_96;
 import static android.telephony.ServiceState.FREQUENCY_RANGE_LOW;
+import static android.telephony.ServiceState.RIL_RADIO_TECHNOLOGY_LTE;
 import static android.telephony.SubscriptionManager.ACTION_DEFAULT_SUBSCRIPTION_CHANGED;
 import static android.telephony.SubscriptionManager.INVALID_SUBSCRIPTION_ID;
 import static android.telephony.TelephonyManager.ACTION_MULTI_SIM_CONFIG_CHANGED;
 import static android.telephony.TelephonyManager.RADIO_POWER_OFF;
 import static android.telephony.TelephonyManager.RADIO_POWER_ON;
 import static android.telephony.TelephonyManager.RADIO_POWER_UNAVAILABLE;
+import static android.telephony.TelephonyManager.SATELLITE_PURCHASE_MODE_STATE_ACTIVE;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -66,6 +72,7 @@ import android.telephony.CellLocation;
 import android.telephony.CellularIdentifierDisclosure;
 import android.telephony.LinkCapacityEstimate;
 import android.telephony.NetworkRegistrationInfo;
+import android.telephony.NetworkSecurityEvent;
 import android.telephony.PhoneCapability;
 import android.telephony.PhysicalChannelConfig;
 import android.telephony.PreciseDataConnectionState;
@@ -139,10 +146,13 @@ public class TelephonyRegistryTest extends TelephonyTest {
     private int mCallbackModeStopReason = TelephonyManager.STOP_REASON_UNKNOWN;
     private long mCallbackModeDurationMillis;
     private boolean mCarrierRoamingNtnMode;
+    public boolean mIsPurchaseModeActive;
+    public int mPurchaseModeState;
     private boolean mCarrierRoamingNtnEligible;
     private int[] mCarrierRoamingNtnAvailableServices;
     private NtnSignalStrength mCarrierRoamingNtnSignalStrength;
     private boolean mIsSatelliteEnabled;
+    private int mDomainSelectionEmergencyModeType;
     private final List<List<CallState>> mCallStateList = new ArrayList<>();
 
     // All events contribute to TelephonyRegistry#isPhoneStatePermissionRequired
@@ -229,10 +239,14 @@ public class TelephonyRegistryTest extends TelephonyTest {
                     TelephonyCallback.CarrierRoamingNtnListener,
                     TelephonyCallback.SecurityAlgorithmsListener,
                     TelephonyCallback.CellularIdentifierDisclosedListener,
-                    TelephonyCallback.CallAttributesListener {
+                    TelephonyCallback.CallAttributesListener,
+                    TelephonyCallback.DomainSelectionEmergencyModeListener,
+                    TelephonyCallback.NetworkSecurityEventsListener,
+                    TelephonyCallback.SatellitePurchaseModeListener {
         // This class isn't mockable to get invocation counts because the IBinder is null and
         // crashes the TelephonyRegistry. Make a cheesy verify(times()) alternative.
         public AtomicInteger invocationCount = new AtomicInteger(0);
+        public Set<NetworkSecurityEvent> mNetworkSecurityEvents;
 
         @Override
         public void onSrvccStateChanged(int srvccState) {
@@ -326,6 +340,14 @@ public class TelephonyRegistryTest extends TelephonyTest {
         }
 
         @Override
+        public void onSatellitePurchaseModeChanged(int subId, boolean isEnabled,
+                @TelephonyManager.SatellitePurchaseModeState int purchaseModeState) {
+            invocationCount.incrementAndGet();
+            mIsPurchaseModeActive = isEnabled;
+            mPurchaseModeState = purchaseModeState;
+        }
+
+        @Override
         public void onSimultaneousCellularCallingSubscriptionsChanged(
                 @NonNull Set<Integer> simultaneousCallingSubscriptionIds) {
             invocationCount.incrementAndGet();
@@ -391,6 +413,28 @@ public class TelephonyRegistryTest extends TelephonyTest {
         public void onCallStatesChanged(List<CallState> callStateList) {
             invocationCount.incrementAndGet();
             mCallStateList.add(callStateList);
+        }
+
+        @Override
+        public void onDomainSelectionEmergencyModeEntered(
+                @TelephonyManager.DomainSelectionEmergencyType int type,
+                int slotIndex, int subscriptionId) {
+            invocationCount.incrementAndGet();
+            mDomainSelectionEmergencyModeType = type;
+        }
+
+        @Override
+        public void onDomainSelectionEmergencyModeExited(
+                @TelephonyManager.DomainSelectionEmergencyType int type,
+                int slotIndex, int subscriptionId) {
+            invocationCount.incrementAndGet();
+            mDomainSelectionEmergencyModeType = type;
+        }
+
+        @Override
+        public void onNetworkSecurityEvents(Set<NetworkSecurityEvent> events) {
+            invocationCount.incrementAndGet();
+            mNetworkSecurityEvents = events;
         }
     }
 
@@ -1888,6 +1932,24 @@ public class TelephonyRegistryTest extends TelephonyTest {
     }
 
     @Test
+    @EnableFlags(Flags.FLAG_SATELLITE_UPSELL_26Q4)
+    public void testNotifySatellitePurchaseModeChanged() {
+        int subId = INVALID_SUBSCRIPTION_ID;
+        doReturn(mMockSubInfo).when(mSubscriptionManager).getActiveSubscriptionInfo(anyInt());
+        doReturn(0/*slotIndex*/).when(mMockSubInfo).getSimSlotIndex();
+        int[] events = {TelephonyCallback.EVENT_SATELLITE_PURCHASE_MODE_CHANGED};
+
+        mTelephonyRegistry.listenWithEventList(false, false, subId, mContext.getOpPackageName(),
+                mContext.getAttributionTag(), mTelephonyCallback.callback, events, true);
+
+        mTelephonyRegistry.notifySatellitePurchaseModeChanged(
+                subId, true, SATELLITE_PURCHASE_MODE_STATE_ACTIVE);
+        processAllMessages();
+        assertTrue(mIsPurchaseModeActive);
+        assertEquals(SATELLITE_PURCHASE_MODE_STATE_ACTIVE, mPurchaseModeState);
+    }
+
+    @Test
     public void testNotifyCarrierRoamingNtnEligibleStateChanged() {
         int subId = INVALID_SUBSCRIPTION_ID;
         doReturn(mMockSubInfo).when(mSubscriptionManager).getActiveSubscriptionInfo(anyInt());
@@ -2036,7 +2098,6 @@ public class TelephonyRegistryTest extends TelephonyTest {
 
 
     @Test
-    @EnableFlags(Flags.FLAG_SECURITY_ALGORITHMS_UPDATE_INDICATIONS)
     public void testNotifySecurityAlgorithmsChanged() {
         int subId = 1;
         int[] events = {TelephonyCallback.EVENT_SECURITY_ALGORITHMS_CHANGED};
@@ -2058,7 +2119,6 @@ public class TelephonyRegistryTest extends TelephonyTest {
     }
 
     @Test
-    @EnableFlags(Flags.FLAG_CELLULAR_IDENTIFIER_DISCLOSURE_INDICATIONS)
     public void testNotifyCellularIdentifierDisclosedChanged() {
         int subId = 1;
         int[] events = {TelephonyCallback.EVENT_CELLULAR_IDENTIFIER_DISCLOSED_CHANGED};
@@ -2078,4 +2138,127 @@ public class TelephonyRegistryTest extends TelephonyTest {
         assertEquals(invocationCount + 1, mTelephonyCallback.invocationCount.get());
     }
 
+    @Test
+    @EnableFlags(Flags.FLAG_DOMAIN_SELECTION_EMERGENCY_MODE_NOTIFICATION)
+    public void testNotifyDomainSelectionEmergencyModeEntered() {
+        int[] events = {TelephonyCallback.EVENT_DOMAIN_SELECTION_EMERGENCY_MODE_CHANGED};
+
+        mTelephonyRegistry.listenWithEventList(false, false, 1 /*subId*/,
+                mContext.getOpPackageName(), mContext.getAttributionTag(),
+                mTelephonyCallback.callback, events, false);
+
+        // Call
+        int invocationCount = mTelephonyCallback.invocationCount.get();
+        int emergencyModeType = TelephonyManager.DOMAIN_SELECTION_EMERGENCY_TYPE_CALL;
+
+        mTelephonyRegistry.notifyDomainSelectionEmergencyModeChanged(
+                0 /*phoneId*/, 1 /*subId*/, emergencyModeType, true);
+        processAllMessages();
+
+        assertEquals(invocationCount + 1, mTelephonyCallback.invocationCount.get());
+        assertEquals(emergencyModeType, mDomainSelectionEmergencyModeType);
+
+        // SMS
+        invocationCount = mTelephonyCallback.invocationCount.get();
+        emergencyModeType = TelephonyManager.DOMAIN_SELECTION_EMERGENCY_TYPE_SMS;
+
+        mTelephonyRegistry.notifyDomainSelectionEmergencyModeChanged(
+                0 /*phoneId*/, 1 /*subId*/, emergencyModeType, true);
+        processAllMessages();
+
+        assertEquals(invocationCount + 1, mTelephonyCallback.invocationCount.get());
+        assertEquals(emergencyModeType, mDomainSelectionEmergencyModeType);
+    }
+
+    @Test
+    @EnableFlags(Flags.FLAG_DOMAIN_SELECTION_EMERGENCY_MODE_NOTIFICATION)
+    public void testNotifyDomainSelectionEmergencyModeExited() {
+        int[] events = {TelephonyCallback.EVENT_DOMAIN_SELECTION_EMERGENCY_MODE_CHANGED};
+
+        mTelephonyRegistry.listenWithEventList(false, false, 1 /*subId*/,
+                mContext.getOpPackageName(), mContext.getAttributionTag(),
+                mTelephonyCallback.callback, events, false);
+
+        // Call
+        int invocationCount = mTelephonyCallback.invocationCount.get();
+        int emergencyModeType = TelephonyManager.DOMAIN_SELECTION_EMERGENCY_TYPE_CALL;
+
+        mTelephonyRegistry.notifyDomainSelectionEmergencyModeChanged(
+                0 /*phoneId*/, 1 /*subId*/, emergencyModeType, false);
+        processAllMessages();
+
+        assertEquals(invocationCount + 1, mTelephonyCallback.invocationCount.get());
+        assertEquals(emergencyModeType, mDomainSelectionEmergencyModeType);
+
+        // SMS
+        invocationCount = mTelephonyCallback.invocationCount.get();
+        emergencyModeType = TelephonyManager.DOMAIN_SELECTION_EMERGENCY_TYPE_SMS;
+
+        mTelephonyRegistry.notifyDomainSelectionEmergencyModeChanged(
+                0 /*phoneId*/, 1 /*subId*/, emergencyModeType, false);
+        processAllMessages();
+
+        assertEquals(invocationCount + 1, mTelephonyCallback.invocationCount.get());
+        assertEquals(emergencyModeType, mDomainSelectionEmergencyModeType);
+    }
+
+    @Test
+    @EnableFlags(Flags.FLAG_NETWORK_SECURITY_EVENT_INDICATIONS)
+    public void testNotifyNetworkSecurityEvents() {
+        int subId = 1;
+        doReturn(mMockSubInfo).when(mSubscriptionManager).getActiveSubscriptionInfo(anyInt());
+        doReturn(0/*slotIndex*/).when(mMockSubInfo).getSimSlotIndex();
+        int[] events = {TelephonyCallback.EVENT_NETWORK_SECURITY_EVENTS};
+
+        List<NetworkSecurityEvent> eventsList = new ArrayList<>();
+        eventsList.add(new NetworkSecurityEvent(
+                ALERT_CATEGORY_DOWNGRADE,
+                ALERT_STATUS_DETECTED,
+                new int[]{REASON_CODE_DOWNGRADE_FORCED_HANDOVER},
+                123, 456, 789, "101112",
+                RIL_RADIO_TECHNOLOGY_LTE,
+                false));
+
+        mTelephonyRegistry.listenWithEventList(false, false, subId, mContext.getOpPackageName(),
+                mContext.getAttributionTag(), mTelephonyCallback.callback, events, true);
+        processAllMessages();
+
+        // The callback should be triggered with the initial empty list.
+        assertEquals(1, mTelephonyCallback.invocationCount.get());
+        assertTrue(mTelephonyCallback.mNetworkSecurityEvents.isEmpty());
+
+        // Notify with a new list of events.
+        mTelephonyRegistry.notifyNetworkSecurityEvents(0, 1,
+                eventsList);
+        processAllMessages();
+        assertEquals(2, mTelephonyCallback.invocationCount.get());
+        assertEquals(new HashSet<>(eventsList), mTelephonyCallback.mNetworkSecurityEvents);
+
+        // Notify with the same list of events should not trigger callback.
+        mTelephonyRegistry.notifyNetworkSecurityEvents(0, 1,
+                eventsList);
+        processAllMessages();
+        assertEquals(2, mTelephonyCallback.invocationCount.get());
+
+        // Notify with an empty list. This should not trigger a callback for the existing
+        // listener, but it should clear the cache.
+        mTelephonyRegistry.notifyNetworkSecurityEvents(0, 1, new ArrayList<>());
+        processAllMessages();
+        assertEquals(2, mTelephonyCallback.invocationCount.get());
+
+        // Unregister the first listener
+        mTelephonyRegistry.listenWithEventList(false, false, subId, mContext.getOpPackageName(),
+                mContext.getAttributionTag(), mTelephonyCallback.callback, new int[0], false);
+        processAllMessages();
+
+        // Register a new listener. It should get the now-empty cache.
+        TelephonyCallbackWrapper newCallback = new TelephonyCallbackWrapper();
+        newCallback.init(mSimpleExecutor);
+        mTelephonyRegistry.listenWithEventList(false, false, subId, mContext.getOpPackageName(),
+                mContext.getAttributionTag(), newCallback.callback, events, true);
+        processAllMessages();
+
+        assertEquals(1, newCallback.invocationCount.get());
+        assertTrue(newCallback.mNetworkSecurityEvents.isEmpty());
+    }
 }

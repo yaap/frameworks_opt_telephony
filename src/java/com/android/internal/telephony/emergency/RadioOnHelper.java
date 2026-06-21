@@ -86,6 +86,7 @@ public class RadioOnHelper implements RadioOnStateListener.Callback {
     public void triggerRadioOnAndListen(RadioOnStateListener.Callback callback,
             boolean forEmergencyCall, Phone phoneForEmergencyCall, boolean isTestEmergencyNumber,
             int emergencyTimeoutIntervalMillis) {
+        Rlog.d(TAG, "triggerRadioOnAndListen, forEmergencyCall: " + forEmergencyCall);
         setupListeners();
         mCallback = callback;
         mInProgressListeners.clear();
@@ -151,13 +152,14 @@ public class RadioOnHelper implements RadioOnStateListener.Callback {
      * onSatelliteModemStateChanged() callback when the satellite modem is successfully disabled.
      */
     private void powerOffSatellite() {
+        Rlog.d(TAG, "powerOffSatellite: disabling Satellite");
         SatelliteController satelliteController = SatelliteController.getInstance();
         satelliteController.requestSatelliteEnabled(
                 false /* enableSatellite */, false /* enableDemoMode */, false /* isEmergency */,
                 new IIntegerConsumer.Stub() {
                     @Override
                     public void accept(int result) {
-
+                        Rlog.d(TAG, "powerOffSatellite: result = " + result);
                     }
                 });
     }

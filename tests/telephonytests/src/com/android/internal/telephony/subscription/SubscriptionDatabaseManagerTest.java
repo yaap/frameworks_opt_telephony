@@ -50,7 +50,6 @@ import android.testing.AndroidTestingRunner;
 import android.testing.TestableLooper;
 
 import com.android.internal.telephony.TelephonyTest;
-import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.subscription.SubscriptionDatabaseManager.SubscriptionDatabaseManagerCallback;
 
 import org.junit.After;
@@ -153,13 +152,22 @@ public class SubscriptionDatabaseManagerTest extends TelephonyTest {
     static final String FAKE_MAC_ADDRESS1 = "DC:E5:5B:38:7D:40";
     static final String FAKE_MAC_ADDRESS2 = "DC:B5:4F:47:F3:4C";
 
-    private FeatureFlags mFeatureFlags;
+    static final long FAKE_STREAMING_DOWNLINK1 = 1234567890123456789L;
+
+    static final long FAKE_STREAMING_DOWNLINK2 = 987654321098765432L;
+
+    static final long FAKE_STREAMING_UPLINK1 = 123456789012345678L;
+
+    static final long FAKE_STREAMING_UPLINK2 = 98765432109876543L;
 
     static final int FAKE_TRANSFER_STATUS_TRANSFERRED_OUT = 1;
     static final int FAKE_TRANSFER_STATUS_CONVERTED = 2;
 
     static final int FAKE_SATELLITE_PROVISIONED = 1;
     static final int FAKE_SATELLITE_NOT_PROVISIONED = 0;
+
+    static final int FAKE_IS_PRIVATE_NETWORK_DISABLED = 0;
+    static final int FAKE_IS_PRIVATE_NETWORK_ENABLED = 1;
 
     static final SubscriptionInfoInternal FAKE_SUBSCRIPTION_INFO1 =
             new SubscriptionInfoInternal.Builder()
@@ -221,6 +229,7 @@ public class SubscriptionDatabaseManagerTest extends TelephonyTest {
                     .setNrAdvancedCallingEnabled(1)
                     .setNumberFromCarrier(FAKE_PHONE_NUMBER1)
                     .setNumberFromIms(FAKE_PHONE_NUMBER1)
+                    .setNumberFromTs43(FAKE_PHONE_NUMBER1)
                     .setPortIndex(0)
                     .setUsageSetting(SubscriptionManager.USAGE_SETTING_DEFAULT)
                     .setLastUsedTPMessageReference(FAKE_TP_MESSAGE_REFERENCE1)
@@ -235,7 +244,9 @@ public class SubscriptionDatabaseManagerTest extends TelephonyTest {
                     .setSatelliteEntitlementStatus(FAKE_SATELLITE_ENTITLEMENT_STATUS_DISABLED)
                     .setSatelliteEntitlementPlmns(FAKE_SATELLITE_ENTITLEMENT_PLMNS2)
                     .setSatelliteESOSSupported(FAKE_SATELLITE_ESOS_SUPPORTED_DISABLED)
-                    .setIsSatelliteProvisionedForNonIpDatagram(FAKE_SATELLITE_NOT_PROVISIONED)
+                    .setIsPrivateNetwork(FAKE_IS_PRIVATE_NETWORK_DISABLED)
+                    .setStreamingAppMaxDownlinkKbps(FAKE_STREAMING_DOWNLINK1)
+                    .setStreamingAppMaxUplinkKbps(FAKE_STREAMING_UPLINK1)
                     .build();
 
     static final SubscriptionInfoInternal FAKE_SUBSCRIPTION_INFO2 =
@@ -297,6 +308,7 @@ public class SubscriptionDatabaseManagerTest extends TelephonyTest {
                     .setDeviceToDeviceStatusSharingContacts(FAKE_CONTACT2)
                     .setNrAdvancedCallingEnabled(0)
                     .setNumberFromCarrier(FAKE_PHONE_NUMBER2)
+                    .setNumberFromTs43(FAKE_PHONE_NUMBER2)
                     .setNumberFromIms(FAKE_PHONE_NUMBER2)
                     .setPortIndex(1)
                     .setUsageSetting(SubscriptionManager.USAGE_SETTING_DATA_CENTRIC)
@@ -323,6 +335,7 @@ public class SubscriptionDatabaseManagerTest extends TelephonyTest {
                             FAKE_SATELLITE_ENTITLEMENT_DATA_SERVICE_POLICY1)
                     .setSatellitePlmnsVoiceServicePolicy(
                             FAKE_SATELLITE_ENTITLEMENT_VOICE_SERVICE_POLICY1)
+                    .setIsPrivateNetwork(FAKE_IS_PRIVATE_NETWORK_ENABLED)
                     .build();
 
     private SubscriptionDatabaseManager mDatabaseManagerUT;
@@ -338,6 +351,8 @@ public class SubscriptionDatabaseManagerTest extends TelephonyTest {
         private final List<String> mAllColumns;
 
         private boolean mDatabaseChanged;
+
+        private int mNextSubId = 1;
 
         SubscriptionProvider() {
             mAllColumns = SimInfo.getAllColumns();
@@ -433,14 +448,8 @@ public class SubscriptionDatabaseManagerTest extends TelephonyTest {
                     throw new IllegalArgumentException("Insert with unknown column " + column);
                 }
             }
-            // The last row's subId + 1
-            int subId;
-            if (mDatabase.isEmpty()) {
-                subId = 1;
-            } else {
-                subId = (int) mDatabase.get(mDatabase.size() - 1)
-                        .get(SimInfo.COLUMN_UNIQUE_KEY_SUBSCRIPTION_ID) + 1;
-            }
+            // subId autoincrement
+            int subId = mNextSubId++;
             values.put(SimInfo.COLUMN_UNIQUE_KEY_SUBSCRIPTION_ID, subId);
             mDatabase.add(values);
             return ContentUris.withAppendedId(SimInfo.CONTENT_URI, subId);
@@ -474,14 +483,13 @@ public class SubscriptionDatabaseManagerTest extends TelephonyTest {
             ((Runnable) invocation.getArguments()[0]).run();
             return null;
         }).when(mSubscriptionDatabaseManagerCallback).invokeFromExecutor(any(Runnable.class));
-        mFeatureFlags = Mockito.mock(FeatureFlags.class);
 
         ((MockContentResolver) mContext.getContentResolver()).addProvider(
                 Telephony.Carriers.CONTENT_URI.getAuthority(), mSubscriptionProvider);
 
         doReturn(1).when(mUiccController).convertToPublicCardId(eq(FAKE_ICCID1));
         doReturn(2).when(mUiccController).convertToPublicCardId(eq(FAKE_ICCID2));
-        when(mFeatureFlags.supportPsimToEsimConversion()).thenReturn(true);
+        when(mFeatureFlags.enableIsPrivateNetworkApi()).thenReturn(true);
         mDatabaseManagerUT = new SubscriptionDatabaseManager(mContext, Looper.myLooper(),
                 mFeatureFlags, mSubscriptionDatabaseManagerCallback);
         logd("SubscriptionDatabaseManagerTest -Setup!");
@@ -1882,6 +1890,29 @@ public class SubscriptionDatabaseManagerTest extends TelephonyTest {
     }
 
     @Test
+    public void testUpdateNumberFromTs43() throws Exception {
+        // exception is expected if there is nothing in the database.
+        assertThrows(IllegalArgumentException.class,
+                () -> mDatabaseManagerUT.setNumberFromTs43(1, FAKE_PHONE_NUMBER2));
+
+        SubscriptionInfoInternal subInfo = insertSubscriptionAndVerify(FAKE_SUBSCRIPTION_INFO1);
+        mDatabaseManagerUT.setNumberFromTs43(subInfo.getSubscriptionId(), FAKE_PHONE_NUMBER2);
+        processAllMessages();
+
+        subInfo = new SubscriptionInfoInternal.Builder(subInfo)
+                .setNumberFromTs43(FAKE_PHONE_NUMBER2).build();
+        verifySubscription(subInfo);
+        verify(mSubscriptionDatabaseManagerCallback, times(2)).onSubscriptionChanged(eq(1));
+
+        assertThat(mDatabaseManagerUT.getSubscriptionProperty(
+                1, SimInfo.COLUMN_PHONE_NUMBER_SOURCE_TS43)).isEqualTo(FAKE_PHONE_NUMBER2);
+        mDatabaseManagerUT.setSubscriptionProperty(
+                1, SimInfo.COLUMN_PHONE_NUMBER_SOURCE_TS43, FAKE_PHONE_NUMBER1);
+        assertThat(mDatabaseManagerUT.getSubscriptionInfoInternal(1)
+                .getNumberFromTs43()).isEqualTo(FAKE_PHONE_NUMBER1);
+    }
+
+    @Test
     public void testUpdatePortIndex() throws Exception {
         // exception is expected if there is nothing in the database.
         assertThrows(IllegalArgumentException.class,
@@ -2576,5 +2607,38 @@ public class SubscriptionDatabaseManagerTest extends TelephonyTest {
                 FAKE_SUBSCRIPTION_INFO1.getSubscriptionId())
                 .getSatellitePlmnsVoiceServicePolicy()).isEqualTo(
                 FAKE_SATELLITE_ENTITLEMENT_VOICE_SERVICE_POLICY2);
+    }
+
+    @Test
+    public void testUpdateIsPrivateNetwork() throws Exception {
+        // exception is expected if there is nothing in the database.
+        assertThrows(IllegalArgumentException.class,
+                () -> mDatabaseManagerUT.setIsPrivateNetwork(
+                        FAKE_SUBSCRIPTION_INFO1.getSubscriptionId(),
+                        FAKE_IS_PRIVATE_NETWORK_ENABLED));
+
+        SubscriptionInfoInternal subInfo = insertSubscriptionAndVerify(FAKE_SUBSCRIPTION_INFO1);
+        mDatabaseManagerUT.setIsPrivateNetwork(
+                FAKE_SUBSCRIPTION_INFO1.getSubscriptionId(),
+                FAKE_IS_PRIVATE_NETWORK_ENABLED);
+        processAllMessages();
+
+        subInfo = new SubscriptionInfoInternal.Builder(subInfo)
+                .setIsPrivateNetwork(FAKE_IS_PRIVATE_NETWORK_ENABLED).build();
+        verifySubscription(subInfo);
+        verify(mSubscriptionDatabaseManagerCallback, times(2)).onSubscriptionChanged(eq(1));
+
+        assertThat(mDatabaseManagerUT.getSubscriptionProperty(
+                FAKE_SUBSCRIPTION_INFO1.getSubscriptionId(),
+                SimInfo.COLUMN_IS_PRIVATE_NETWORK)).isEqualTo(
+                FAKE_IS_PRIVATE_NETWORK_ENABLED);
+
+        mDatabaseManagerUT.setSubscriptionProperty(FAKE_SUBSCRIPTION_INFO1.getSubscriptionId(),
+                SimInfo.COLUMN_IS_PRIVATE_NETWORK,
+                FAKE_IS_PRIVATE_NETWORK_DISABLED);
+        assertThat(mDatabaseManagerUT.getSubscriptionInfoInternal(
+                FAKE_SUBSCRIPTION_INFO1.getSubscriptionId())
+                .getIsPrivateNetwork()).isEqualTo(
+                FAKE_IS_PRIVATE_NETWORK_DISABLED);
     }
 }

@@ -33,9 +33,9 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * A factory class for the {@link NitzSignalInputFilterPredicate} instance used by
- * {@link NitzStateMachineImpl}. This class is exposed for testing and provides access to various
- * internal components.
+ * A factory class for the {@link NitzSignalInputFilterPredicate} instance used by {@link
+ * NitzStateMachineImpl}. This class is exposed for testing and provides access to various internal
+ * components.
  */
 @VisibleForTesting
 public final class NitzSignalInputFilterPredicateFactory {
@@ -56,42 +56,40 @@ public final class NitzSignalInputFilterPredicateFactory {
         Objects.requireNonNull(context);
         Objects.requireNonNull(deviceState);
 
-        TrivalentPredicate[] components = new TrivalentPredicate[] {
-                // Disables NITZ processing entirely: can return false or null.
-                createIgnoreNitzPropertyCheck(deviceState),
-                // Filters bad reference times from new signals: can return false or null.
-                createBogusElapsedRealtimeCheck(context, deviceState),
-                // Ensures oldSignal == null is always processed: can return true or null.
-                createNoOldSignalCheck(),
-                // Adds rate limiting: can return true or false.
-                createRateLimitCheck(deviceState),
-        };
+        TrivalentPredicate[] components =
+                new TrivalentPredicate[] {
+                    // Disables NITZ processing entirely: can return false or null.
+                    createIgnoreNitzPropertyCheck(deviceState),
+                    // Filters bad reference times from new signals: can return false or null.
+                    createBogusElapsedRealtimeCheck(context, deviceState),
+                    // Ensures oldSignal == null is always processed: can return true or null.
+                    createNoOldSignalCheck(),
+                    // Adds rate limiting: can return true or false.
+                    createRateLimitCheck(deviceState),
+                };
         return new NitzSignalInputFilterPredicateImpl(components);
     }
 
     /**
      * A filtering function that can give a {@code true} (must process), {@code false} (must not
      * process) and a {@code null} (no opinion) response given a previous NITZ signal and a new
-     * signal. The previous signal may be {@code null} (unless ruled out by a prior
-     * {@link TrivalentPredicate}).
+     * signal. The previous signal may be {@code null} (unless ruled out by a prior {@link
+     * TrivalentPredicate}).
      */
     @VisibleForTesting
     @FunctionalInterface
     public interface TrivalentPredicate {
 
-        /**
-         * See {@link TrivalentPredicate}.
-         */
+        /** See {@link TrivalentPredicate}. */
         @Nullable
         Boolean mustProcessNitzSignal(
-                @Nullable NitzSignal previousSignal,
-                @NonNull NitzSignal newSignal);
+                @Nullable NitzSignal previousSignal, @NonNull NitzSignal newSignal);
     }
 
     /**
      * Returns a {@link TrivalentPredicate} function that implements a check for the
-     * "gsm.ignore-nitz" Android system property. The function can return {@code false} or
-     * {@code null}.
+     * "gsm.ignore-nitz" Android system property. The function can return {@code false} or {@code
+     * null}.
      */
     @VisibleForTesting
     @NonNull
@@ -101,8 +99,10 @@ public final class NitzSignalInputFilterPredicateFactory {
             boolean ignoreNitz = deviceState.getIgnoreNitz();
             if (ignoreNitz) {
                 if (DBG) {
-                    Rlog.d(LOG_TAG, "mustProcessNitzSignal: Not processing NITZ signal because"
-                            + " gsm.ignore-nitz is set");
+                    Rlog.d(
+                            LOG_TAG,
+                            "mustProcessNitzSignal: Not processing NITZ signal because"
+                                    + " gsm.ignore-nitz is set");
                 }
                 return false;
             }
@@ -112,15 +112,14 @@ public final class NitzSignalInputFilterPredicateFactory {
 
     /**
      * Returns a {@link TrivalentPredicate} function that implements a check for a bad reference
-     * time associated with {@code newSignal}. The function can return {@code false} or
-     * {@code null}.
+     * time associated with {@code newSignal}. The function can return {@code false} or {@code
+     * null}.
      */
     @VisibleForTesting
     @NonNull
     public static TrivalentPredicate createBogusElapsedRealtimeCheck(
             @NonNull Context context, @NonNull DeviceState deviceState) {
-        PowerManager powerManager =
-                (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        PowerManager powerManager = context.getSystemService(PowerManager.class);
         final WakeLock wakeLock =
                 powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG);
 
@@ -137,9 +136,13 @@ public final class NitzSignalInputFilterPredicateFactory {
                         elapsedRealtime - newSignal.getReceiptElapsedRealtimeMillis();
                 if (millisSinceNitzReceived < 0 || millisSinceNitzReceived > Integer.MAX_VALUE) {
                     if (DBG) {
-                        Rlog.d(LOG_TAG, "mustProcessNitzSignal: Not processing NITZ signal"
-                                + " because unexpected elapsedRealtime=" + elapsedRealtime
-                                + " nitzSignal=" + newSignal);
+                        Rlog.d(
+                                LOG_TAG,
+                                "mustProcessNitzSignal: Not processing NITZ signal"
+                                        + " because unexpected elapsedRealtime="
+                                        + elapsedRealtime
+                                        + " nitzSignal="
+                                        + newSignal);
                     }
                     return false;
                 }
@@ -152,8 +155,8 @@ public final class NitzSignalInputFilterPredicateFactory {
 
     /**
      * Returns a {@link TrivalentPredicate} function that implements a check for a {@code null}
-     * {@code oldSignal} (indicating there's no history). The function can return {@code true}
-     * or {@code null}.
+     * {@code oldSignal} (indicating there's no history). The function can return {@code true} or
+     * {@code null}.
      */
     @VisibleForTesting
     @NonNull
@@ -163,14 +166,14 @@ public final class NitzSignalInputFilterPredicateFactory {
     }
 
     /**
-     * Returns a {@link TrivalentPredicate} function that implements filtering using
-     * {@code oldSignal} and {@code newSignal}. The function can return {@code true} or
-     * {@code false} and so is intended as the final function in a chain.
+     * Returns a {@link TrivalentPredicate} function that implements filtering using {@code
+     * oldSignal} and {@code newSignal}. The function can return {@code true} or {@code false} and
+     * so is intended as the final function in a chain.
      *
-     * Function detail: if an NITZ signal received that is too similar to a previous one
-     * it should be disregarded if it's received within a configured time period.
-     * The general contract for {@link TrivalentPredicate} allows {@code previousSignal} to be
-     * {@code null}, but previous functions are expected to prevent it in this case.
+     * <p>Function detail: if an NITZ signal received that is too similar to a previous one it
+     * should be disregarded if it's received within a configured time period. The general contract
+     * for {@link TrivalentPredicate} allows {@code previousSignal} to be {@code null}, but previous
+     * functions are expected to prevent it in this case.
      */
     @VisibleForTesting
     @NonNull
@@ -179,8 +182,7 @@ public final class NitzSignalInputFilterPredicateFactory {
             @Override
             @NonNull
             public Boolean mustProcessNitzSignal(
-                    @NonNull NitzSignal previousSignal,
-                    @NonNull NitzSignal newSignal) {
+                    @NonNull NitzSignal previousSignal, @NonNull NitzSignal newSignal) {
                 Objects.requireNonNull(newSignal);
                 Objects.requireNonNull(newSignal.getNitzData());
                 Objects.requireNonNull(previousSignal);
@@ -201,8 +203,9 @@ public final class NitzSignalInputFilterPredicateFactory {
                 // See if the NITZ signals have been received sufficiently far apart. If yes, we
                 // want to process the new one.
                 int nitzUpdateSpacing = deviceState.getNitzUpdateSpacingMillis();
-                long elapsedRealtimeSinceLastSaved = newSignal.getReceiptElapsedRealtimeMillis()
-                        - previousSignal.getReceiptElapsedRealtimeMillis();
+                long elapsedRealtimeSinceLastSaved =
+                        newSignal.getReceiptElapsedRealtimeMillis()
+                                - previousSignal.getReceiptElapsedRealtimeMillis();
                 if (elapsedRealtimeSinceLastSaved > nitzUpdateSpacing) {
                     return true;
                 }
@@ -213,8 +216,9 @@ public final class NitzSignalInputFilterPredicateFactory {
 
                 // Calculate the Unix epoch difference between the time the two signals hold,
                 // accounting for any difference in receipt time and age.
-                long unixEpochTimeDifferenceMillis = newNitzData.getCurrentTimeInMillis()
-                        - previousNitzData.getCurrentTimeInMillis();
+                long unixEpochTimeDifferenceMillis =
+                        newNitzData.getCurrentTimeInMillis()
+                                - previousNitzData.getCurrentTimeInMillis();
                 long ageAdjustedElapsedRealtimeDifferenceMillis =
                         newSignal.getAgeAdjustedElapsedRealtimeMillis()
                                 - previousSignal.getAgeAdjustedElapsedRealtimeMillis();
@@ -223,18 +227,26 @@ public final class NitzSignalInputFilterPredicateFactory {
                 // ageAdjustedElapsedRealtimeSinceLastSaved and unixEpochTimeDifferenceMillis will
                 // be zero if two NITZ signals are consistent and if the elapsed realtime clock is
                 // ticking at the correct rate.
-                long millisGainedOrLost = Math.abs(
-                        unixEpochTimeDifferenceMillis - ageAdjustedElapsedRealtimeDifferenceMillis);
+                long millisGainedOrLost =
+                        Math.abs(
+                                unixEpochTimeDifferenceMillis
+                                        - ageAdjustedElapsedRealtimeDifferenceMillis);
                 if (millisGainedOrLost > nitzUpdateDiff) {
                     return true;
                 }
 
                 if (DBG) {
-                    Rlog.d(LOG_TAG, "mustProcessNitzSignal: NITZ signal filtered"
-                            + " previousSignal=" + previousSignal
-                            + ", newSignal=" + newSignal
-                            + ", nitzUpdateSpacing=" + nitzUpdateSpacing
-                            + ", nitzUpdateDiff=" + nitzUpdateDiff);
+                    Rlog.d(
+                            LOG_TAG,
+                            "mustProcessNitzSignal: NITZ signal filtered"
+                                    + " previousSignal="
+                                    + previousSignal
+                                    + ", newSignal="
+                                    + newSignal
+                                    + ", nitzUpdateSpacing="
+                                    + nitzUpdateSpacing
+                                    + ", nitzUpdateDiff="
+                                    + nitzUpdateDiff);
                 }
                 return false;
             }
@@ -249,17 +261,16 @@ public final class NitzSignalInputFilterPredicateFactory {
     }
 
     /**
-     * An implementation of {@link NitzSignalInputFilterPredicate} that tries a series of
-     * {@link TrivalentPredicate} instances until one provides a {@code true} or {@code false}
-     * response indicating that the {@code newSignal} should be processed or not. If all return
-     * {@code null} then a default of {@code true} is returned.
+     * An implementation of {@link NitzSignalInputFilterPredicate} that tries a series of {@link
+     * TrivalentPredicate} instances until one provides a {@code true} or {@code false} response
+     * indicating that the {@code newSignal} should be processed or not. If all return {@code null}
+     * then a default of {@code true} is returned.
      */
     @VisibleForTesting
     public static class NitzSignalInputFilterPredicateImpl
             implements NitzSignalInputFilterPredicate {
 
-        @NonNull
-        private final TrivalentPredicate[] mComponents;
+        @NonNull private final TrivalentPredicate[] mComponents;
 
         @VisibleForTesting
         public NitzSignalInputFilterPredicateImpl(@NonNull TrivalentPredicate[] components) {
@@ -267,8 +278,8 @@ public final class NitzSignalInputFilterPredicateFactory {
         }
 
         @Override
-        public boolean mustProcessNitzSignal(@Nullable NitzSignal oldSignal,
-                @NonNull NitzSignal newSignal) {
+        public boolean mustProcessNitzSignal(
+                @Nullable NitzSignal oldSignal, @NonNull NitzSignal newSignal) {
             Objects.requireNonNull(newSignal);
 
             for (TrivalentPredicate component : mComponents) {

@@ -60,3 +60,33 @@ message EncryptedPin {
     // Initialization vector
     optional bytes iv = 2;
 }
+
+// Stores the PIN of a SIM card when the platform manages that PIN. In such a case,
+// the old PIN is also stored for when the user turns this off.
+message PlatformManagedPin {
+    // ICCID of the SIM card
+    optional string iccid = 1;
+
+    // PIN code
+    optional string pin = 2;
+
+    // The old SIM PIN, for restoring when the user turns the feature off.
+    optional string old_pin = 3;
+}
+
+message PlatformManagedPins {
+    // A collection of platform-managed PINs. We have multiple since a user
+    // can enroll multiple SIM cards into automatic PIN management, and we
+    // need to keep all of them.
+    repeated PlatformManagedPin pins = 1;
+}
+
+// Holds an encrypted PlatformManagedPins instance and the initialization
+// vector needed for decryption.
+message EncryptedPlatformManagedPins {
+    // Encrypted PlatformManagedPins
+    optional bytes encrypted_platform_pins = 1;
+
+    // Initialization vector
+    optional bytes iv = 2;
+}

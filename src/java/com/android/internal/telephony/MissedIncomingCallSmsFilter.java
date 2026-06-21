@@ -31,6 +31,7 @@ import android.telephony.CarrierConfigManager;
 import android.telephony.Rlog;
 import android.telephony.SmsMessage;
 import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 
 import java.time.Instant;
@@ -270,7 +271,7 @@ public class MissedIncomingCallSmsFilter {
 
             // Need to use the Epoch time instead of the elapsed time because it's possible
             // the missed incoming call occurred before the phone boots up.
-            bundle.putLong(TelecomManager.EXTRA_CALL_CREATED_EPOCH_TIME_MILLIS, missedCallTime);
+            bundle.putLong(TelephonyManager.EXTRA_CALL_CREATED_EPOCH_TIME_MILLIS, missedCallTime);
             tm.addNewIncomingCall(makePstnPhoneAccountHandle(mPhone), bundle);
         }
     }

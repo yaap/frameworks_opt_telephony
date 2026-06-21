@@ -85,7 +85,6 @@ public class CommunicatorTest {
         verify(mTransportProtocols.get(1)).startNegotiation();
         assertEquals(mTransportProtocols.get(1), mCommunicator.getActiveTransport());
         mCallback.onNegotiationSuccess(mTransportProtocols.get(1));
-        verify(mCommunicatorCallback).onD2DAvailabilitychanged(eq(true));
     }
 
     /**
@@ -104,7 +103,6 @@ public class CommunicatorTest {
         assertEquals(mTransportProtocols.get(1), mCommunicator.getActiveTransport());
         // Oops, the second one failed too; not negotiated!
         mCallback.onNegotiationFailed(mTransportProtocols.get(1));
-        verify(mCommunicatorCallback).onD2DAvailabilitychanged(eq(false));
     }
 
     /**
@@ -115,7 +113,6 @@ public class CommunicatorTest {
     public void testNegotiationFailedNoProtocols() {
         mCommunicator = new Communicator(Collections.EMPTY_LIST, mCommunicatorCallback);
         mCommunicator.onStateChanged(null, Connection.STATE_ACTIVE);
-        verify(mCommunicatorCallback).onD2DAvailabilitychanged(eq(false));
     }
 
     /**

@@ -31,8 +31,10 @@ import android.telephony.data.DataProfile;
 import android.telephony.data.TrafficDescriptor;
 import android.telephony.data.TrafficDescriptor.OsAppId;
 
+import com.android.internal.telephony.HalVersion;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
+import com.android.internal.telephony.RIL;
 import com.android.internal.telephony.flags.FeatureFlags;
 
 import java.lang.annotation.Retention;
@@ -42,7 +44,6 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -79,6 +80,7 @@ public class TelephonyNetworkRequest {
             CAPABILITY_ATTRIBUTE_APN_SETTING,
             CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN,
             CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_OS_APP_ID,
+            CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY,
     })
     @Retention(RetentionPolicy.SOURCE)
     public @interface NetCapabilityAttribute {}
@@ -98,47 +100,74 @@ public class TelephonyNetworkRequest {
     public static final int CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_OS_APP_ID = 1 << 2;
 
     /**
+     * The network capability should result in filling Connection Capability in
+     * {@link TrafficDescriptor}.
+     **/
+    public static final int CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY = 1 << 3;
+
+    /**
      * Describes the attributes of network capabilities. Different capabilities can be translated
      * to different fields in {@link DataProfile}, or might be expanded to support special actions
      * in telephony in the future.
      */
     private static final Map<Integer, Integer> CAPABILITY_ATTRIBUTE_MAP = Map.ofEntries(
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_MMS,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_SUPL,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_DUN,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_FOTA,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_IMS,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_CBS,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN
                             | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_OS_APP_ID),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_XCAP,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_EIMS,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_INTERNET,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_MCX,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_ENTERPRISE,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN
                             | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_OS_APP_ID),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_VSIM,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_BIP,
-                    CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_LATENCY,
-                    CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_OS_APP_ID),
+                    CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_OS_APP_ID
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_PRIORITIZE_BANDWIDTH,
-                    CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_OS_APP_ID),
+                    CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_OS_APP_ID
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY),
             new SimpleImmutableEntry<>(NetworkCapabilities.NET_CAPABILITY_RCS,
-                CAPABILITY_ATTRIBUTE_APN_SETTING | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
+                    CAPABILITY_ATTRIBUTE_APN_SETTING
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_DNN),
             new SimpleImmutableEntry<>(DataUtils.NET_CAPABILITY_PRIORITIZE_UNIFIED_COMMUNICATIONS,
-                    CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_OS_APP_ID)
+                    CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_OS_APP_ID
+                            | CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY)
     );
 
     /**
@@ -153,7 +182,7 @@ public class TelephonyNetworkRequest {
      * special actions in telephony.
      */
     @NetCapabilityAttribute
-    private final int mCapabilitiesAttributes;
+    private int mCapabilitiesAttributes;
 
     /**
      * Priority of the network request. The network request has higher priority will be satisfied
@@ -207,6 +236,7 @@ public class TelephonyNetworkRequest {
                                    @NonNull FeatureFlags featureFlags) {
         this(request, featureFlags);
         mDataConfigManager = phone.getDataNetworkController().getDataConfigManager();
+        updateCapabilitiesAttributes();
         updatePriority();
     }
 
@@ -221,12 +251,7 @@ public class TelephonyNetworkRequest {
         mNativeNetworkRequest = request;
         mFeatureFlags = featureFlags;
 
-        int capabilitiesAttributes = CAPABILITY_ATTRIBUTE_NONE;
-        for (int networkCapability : mNativeNetworkRequest.getCapabilities()) {
-            capabilitiesAttributes |= CAPABILITY_ATTRIBUTE_MAP.getOrDefault(
-                    networkCapability, CAPABILITY_ATTRIBUTE_NONE);
-        }
-        mCapabilitiesAttributes = capabilitiesAttributes;
+        updateCapabilitiesAttributes();
 
         mPriority = 0;
         mAttachedDataNetwork = null;
@@ -243,7 +268,34 @@ public class TelephonyNetworkRequest {
      */
     public void updateDataConfig(@NonNull DataConfigManager dataConfigManager) {
         mDataConfigManager = dataConfigManager;
+        updateCapabilitiesAttributes();
         updatePriority();
+    }
+
+    private void updateCapabilitiesAttributes() {
+        int capabilitiesAttributes = CAPABILITY_ATTRIBUTE_NONE;
+        if (mFeatureFlags.enableTrafficDescriptorConnectionCapability()) {
+            for (int networkCapability : mNativeNetworkRequest.getCapabilities()) {
+                capabilitiesAttributes |= CAPABILITY_ATTRIBUTE_MAP.getOrDefault(
+                        networkCapability, CAPABILITY_ATTRIBUTE_NONE);
+                if (mDataConfigManager != null) {
+                    int connectionCapability = mDataConfigManager
+                            .networkCapabilityToConnectionCapability(networkCapability);
+                    if (connectionCapability != TrafficDescriptor.CONNECTION_CAPABILITY_UNKNOWN) {
+                        capabilitiesAttributes |=
+                                CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY;
+                    }
+                }
+            }
+        } else {
+            // Previous logic without CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY
+            for (int networkCapability : mNativeNetworkRequest.getCapabilities()) {
+                capabilitiesAttributes |= (CAPABILITY_ATTRIBUTE_MAP.getOrDefault(
+                        networkCapability, CAPABILITY_ATTRIBUTE_NONE)
+                        & ~CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY);
+            }
+        }
+        mCapabilitiesAttributes = capabilitiesAttributes;
     }
 
     /**
@@ -323,6 +375,24 @@ public class TelephonyNetworkRequest {
             if (dataProfile.getTrafficDescriptor() != null && Arrays.equals(getOsAppId().getBytes(),
                     dataProfile.getTrafficDescriptor().getOsAppId())) {
                 return true;
+            }
+        }
+
+        // If the network request can be translated to Connection Capability, check if the data
+        // profile's traffic descriptor can satisfy it.
+        if (hasAttribute(CAPABILITY_ATTRIBUTE_TRAFFIC_DESCRIPTOR_CONNECTION_CAPABILITY)
+                && dataProfile.getTrafficDescriptor() != null) {
+            int highestPriorityCapability = getHighestPrioritySupportedNetworkCapability();
+            int targetConnectionCapability = TrafficDescriptor.CONNECTION_CAPABILITY_UNKNOWN;
+            if (mDataConfigManager != null) {
+                targetConnectionCapability = mDataConfigManager
+                        .networkCapabilityToConnectionCapability(highestPriorityCapability);
+            }
+            if (targetConnectionCapability != TrafficDescriptor.CONNECTION_CAPABILITY_UNKNOWN) {
+                if (dataProfile.getTrafficDescriptor().getConnectionCapability()
+                        == targetConnectionCapability) {
+                    return true;
+                }
             }
         }
 
@@ -428,22 +498,30 @@ public class TelephonyNetworkRequest {
     public int getHighestPrioritySupportedNetworkCapability() {
         if (mDataConfigManager == null) return -1;
         return Arrays.stream(getCapabilities()).boxed()
-                .filter(CAPABILITY_ATTRIBUTE_MAP::containsKey)
+                .filter(cap -> CAPABILITY_ATTRIBUTE_MAP.containsKey(cap)
+                        || (mFeatureFlags.enableTrafficDescriptorConnectionCapability()
+                        && mDataConfigManager.networkCapabilityToConnectionCapability(cap)
+                        != TrafficDescriptor.CONNECTION_CAPABILITY_UNKNOWN))
                 .max(Comparator.comparingInt(mDataConfigManager::getNetworkCapabilityPriority))
                 .orElse(-1);
     }
 
     /**
-     * @return Get all the network capabilities that can lead to data setup.
+     * @return Get all the network capabilities that can lead to data setup. Note this does not
+     * take {@code CarrierConfigManager#KEY_TELEPHONY_UNSUPPORTED_NETWORK_CAPABILITY_STRING_ARRAY}
+     * or the resource overlay {@code config_unsupported_network_capabilities} into account.
      */
     @NonNull
     @NetCapability
     public static List<Integer> getAllSupportedNetworkCapabilities() {
-        Set<Integer> unsupportedCaps = PhoneFactory.getDefaultPhone()
-                .getDataNetworkController().getDataConfigManager()
-                .getUnsupportedNetworkCapabilities();
-        return CAPABILITY_ATTRIBUTE_MAP.keySet().stream()
-                .filter(cap -> !unsupportedCaps.contains(cap)).toList();
+        HalVersion halVersion = PhoneFactory.getDefaultPhone().getHalVersion();
+        boolean useApnOnly = halVersion != null
+                && halVersion.lessOrEqual(RIL.RADIO_HAL_VERSION_1_5);
+        return CAPABILITY_ATTRIBUTE_MAP.entrySet().stream()
+                .filter(entry -> !useApnOnly
+                        || (entry.getValue() & CAPABILITY_ATTRIBUTE_APN_SETTING) != 0)
+                .map(Map.Entry::getKey)
+                .toList();
     }
 
     /**

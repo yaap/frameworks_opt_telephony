@@ -177,10 +177,15 @@ public class CarrierPrivilegesTracker extends Handler {
      */
     private static final int ACTION_SET_TEST_OVERRIDE_CARRIER_SERVICE_PACKAGE = 11;
 
-    private final Context mContext;
-    @NonNull
-    private final FeatureFlags mFeatureFlags;
-    private final Phone mPhone;
+    /**
+     * Action used to synchronize variables after initialization is done.
+     */
+    private static final int ACTION_INITIALIZE_TRACKER_DONE = 12;
+
+    @NonNull private final Phone mPhone;
+    @NonNull private final Context mContext;
+    @NonNull private final FeatureFlags mFeatureFlags;
+
     private final PackageManager mPackageManager;
     private final UserManager mUserManager;
     private final CarrierConfigManager mCarrierConfigManager;
@@ -356,12 +361,6 @@ public class CarrierPrivilegesTracker extends Handler {
         mUserManager = (UserManager) mContext.getSystemService(Context.USER_SERVICE);
         mCarrierConfigManager =
                 (CarrierConfigManager) mContext.getSystemService(Context.CARRIER_CONFIG_SERVICE);
-        // Callback is executed in handler thread and directly handles carrier config update
-        if (mCarrierConfigManager != null) {
-            mCarrierConfigManager.registerCarrierConfigChangeListener(this::post,
-                    (slotIndex, subId, carrierId, specificCarrierId) -> handleCarrierConfigUpdated(
-                            subId, slotIndex));
-        }
         mTelephonyManager = (TelephonyManager) mContext.getSystemService(Context.TELEPHONY_SERVICE);
         mTelephonyRegistryManager =
                 (TelephonyRegistryManager)
@@ -373,6 +372,8 @@ public class CarrierPrivilegesTracker extends Handler {
                 switch(msg.what) {
                     case ACTION_INITIALIZE_TRACKER:
                         handleInitializeTracker();
+                        CarrierPrivilegesTracker.this
+                                .sendEmptyMessage(ACTION_INITIALIZE_TRACKER_DONE);
                         if (!hasMessagesOrCallbacks()) {
                             mCurrentHandler = CarrierPrivilegesTracker.this;
                         }
@@ -390,6 +391,15 @@ public class CarrierPrivilegesTracker extends Handler {
         };
 
         mCurrentHandler.sendMessage(obtainMessage(ACTION_INITIALIZE_TRACKER));
+
+        // Callback is executed in handler thread and directly handles carrier config update
+        if (mCarrierConfigManager != null) {
+            mCarrierConfigManager.registerCarrierConfigChangeListener(
+                    Runnable::run,
+                    (slotIndex, subId, carrierId, specificCarrierId) -> {
+                        mCurrentHandler.post(() -> handleCarrierConfigUpdated(subId, slotIndex));
+                    });
+        }
 
         IntentFilter certFilter = new IntentFilter();
         certFilter.addAction(TelephonyManager.ACTION_SIM_CARD_STATE_CHANGED);
@@ -417,44 +427,46 @@ public class CarrierPrivilegesTracker extends Handler {
         switch (msg.what) {
             case ACTION_SIM_STATE_UPDATED: {
                 handleSimStateChanged(msg.arg1, msg.arg2);
-                break;
             }
+            break;
             case ACTION_PACKAGE_ADDED_REPLACED_OR_CHANGED: {
                 String pkgName = (String) msg.obj;
                 handlePackageAddedReplacedOrChanged(pkgName);
-                break;
             }
+            break;
             case ACTION_PACKAGE_REMOVED_OR_DISABLED_BY_USER: {
                 String pkgName = (String) msg.obj;
                 handlePackageRemovedOrDisabledByUser(pkgName);
-                break;
             }
-            case ACTION_INITIALIZE_TRACKER: {
-                handleInitializeTracker();
-                break;
-            }
+            break;
             case ACTION_SET_TEST_OVERRIDE_RULE: {
                 String carrierPrivilegeRules = (String) msg.obj;
                 handleSetTestOverrideRules(carrierPrivilegeRules);
-                break;
             }
+            break;
             case ACTION_CLEAR_UICC_RULES: {
                 handleClearUiccRules();
-                break;
             }
+            break;
             case ACTION_UICC_ACCESS_RULES_LOADED: {
                 handleUiccAccessRulesLoaded();
-                break;
             }
+            break;
             case ACTION_SET_TEST_OVERRIDE_CARRIER_SERVICE_PACKAGE: {
                 String carrierServicePackage = (String) msg.obj;
                 handleSetTestOverrideCarrierServicePackage(carrierServicePackage);
-                break;
             }
+            break;
+            case ACTION_INITIALIZE_TRACKER_DONE: {
+                synchronized (CarrierPrivilegesTracker.this) {
+                    // now we are guaranteed that updated values are visible in this thread
+                }
+            }
+            break;
             default: {
                 Rlog.e(TAG, "Received unknown msg type: " + msg.what);
-                break;
             }
+            break;
         }
     }
 
@@ -545,7 +557,7 @@ public class CarrierPrivilegesTracker extends Handler {
 
     /** Called when UiccAccessRules has been loaded */
     public void onUiccAccessRulesLoaded() {
-        sendEmptyMessage(ACTION_UICC_ACCESS_RULES_LOADED);
+        mCurrentHandler.sendEmptyMessage(ACTION_UICC_ACCESS_RULES_LOADED);
     }
 
     private void handleClearUiccRules() {
@@ -588,7 +600,7 @@ public class CarrierPrivilegesTracker extends Handler {
                     INSTALLED_PACKAGES_QUERY_FLAGS,
                     ActivityManager.getCurrentUser());
         } catch (NameNotFoundException e) {
-            Rlog.e(TAG, "Error getting installed package: " + pkgName, e);
+            Rlog.w(TAG, "Error getting installed package: " + pkgName, e);
             return null;
         }
     }
@@ -777,6 +789,9 @@ public class CarrierPrivilegesTracker extends Handler {
         Set<String> carrierServiceEligiblePackages = new ArraySet<>();
         Set<String> privilegedPackageNames = new ArraySet<>();
         Set<Integer> privilegedUids = new ArraySet<>();
+        int simPrivilegedPackageCount = 0;
+        int configPrivilegedPackageCount = 0;
+
         for (Map.Entry<String, Set<Integer>> e : mInstalledPackageCertHashes.entrySet()) {
             if (!isPackageMaybePrivileged(e.getKey(), e.getValue())) continue;
 
@@ -784,16 +799,27 @@ public class CarrierPrivilegesTracker extends Handler {
 
             final int priv = getPackagePrivilegedStatus(e.getKey(), fullCerts);
             switch (priv) {
-                case PACKAGE_PRIVILEGED_FROM_SIM:
-                case PACKAGE_PRIVILEGED_FROM_CARRIER_SERVICE_TEST_OVERRIDE: // fallthrough
+                case PACKAGE_PRIVILEGED_FROM_SIM: // fallthrough
+                case PACKAGE_PRIVILEGED_FROM_CARRIER_SERVICE_TEST_OVERRIDE:
                     carrierServiceEligiblePackages.add(e.getKey());
-                    // fallthrough
+                    simPrivilegedPackageCount++;
+                    break;
                 case PACKAGE_PRIVILEGED_FROM_CARRIER_CONFIG:
-                    privilegedPackageNames.add(e.getKey());
-                    privilegedUids.addAll(
-                            getUidsForPackage(e.getKey(), /* invalidateCache= */ false));
+                    configPrivilegedPackageCount++;
+                    break;
+                default:
+                    continue;
             }
+
+            privilegedPackageNames.add(e.getKey());
+            privilegedUids.addAll(
+                    getUidsForPackage(e.getKey(), /* invalidateCache= */ false));
         }
+
+        TelephonyStatsLog.write(TelephonyStatsLog.CARRIER_PRIVILEGES_REPORTED,
+                mPhone.getSpecificCarrierId(),
+                simPrivilegedPackageCount,
+                configPrivilegedPackageCount);
 
         return new PrivilegedPackageInfo(
                 privilegedPackageNames,

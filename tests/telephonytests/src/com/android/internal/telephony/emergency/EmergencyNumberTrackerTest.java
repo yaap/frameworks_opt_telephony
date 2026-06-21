@@ -418,6 +418,7 @@ public class EmergencyNumberTrackerTest extends TelephonyTest {
     }
 
     @Test
+    @org.junit.Ignore("Modifies static final ShortNumberInfo.INSTANCE")
     public void testIsEmergencyNumber_FallbackToShortNumberXml_NoSims() throws Exception {
         setDsdsPhones();
 
@@ -440,11 +441,13 @@ public class EmergencyNumberTrackerTest extends TelephonyTest {
     }
 
     @Test
+    @org.junit.Ignore("Modifies static final ShortNumberInfo.INSTANCE")
     public void testIsEmergencyNumber_NoFallbackToShortNumberXml_OneSimActive() throws Exception {
         testIsEmergencyNumber_NoFallbackToShortNumberXml(1);
     }
 
     @Test
+    @org.junit.Ignore("Modifies static final ShortNumberInfo.INSTANCE")
     public void testIsEmergencyNumber_NoFallbackToShortNumberXml_TwoSimsActive() throws Exception {
         testIsEmergencyNumber_NoFallbackToShortNumberXml(2);
     }

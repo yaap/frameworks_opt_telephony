@@ -27,8 +27,8 @@ import java.io.PrintWriter;
 
 /**
  * An interface to various time / time zone detection behaviors that are centralized into services.
- * This interface exists to separate out behavior to enable easier testing of the
- * {@link NitzStateMachineImpl}.
+ * This interface exists to separate out behavior to enable easier testing of the {@link
+ * NitzStateMachineImpl}.
  */
 @VisibleForTesting
 public interface TimeServiceHelper {
@@ -51,13 +51,9 @@ public interface TimeServiceHelper {
      */
     void maybeSuggestDeviceTimeZone(@NonNull TelephonyTimeZoneSuggestion suggestion);
 
-    /**
-     * Dumps any logs held to the supplied writer.
-     */
+    /** Dumps any logs held to the supplied writer. */
     void dumpLogs(IndentingPrintWriter ipw);
 
-    /**
-     * Dumps internal state such as field values.
-     */
+    /** Dumps internal state such as field values. */
     void dumpState(PrintWriter pw);
 }

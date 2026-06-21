@@ -17,6 +17,7 @@
 package com.android.internal.telephony.data;
 
 import android.annotation.NonNull;
+import android.annotation.Nullable;
 import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.MatchAllNetworkSpecifier;
@@ -35,6 +36,9 @@ import android.util.LocalLog;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
+import com.android.internal.telephony.configupdate.ConfigParser;
+import com.android.internal.telephony.configupdate.ConfigProviderAdaptor;
+import com.android.internal.telephony.configupdate.TelephonyConfigUpdateInstallReceiver;
 import com.android.internal.telephony.data.PhoneSwitcher.PhoneSwitcherCallback;
 import com.android.internal.telephony.flags.FeatureFlags;
 import com.android.internal.telephony.metrics.NetworkRequestsStats;
@@ -44,7 +48,10 @@ import com.android.telephony.Rlog;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * TelephonyNetworkProvider is a singleton network provider responsible for providing all
@@ -58,6 +65,9 @@ public class TelephonyNetworkProvider extends NetworkProvider implements Network
     @NonNull
     private final FeatureFlags mFlags;
 
+    @NonNull
+    private final Context mContext;
+
     /** The event handler */
     @NonNull
     private final Handler mHandler;
@@ -68,6 +78,10 @@ public class TelephonyNetworkProvider extends NetworkProvider implements Network
 
     /** Network requests map. Key is the network request, value is the phone id it applies to. */
     private final Map<TelephonyNetworkRequest, Integer> mNetworkRequests = new ArrayMap<>();
+
+    /** Dynamic network capabilities from DataConfig */
+    @NonNull
+    private final Set<Integer> mDynamicNetworkCapabilities = new HashSet<>();
 
     /** Persisted log */
     @NonNull
@@ -85,6 +99,7 @@ public class TelephonyNetworkProvider extends NetworkProvider implements Network
         super(context, looper, TelephonyNetworkProvider.class.getSimpleName());
 
         mFlags = featureFlags;
+        mContext = context;
         mHandler = new Handler(looper);
         mPhoneSwitcher = PhoneSwitcher.getInstance();
 
@@ -107,6 +122,34 @@ public class TelephonyNetworkProvider extends NetworkProvider implements Network
                     }
                 });
 
+        boolean flagEnabled = mFlags.enableTrafficDescriptorConnectionCapability();
+
+        if (flagEnabled) {
+            TelephonyConfigUpdateInstallReceiver receiver =
+                    TelephonyConfigUpdateInstallReceiver.getInstance();
+
+            ConfigParser parser = receiver.getConfigParser(ConfigProviderAdaptor.DOMAIN_DATA);
+            if (parser != null) {
+                DataConfig dataConfig = (DataConfig) parser.getConfig();
+                if (dataConfig != null) {
+                    mDynamicNetworkCapabilities.addAll(dataConfig.getAllNetworkCapabilities());
+                }
+            }
+
+            receiver.registerCallback(
+                    mHandler::post,
+                    new ConfigProviderAdaptor.Callback() {
+                        @Override
+                        public void onChanged(@Nullable ConfigParser config) {
+                            if (config instanceof DataConfigParser) {
+                                DataConfig dataConfig = (DataConfig) config.getConfig();
+                                updateNetworkOffer(dataConfig);
+                            }
+                        }
+                    }
+            );
+        }
+
         // Register the provider and tell connectivity service what network offer telephony can
         // provide
         ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
@@ -115,6 +158,39 @@ public class TelephonyNetworkProvider extends NetworkProvider implements Network
             NetworkCapabilities caps = makeNetworkFilter();
             registerNetworkOffer(new NetworkScore.Builder().build(), caps, mHandler::post, this);
             logl("registerNetworkOffer: " + caps);
+        }
+    }
+
+    private void updateNetworkOffer(@Nullable DataConfig dataConfig) {
+        Set<Integer> newCaps = new HashSet<>();
+        if (dataConfig != null) {
+            newCaps.addAll(dataConfig.getAllNetworkCapabilities());
+        }
+
+        List<Integer> staticCaps = TelephonyNetworkRequest.getAllSupportedNetworkCapabilities();
+        staticCaps.forEach(newCaps::remove);
+
+        synchronized (mDynamicNetworkCapabilities) {
+            if (mDynamicNetworkCapabilities.equals(newCaps)) return;
+
+            mDynamicNetworkCapabilities.clear();
+            mDynamicNetworkCapabilities.addAll(newCaps);
+        }
+
+        logl("updateNetworkOffer: mDynamicNetworkCapabilities="
+                + mDynamicNetworkCapabilities.stream()
+                .map(DataUtils::networkCapabilityToString)
+                .collect(java.util.stream.Collectors.joining(",")));
+
+        // Refresh offer
+        ConnectivityManager cm = mContext.getSystemService(ConnectivityManager.class);
+        if (cm != null) {
+            // Unregister the previous offer
+            unregisterNetworkOffer(this);
+            // Register new offer with updated capabilities
+            NetworkCapabilities caps = makeNetworkFilter();
+            registerNetworkOffer(new NetworkScore.Builder().build(), caps, mHandler::post, this);
+            logl("Updated registerNetworkOffer: " + caps);
         }
     }
 
@@ -259,6 +335,10 @@ public class TelephonyNetworkProvider extends NetworkProvider implements Network
                 .setNetworkSpecifier(new MatchAllNetworkSpecifier());
         TelephonyNetworkRequest.getAllSupportedNetworkCapabilities()
                 .forEach(builder::addCapability);
+        // Add dynamic capabilities
+        synchronized (mDynamicNetworkCapabilities) {
+            mDynamicNetworkCapabilities.forEach(builder::addCapability);
+        }
 
         return builder.build();
     }

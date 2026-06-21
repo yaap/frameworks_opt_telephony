@@ -32,9 +32,6 @@ import android.os.Bundle;
 import android.os.Parcelable;
 import android.os.RemoteException;
 import android.os.UserManager;
-import android.platform.test.annotations.DisableFlags;
-import android.platform.test.annotations.EnableFlags;
-import android.platform.test.flag.junit.SetFlagsRule;
 import android.provider.Settings;
 import android.service.euicc.DownloadSubscriptionResult;
 import android.service.euicc.EuiccService;
@@ -58,8 +55,6 @@ import com.android.internal.telephony.TelephonyTest;
 import com.android.internal.telephony.euicc.EuiccConnector.GetOtaStatusCommandCallback;
 import com.android.internal.telephony.euicc.EuiccConnector.OtaStatusChangedCallback;
 import com.android.internal.telephony.uicc.euicc.apdu.ApduSender;
-import com.android.internal.telephony.flags.FeatureFlags;
-import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.uicc.UiccSlot;
 
 import libcore.junit.util.compat.CoreCompatChangeRule.DisableCompatChanges;
@@ -94,8 +89,6 @@ public class EuiccSessionTest extends TelephonyTest {
     @Rule
     public final TestRule compatChangeRule = new PlatformCompatChangeRule();
     @Rule
-    public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
-    @Rule
     public final MockitoRule rule = MockitoJUnit.rule();
 
     private static final String SESSION_ID_1 = "SESSION_ID_1";
@@ -112,23 +105,6 @@ public class EuiccSessionTest extends TelephonyTest {
     }
 
     @Test
-    @DisableFlags(Flags.FLAG_OPTIMIZATION_APDU_SENDER)
-    public void startOneSession_featureDisabled_noop() throws Exception {
-        mEuiccSession.startSession(SESSION_ID_1);
-        mEuiccSession.noteChannelOpen(mApduSender);
-        mEuiccSession.noteChannelOpen(mApduSender2);
-
-        assertThat(mEuiccSession.hasSession()).isFalse();
-
-        mEuiccSession.endSession(SESSION_ID_1);
-
-        assertThat(mEuiccSession.hasSession()).isFalse();
-        verify(mApduSender, never()).closeAnyOpenChannel();
-        verify(mApduSender2, never()).closeAnyOpenChannel();
-    }
-
-    @Test
-    @EnableFlags(Flags.FLAG_OPTIMIZATION_APDU_SENDER)
     public void startOneSession_featureOverlayDisabled_noop() throws Exception {
         mEuiccSession.startSession(SESSION_ID_1);
         mEuiccSession.noteChannelOpen(mApduSender);
@@ -144,7 +120,6 @@ public class EuiccSessionTest extends TelephonyTest {
     }
 
     @Test
-    @EnableFlags(Flags.FLAG_OPTIMIZATION_APDU_SENDER)
     public void startOneSession_endSession_hasSession() throws Exception {
         mContextFixture.putBooleanResource(
                 com.android.internal.R.bool.euicc_optimize_apdu_sender, true);
@@ -167,7 +142,6 @@ public class EuiccSessionTest extends TelephonyTest {
     }
 
     @Test
-    @EnableFlags(Flags.FLAG_OPTIMIZATION_APDU_SENDER)
     public void startTwoSession_endSession_hasSession() throws Exception {
         mContextFixture.putBooleanResource(
                 com.android.internal.R.bool.euicc_optimize_apdu_sender, true);
@@ -189,7 +163,6 @@ public class EuiccSessionTest extends TelephonyTest {
     }
 
     @Test
-    @EnableFlags(Flags.FLAG_OPTIMIZATION_APDU_SENDER)
     public void startTwoSessions_endAllSessions_hasSession() throws Exception {
         mContextFixture.putBooleanResource(
                 com.android.internal.R.bool.euicc_optimize_apdu_sender, true);
@@ -208,7 +181,6 @@ public class EuiccSessionTest extends TelephonyTest {
     }
 
     @Test
-    @EnableFlags(Flags.FLAG_OPTIMIZATION_APDU_SENDER)
     public void noteChannelOpen_noSession_endSession_noop() throws Exception {
         // noteChannelOpen called without a session started
         mContextFixture.putBooleanResource(
@@ -224,7 +196,6 @@ public class EuiccSessionTest extends TelephonyTest {
     }
 
     @Test
-    @EnableFlags(Flags.FLAG_OPTIMIZATION_APDU_SENDER)
     public void endAllSessions_noSession_endAllSessions_noOp() throws Exception {
         // noteChannelOpen called without a session started
         mContextFixture.putBooleanResource(

@@ -87,7 +87,7 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
         NitzSignal nitzSignal =
                 scenario.createNitzSignal(mFakeDeviceState.elapsedRealtimeMillis(), ARBITRARY_AGE);
         TrivalentPredicate nullPredicate = (x, y) -> null;
-        TrivalentPredicate[] triPredicates = { nullPredicate };
+        TrivalentPredicate[] triPredicates = {nullPredicate};
         NitzSignalInputFilterPredicateImpl impl =
                 new NitzSignalInputFilterPredicateImpl(triPredicates);
         assertTrue(impl.mustProcessNitzSignal(null, nitzSignal));
@@ -100,13 +100,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
                 scenario.createNitzSignal(mFakeDeviceState.elapsedRealtimeMillis(), ARBITRARY_AGE);
         TrivalentPredicate nullPredicate = (x, y) -> null;
         TrivalentPredicate truePredicate = (x, y) -> true;
-        TrivalentPredicate exceptionPredicate = (x, y) -> {
-            throw new RuntimeException();
-        };
+        TrivalentPredicate exceptionPredicate =
+                (x, y) -> {
+                    throw new RuntimeException();
+                };
         TrivalentPredicate[] triPredicates = {
-                nullPredicate,
-                truePredicate,
-                exceptionPredicate,
+            nullPredicate, truePredicate, exceptionPredicate,
         };
         NitzSignalInputFilterPredicateImpl impl =
                 new NitzSignalInputFilterPredicateImpl(triPredicates);
@@ -120,13 +119,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
                 scenario.createNitzSignal(mFakeDeviceState.elapsedRealtimeMillis(), ARBITRARY_AGE);
         TrivalentPredicate nullPredicate = (x, y) -> null;
         TrivalentPredicate falsePredicate = (x, y) -> false;
-        TrivalentPredicate exceptionPredicate = (x, y) -> {
-            throw new RuntimeException();
-        };
+        TrivalentPredicate exceptionPredicate =
+                (x, y) -> {
+                    throw new RuntimeException();
+                };
         TrivalentPredicate[] triPredicates = {
-                nullPredicate,
-                falsePredicate,
-                exceptionPredicate,
+            nullPredicate, falsePredicate, exceptionPredicate,
         };
         NitzSignalInputFilterPredicateImpl impl =
                 new NitzSignalInputFilterPredicateImpl(triPredicates);
@@ -148,8 +146,7 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
     public void testTrivalentPredicate_bogusElapsedRealtimeCheck() {
         Scenario scenario = UNIQUE_US_ZONE_SCENARIO1;
         long elapsedRealtimeMillis = mFakeDeviceState.elapsedRealtimeMillis();
-        NitzSignal baseNitzSignal =
-                scenario.createNitzSignal(elapsedRealtimeMillis, ARBITRARY_AGE);
+        NitzSignal baseNitzSignal = scenario.createNitzSignal(elapsedRealtimeMillis, ARBITRARY_AGE);
 
         TrivalentPredicate triPredicate =
                 createBogusElapsedRealtimeCheck(mContext, mFakeDeviceState);
@@ -159,8 +156,8 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
         {
             long receiptElapsedMillis = elapsedRealtimeMillis + 1;
             long ageMillis = 0;
-            NitzSignal bogusNitzSignal = new NitzSignal(
-                    receiptElapsedMillis, baseNitzSignal.getNitzData(), ageMillis);
+            NitzSignal bogusNitzSignal =
+                    new NitzSignal(receiptElapsedMillis, baseNitzSignal.getNitzData(), ageMillis);
             assertFalse(triPredicate.mustProcessNitzSignal(null, bogusNitzSignal));
         }
 
@@ -171,8 +168,8 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
         {
             long receiptElapsedMillis = elapsedRealtimeMillis + 1;
             long ageMillis = 10000;
-            NitzSignal bogusNitzSignal = new NitzSignal(
-                    receiptElapsedMillis, baseNitzSignal.getNitzData(), ageMillis);
+            NitzSignal bogusNitzSignal =
+                    new NitzSignal(receiptElapsedMillis, baseNitzSignal.getNitzData(), ageMillis);
 
             assertFalse(triPredicate.mustProcessNitzSignal(null, bogusNitzSignal));
         }
@@ -215,8 +212,9 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int timeAdjustment = nitzSpacingThreshold - 1;
             int unixTimeAdjustment = 0;
             long ageAdjustment = 0;
-            NitzSignal newSignal = createAdjustedNitzSignal(
-                    baseNitzSignal, timeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal newSignal =
+                    createAdjustedNitzSignal(
+                            baseNitzSignal, timeAdjustment, unixTimeAdjustment, ageAdjustment);
             assertFalse(triPredicate.mustProcessNitzSignal(baseNitzSignal, newSignal));
         }
 
@@ -225,8 +223,9 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int timeAdjustment = nitzSpacingThreshold + 1;
             int unixTimeAdjustment = 0;
             long ageAdjustment = 0;
-            NitzSignal newSignal = createAdjustedNitzSignal(
-                    baseNitzSignal, timeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal newSignal =
+                    createAdjustedNitzSignal(
+                            baseNitzSignal, timeAdjustment, unixTimeAdjustment, ageAdjustment);
             assertTrue(triPredicate.mustProcessNitzSignal(baseNitzSignal, newSignal));
         }
     }
@@ -259,8 +258,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = nitzSpacingThreshold - 1;
             int unixTimeAdjustment = 0;
             long ageAdjustment = 10000;
-            NitzSignal newSignal = createAdjustedNitzSignal(
-                    baseNitzSignal, elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal newSignal =
+                    createAdjustedNitzSignal(
+                            baseNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertFalse(triPredicate.mustProcessNitzSignal(baseNitzSignal, newSignal));
         }
 
@@ -270,8 +273,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = nitzSpacingThreshold - 1;
             int unixTimeAdjustment = 0;
             long ageAdjustment = -10000;
-            NitzSignal newSignal = createAdjustedNitzSignal(
-                    baseNitzSignal, elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal newSignal =
+                    createAdjustedNitzSignal(
+                            baseNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertFalse(triPredicate.mustProcessNitzSignal(baseNitzSignal, newSignal));
         }
 
@@ -280,8 +287,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = nitzSpacingThreshold + 1;
             int unixTimeAdjustment = 0;
             long ageAdjustment = 10000;
-            NitzSignal newSignal = createAdjustedNitzSignal(
-                    baseNitzSignal, elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal newSignal =
+                    createAdjustedNitzSignal(
+                            baseNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertTrue(triPredicate.mustProcessNitzSignal(baseNitzSignal, newSignal));
         }
 
@@ -290,8 +301,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = nitzSpacingThreshold + 1;
             int unixTimeAdjustment = 0;
             long ageAdjustment = -10000;
-            NitzSignal newSignal = createAdjustedNitzSignal(
-                    baseNitzSignal, elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal newSignal =
+                    createAdjustedNitzSignal(
+                            baseNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertTrue(triPredicate.mustProcessNitzSignal(baseNitzSignal, newSignal));
         }
     }
@@ -306,14 +321,15 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
         long baseElapsedRealtimeMillis = mFakeDeviceState.elapsedRealtimeMillis();
         NitzData baseNitzData = scenario.createNitzData();
         long baseAgeMillis = 0;
-        NitzSignal baseNitzSignal = new NitzSignal(
-                baseElapsedRealtimeMillis, baseNitzData, baseAgeMillis);
+        NitzSignal baseNitzSignal =
+                new NitzSignal(baseElapsedRealtimeMillis, baseNitzData, baseAgeMillis);
 
         // Create a new NitzSignal that would normally be filtered.
         int timeAdjustment = nitzSpacingThreshold - 1;
         long ageAdjustment = 0;
-        NitzSignal intermediateNitzSignal = createAdjustedNitzSignal(
-                baseNitzSignal, timeAdjustment, timeAdjustment, ageAdjustment);
+        NitzSignal intermediateNitzSignal =
+                createAdjustedNitzSignal(
+                        baseNitzSignal, timeAdjustment, timeAdjustment, ageAdjustment);
         NitzData intermediateNitzData = intermediateNitzSignal.getNitzData();
         assertAgeAdjustedUnixEpochTimeIsIdentical(baseNitzSignal, intermediateNitzSignal);
         assertFalse(triPredicate.mustProcessNitzSignal(baseNitzSignal, intermediateNitzSignal));
@@ -322,15 +338,17 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
         // offset information so should be detected as "different" and processed.
         {
             // Modifying the local offset should be enough to recognize the NitzData as different.
-            NitzData differentOffsetNitzData = NitzData.createForTests(
-                    intermediateNitzData.getLocalOffsetMillis() + 1,
-                    intermediateNitzData.getDstAdjustmentMillis(),
-                    intermediateNitzData.getCurrentTimeInMillis(),
-                    intermediateNitzData.getEmulatorHostTimeZone());
-            NitzSignal differentOffsetSignal = new NitzSignal(
-                    baseNitzSignal.getReceiptElapsedRealtimeMillis() + timeAdjustment,
-                    differentOffsetNitzData,
-                    baseNitzSignal.getAgeMillis());
+            NitzData differentOffsetNitzData =
+                    NitzData.createForTests(
+                            intermediateNitzData.getLocalOffsetMillis() + 1,
+                            intermediateNitzData.getDstAdjustmentMillis(),
+                            intermediateNitzData.getCurrentTimeInMillis(),
+                            intermediateNitzData.getEmulatorHostTimeZone());
+            NitzSignal differentOffsetSignal =
+                    new NitzSignal(
+                            baseNitzSignal.getReceiptElapsedRealtimeMillis() + timeAdjustment,
+                            differentOffsetNitzData,
+                            baseNitzSignal.getAgeMillis());
             assertAgeAdjustedUnixEpochTimeIsIdentical(baseNitzSignal, differentOffsetSignal);
             assertTrue(triPredicate.mustProcessNitzSignal(baseNitzSignal, differentOffsetSignal));
         }
@@ -358,8 +376,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = 0;
             int unixTimeAdjustment = nitzUnixDiffThreshold - 1;
             long ageAdjustment = 0;
-            NitzSignal nitzSignal = createAdjustedNitzSignal(baseNitzSignal,
-                    elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal nitzSignal =
+                    createAdjustedNitzSignal(
+                            baseNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertFalse(triPredicate.mustProcessNitzSignal(baseNitzSignal, nitzSignal));
         }
 
@@ -369,8 +391,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = 0;
             int unixTimeAdjustment = -(nitzUnixDiffThreshold - 1);
             long ageAdjustment = 0;
-            NitzSignal nitzSignal = createAdjustedNitzSignal(baseNitzSignal,
-                    elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal nitzSignal =
+                    createAdjustedNitzSignal(
+                            baseNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertFalse(triPredicate.mustProcessNitzSignal(baseNitzSignal, nitzSignal));
         }
 
@@ -380,8 +406,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = 0;
             int unixTimeAdjustment = nitzUnixDiffThreshold + 1;
             long ageAdjustment = 0;
-            NitzSignal nitzSignal = createAdjustedNitzSignal(baseNitzSignal,
-                    elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal nitzSignal =
+                    createAdjustedNitzSignal(
+                            baseNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertTrue(triPredicate.mustProcessNitzSignal(baseNitzSignal, nitzSignal));
         }
 
@@ -391,8 +421,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = 0;
             int unixTimeAdjustment = -(nitzUnixDiffThreshold + 1);
             long ageAdjustment = 0;
-            NitzSignal nitzSignal = createAdjustedNitzSignal(baseNitzSignal,
-                    elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal nitzSignal =
+                    createAdjustedNitzSignal(
+                            baseNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertTrue(triPredicate.mustProcessNitzSignal(baseNitzSignal, nitzSignal));
         }
     }
@@ -418,9 +452,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
         // though it encodes for the same Unix epoch time. Used to construct test signals below.
         int intermediateSignalAgeAdjustment = -10000;
         int intermediateUnixTimeAdjustment = 0;
-        NitzSignal intermediateNitzSignal = createAdjustedNitzSignal(baseNitzSignal,
-                intermediateSignalAgeAdjustment, intermediateUnixTimeAdjustment,
-                intermediateSignalAgeAdjustment);
+        NitzSignal intermediateNitzSignal =
+                createAdjustedNitzSignal(
+                        baseNitzSignal,
+                        intermediateSignalAgeAdjustment,
+                        intermediateUnixTimeAdjustment,
+                        intermediateSignalAgeAdjustment);
         assertAgeAdjustedUnixEpochTimeIsIdentical(baseNitzSignal, intermediateNitzSignal);
 
         // Two signals spaced contain Unix epoch times that are not sufficiently different and so
@@ -429,8 +466,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = 0;
             int unixTimeAdjustment = nitzUnixDiffThreshold - 1;
             long ageAdjustment = 0;
-            NitzSignal nitzSignal = createAdjustedNitzSignal(intermediateNitzSignal,
-                    elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal nitzSignal =
+                    createAdjustedNitzSignal(
+                            intermediateNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertFalse(triPredicate.mustProcessNitzSignal(baseNitzSignal, nitzSignal));
         }
 
@@ -440,8 +481,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = 0;
             int unixTimeAdjustment = -(nitzUnixDiffThreshold - 1);
             long ageAdjustment = 0;
-            NitzSignal nitzSignal = createAdjustedNitzSignal(intermediateNitzSignal,
-                    elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal nitzSignal =
+                    createAdjustedNitzSignal(
+                            intermediateNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertFalse(triPredicate.mustProcessNitzSignal(baseNitzSignal, nitzSignal));
         }
 
@@ -451,8 +496,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = 0;
             int unixTimeAdjustment = nitzUnixDiffThreshold + 1;
             long ageAdjustment = 0;
-            NitzSignal nitzSignal = createAdjustedNitzSignal(intermediateNitzSignal,
-                    elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal nitzSignal =
+                    createAdjustedNitzSignal(
+                            intermediateNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertTrue(triPredicate.mustProcessNitzSignal(baseNitzSignal, nitzSignal));
         }
 
@@ -462,8 +511,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
             int elapsedRealtimeAdjustment = 0;
             int unixTimeAdjustment = -(nitzUnixDiffThreshold + 1);
             long ageAdjustment = 0;
-            NitzSignal nitzSignal = createAdjustedNitzSignal(intermediateNitzSignal,
-                    elapsedRealtimeAdjustment, unixTimeAdjustment, ageAdjustment);
+            NitzSignal nitzSignal =
+                    createAdjustedNitzSignal(
+                            intermediateNitzSignal,
+                            elapsedRealtimeAdjustment,
+                            unixTimeAdjustment,
+                            ageAdjustment);
             assertTrue(triPredicate.mustProcessNitzSignal(baseNitzSignal, nitzSignal));
         }
     }
@@ -473,8 +526,10 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
      * the time (receipt time, Unix epoch and age) adjusted by the specified amounts.
      */
     private static NitzSignal createAdjustedNitzSignal(
-            NitzSignal baseNitzSignal, int elapsedRealtimeMillisAdjustment,
-            int unixMillisAdjustment, long ageMillisAdjustment) {
+            NitzSignal baseNitzSignal,
+            int elapsedRealtimeMillisAdjustment,
+            int unixMillisAdjustment,
+            long ageMillisAdjustment) {
         long adjustedReceiptElapsedMillis =
                 baseNitzSignal.getReceiptElapsedRealtimeMillis() + elapsedRealtimeMillisAdjustment;
         NitzData adjustedNitzData =
@@ -498,10 +553,12 @@ public class NitzSignalInputFilterPredicateFactoryTest extends TelephonyTest {
      */
     private static void assertAgeAdjustedUnixEpochTimeIsIdentical(
             NitzSignal signal1, NitzSignal signal2) {
-        long referenceTimeDifference = signal2.getAgeAdjustedElapsedRealtimeMillis()
-                - signal1.getAgeAdjustedElapsedRealtimeMillis();
-        long unixEpochTimeDifference = signal2.getNitzData().getCurrentTimeInMillis()
-                - signal1.getNitzData().getCurrentTimeInMillis();
+        long referenceTimeDifference =
+                signal2.getAgeAdjustedElapsedRealtimeMillis()
+                        - signal1.getAgeAdjustedElapsedRealtimeMillis();
+        long unixEpochTimeDifference =
+                signal2.getNitzData().getCurrentTimeInMillis()
+                        - signal1.getNitzData().getCurrentTimeInMillis();
         assertEquals(referenceTimeDifference, unixEpochTimeDifference);
     }
 }

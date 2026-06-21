@@ -95,6 +95,7 @@ import android.telephony.ims.ImsMmTelManager;
 import android.telephony.ims.ImsReasonInfo;
 import android.telephony.ims.ImsStreamMediaProfile;
 import android.telephony.ims.ProvisioningManager;
+import android.telephony.ims.RegistrationManager;
 import android.telephony.ims.RtpHeaderExtensionType;
 import android.telephony.ims.SrvccCall;
 import android.telephony.ims.aidl.IImsTrafficSessionCallback;
@@ -174,6 +175,8 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
     private ImsPhoneCallTracker.ConnectorFactory mConnectorFactory;
     private CommandsInterface mMockCi;
     private CarrierConfigManager.CarrierConfigChangeListener mCarrierConfigChangeListener;
+    private RegistrationManager.RegistrationCallback mRegistrationCallback;
+    private RegistrationManager.RegistrationCallback mEmergencyRegistrationCallback;
 
     private final Executor mExecutor = Runnable::run;
 
@@ -229,6 +232,8 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
         mImsConfig = mock(ImsConfig.class);
         mVtDataUsageProviderCb = mock(INetworkStatsProviderCallback.class);
         mConnectorFactory = mock(ImsPhoneCallTracker.ConnectorFactory.class);
+        mRegistrationCallback = mock(RegistrationManager.RegistrationCallback.class);
+        mEmergencyRegistrationCallback = mock(RegistrationManager.RegistrationCallback.class);
         mImsCallProfile.mCallExtras = mBundle;
         mImsCall = spy(new ImsCall(mContext, mImsCallProfile));
         mSecondImsCall = spy(new ImsCall(mContext, mImsCallProfile));
@@ -241,6 +246,9 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
         doReturn(mImsCallProfile).when(mImsManager).createCallProfile(anyInt(), anyInt());
         mContextFixture.addSystemFeature(PackageManager.FEATURE_TELEPHONY_IMS);
 
+        doReturn(mRegistrationCallback).when(mImsPhone).getImsMmTelRegistrationCallback();
+        doReturn(mEmergencyRegistrationCallback).when(mImsPhone)
+                .getImsMmTelEmergencyRegistrationCallback();
         doReturn(new SubscriptionInfoInternal.Builder().setSimSlotIndex(0).setId(1).build())
                 .when(mSubscriptionManagerService).getSubscriptionInfoInternal(anyInt());
 
@@ -306,6 +314,10 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
 
         verify(mMockConnector).connect();
         mConnectorListener.connectionReady(mImsManager, SUB_0);
+
+        verify(mImsManager).addRegistrationCallback(eq(mRegistrationCallback), any());
+        verify(mImsManager).addEmergencyRegistrationCallbackForSubscription(
+                any(), eq(SUB_0));
 
         final ArgumentCaptor<ProvisioningManager.Callback> configCallbackCaptor =
                 ArgumentCaptor.forClass(ProvisioningManager.Callback.class);
@@ -525,7 +537,7 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testImsMTCall() {
-        ImsPhoneConnection connection = setupRingingConnection();
+        ImsPhoneConnection connection = setupRingingConnection(null /* imsCallSession */);
         assertEquals(android.telecom.Connection.VERIFICATION_STATUS_PASSED,
                 connection.getNumberVerificationStatus());
     }
@@ -533,7 +545,7 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testImsMTCallMissed() {
-        ImsPhoneConnection connection = setupRingingConnection();
+        ImsPhoneConnection connection = setupRingingConnection(null /* imsCallSession */);
         mImsCallListener.onCallTerminated(connection.getImsCall(),
                 new ImsReasonInfo(ImsReasonInfo.CODE_USER_TERMINATED_BY_REMOTE, 0));
         assertEquals(DisconnectCause.INCOMING_MISSED, connection.getDisconnectCause());
@@ -542,7 +554,7 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testImsMTCallRejected() {
-        ImsPhoneConnection connection = setupRingingConnection();
+        ImsPhoneConnection connection = setupRingingConnection(null /* imsCallSession */);
         connection.onHangupLocal();
         mImsCallListener.onCallTerminated(connection.getImsCall(),
                 new ImsReasonInfo(ImsReasonInfo.CODE_SIP_REQUEST_TIMEOUT, 0));
@@ -552,7 +564,7 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testRejectedElsewhereIsRejected() {
-        ImsPhoneConnection connection = setupRingingConnection();
+        ImsPhoneConnection connection = setupRingingConnection(null /* imsCallSession */);
         mImsCallListener.onCallTerminated(connection.getImsCall(),
                 new ImsReasonInfo(ImsReasonInfo.CODE_REJECTED_ELSEWHERE, 0));
         assertEquals(DisconnectCause.INCOMING_REJECTED, connection.getDisconnectCause());
@@ -561,20 +573,41 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testRemoteCallDeclineIsRejected() {
-        ImsPhoneConnection connection = setupRingingConnection();
+        ImsPhoneConnection connection = setupRingingConnection(null /* imsCallSession */);
         mImsCallListener.onCallTerminated(connection.getImsCall(),
                 new ImsReasonInfo(ImsReasonInfo.CODE_REMOTE_CALL_DECLINE, 0));
         assertEquals(DisconnectCause.INCOMING_REJECTED, connection.getDisconnectCause());
     }
 
-    private ImsPhoneConnection setupRingingConnection() {
+    @Test
+    @SmallTest
+    public void testVtLowCallBatteryCallDisconnect() throws Exception {
+        // Set up mocks for testing low battery video call decline
+        doReturn(true).when(mImsCall).isVideoCall();
+        IImsCallSession imsCallSession = mock(IImsCallSession.class);
+        mImsCallProfile.setCallExtraBoolean(ImsCallProfile.EXTRA_LOW_BATTERY, true);
+        when(imsCallSession.getCallProfile()).thenReturn(mImsCallProfile);
+        mCTUT.setShouldAllowVtCallsInLowBatteryForTesting(false);
+
+        ImsPhoneConnection connection = setupRingingConnection(imsCallSession);
+
+        // Verify that the call was rejected and the disconnect cause is INCOMING_AUTO_REJECTED,
+        verify(mImsCall).reject(ImsReasonInfo.CODE_USER_DECLINE);
+        assertEquals(DisconnectCause.INCOMING_AUTO_REJECTED, connection.getDisconnectCause());
+    }
+
+    private ImsPhoneConnection setupRingingConnection(IImsCallSession imsCallSession) {
+        if (imsCallSession == null) {
+            imsCallSession = mock(IImsCallSession.class);
+        }
         mImsCallProfile.setCallerNumberVerificationStatus(
                 ImsCallProfile.VERIFICATION_STATUS_PASSED);
         assertEquals(PhoneConstants.State.IDLE, mCTUT.getState());
         assertFalse(mCTUT.mRingingCall.isRinging());
         // mock a MT call
-        mMmTelListener.onIncomingCall(mock(IImsCallSession.class), null, Bundle.EMPTY);
-        verify(mImsPhone, times(1)).notifyNewRingingConnection((Connection) any());
+        mMmTelListener.onIncomingCall(imsCallSession, null, Bundle.EMPTY);
+        verify(mImsPhone, times(1))
+                .notifyNewRingingConnection((Connection) any());
         verify(mImsPhone, times(1)).notifyIncomingRing();
         assertEquals(PhoneConstants.State.RINGING, mCTUT.getState());
         assertTrue(mCTUT.mRingingCall.isRinging());
@@ -1557,6 +1590,19 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
                 new ImsReasonInfo(ImsReasonInfo.CODE_USER_TERMINATED, 0));
     }
 
+    @Test
+    @SmallTest
+    public void testTriggerNotifyAnbrNoActiveCall() throws Exception {
+        logd("ImsPhoneCallTracker testTriggerNotifyAnbrNoActiveCall");
+
+        // Ensure no calls are active
+        assertEquals(PhoneConstants.State.IDLE, mCTUT.getState());
+
+        mCTUT.triggerNotifyAnbr(1, 1, 24400);
+
+        verify(mImsCall, never()).callSessionNotifyAnbr(anyInt(), anyInt(), anyInt());
+    }
+
     /**
      * Verifies that a remote hold tone is played when the call is remotely held and the media
      * direction is inactive (i.e. the audio stream is not playing, so we should play the tone).
@@ -2535,7 +2581,7 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
     @Test
     public void testUpdateImsCallStatusIncoming() throws Exception {
         // Incoming call
-        ImsPhoneConnection connection = setupRingingConnection();
+        ImsPhoneConnection connection = setupRingingConnection(null /* imsCallSession */);
 
         verify(mImsPhone, times(1)).updateImsCallStatus(any(), any());
 
@@ -2617,7 +2663,7 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
     @Test
     public void testUpdateImsCallStatusSrvccCompleted() throws Exception {
         // Incoming call
-        setupRingingConnection();
+        setupRingingConnection(null /* imsCallSession */);
 
         verify(mImsPhone, times(1)).updateImsCallStatus(any(), any());
 
@@ -2975,5 +3021,45 @@ public class ImsPhoneCallTrackerTest extends TelephonyTest {
         verify(mImsPhoneConnection).onConferenceMergeFailed();
         verify(mImsPhoneConnection).handleMergeComplete();
     }
-}
 
+    @Test
+    public void testCarrierRoamingNtnListener() {
+        doReturn(mServiceState).when(mTelephonyManager).getServiceState();
+        doReturn(true).when(mServiceState).getRoaming();
+
+        mCTUT.getCarrierRoamingNtnListener().onCarrierRoamingNtnModeChanged(true);
+        verify(mImsManager, times(1)).setWfcModeInternal(anyInt());
+    }
+
+    @Test
+    public void testCarrierRoamingNtnListener_NullServiceState() {
+        doReturn(null).when(mTelephonyManager).getServiceState();
+
+        mCTUT.getCarrierRoamingNtnListener().onCarrierRoamingNtnModeChanged(true);
+        verify(mImsManager, times(1)).setWfcModeInternal(anyInt());
+    }
+
+    @Test
+    public void testUnholdForeground_HeldCall() throws Exception {
+        when(mFeatureFlags.fixUnholdFgCall()).thenReturn(true);
+
+        // Mock the fg and bg calls
+        ImsPhoneCall mockForegroundCall = mock(ImsPhoneCall.class);
+        ImsPhoneCall mockBackgroundCall = mock(ImsPhoneCall.class);
+        ImsCall mockImsCall = mock(ImsCall.class);
+        mCTUT.mForegroundCall = mockForegroundCall;
+        mCTUT.mBackgroundCall = mockBackgroundCall;
+
+        when(mockBackgroundCall.getImsCall()).thenReturn(null);
+        when(mCTUT.mForegroundCall.getImsCall()).thenReturn(mockImsCall);
+        // Mock equalsTo to ensure that mockImsCall is same as mForegroundCall.getImsCall()
+        when(mockImsCall.equalsTo(any(ImsCall.class))).thenReturn(true);
+        when(mCTUT.mForegroundCall.getState()).thenReturn(ImsPhoneCall.State.HOLDING);
+
+        // Unhold call and verify that we resume on the fg call and never try switching the fg with
+        // the bg ImsCall.
+        mCTUT.unholdHeldCall();
+        verify(mockImsCall).resume();
+        verify(mCTUT.mForegroundCall, never()).switchWith(any());
+    }
+}

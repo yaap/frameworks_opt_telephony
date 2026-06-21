@@ -1,4 +1,4 @@
-
+//
 // Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,15 +14,42 @@
 // limitations under the License.
 
 syntax = "proto2";
-package com.android.internal.telephony.satellite;
+package com.android.internal.telephony;
 
-option java_package = "com.android.internal.telephony.satellite";
-option java_outer_classname = "SatelliteConfigData";
+option java_package = "com.android.internal.telephony";
+option java_outer_classname = "TelephonyConfigData";
 
+// Top level container for all telephony configs that can be updated.
+//
+// satellite:
+//   Configuration for satellite related configs.
+//
+// data:
+//   Configuration for data related configs.
 message TelephonyConfigProto {
   optional SatelliteConfigProto satellite = 1;
+  optional DataConfigProto data = 2;
 }
 
+// 1. Container for all satellite-related configs that can be dynamically updated.
+//
+// Certain configurations (e.g., those marked for Carrier Enablement) are used
+// to dynamically enable or modify telephony features (such as Carrier
+// Satellite) without requiring a full Android OS update (OTA).
+//
+// version:
+//   The version of this configuration file. Used to prevent applying older
+//   configs.
+//
+// carrier_supported_satellite_services:
+//   List of carriers and their supported satellite services.
+//
+// device_satellite_region:
+//   The satellite region of the device.
+//
+// carrier_roaming_config:
+//   The carrier roaming config of the device.
+//
 message SatelliteConfigProto {
   optional int32 version = 1;
   repeated CarrierSupportedSatelliteServicesProto carrier_supported_satellite_services = 2;
@@ -30,18 +57,66 @@ message SatelliteConfigProto {
   optional CarrierRoamingConfigProto carrier_roaming_config = 4;
 }
 
+// Container for all device-level satellite-related configurations that can be
+// dynamically updated. These settings apply globally to the device, regardless
+// of the active carrier.
 message CarrierRoamingConfigProto {
   optional int32 max_allowed_data_mode = 1;
+  repeated string device_satellite_plmn = 2;
+
+  // Whether to forcefully override the roaming mode of Wi-Fi Calling when connected to NTN.
+  // Mapped from: config_override_wfc_roaming_mode_while_using_ntn
+  optional bool override_wfc_roaming_mode_while_using_ntn = 3;
 }
 
+// Container for all carrier-specific satellite-related configurations that can
+// be dynamically updated. These settings are matched to the device's active
+// SIM via the carrier_id.
 message CarrierSupportedSatelliteServicesProto {
   optional int32 carrier_id = 1;
+
+  // Supported Satellite Provider Capabilities
+  // Also, Mapped from: KEY_SATELLITE_CONFIGS_PER_PLMN_BUNDLE
   repeated SatelliteProviderCapabilityProto supported_satellite_provider_capabilities = 2;
+
+  // Whether satellite PLMN scan and attachment are supported.
+  // Mapped from: KEY_SATELLITE_ATTACH_SUPPORTED_BOOL
+  optional bool attach_supported = 3;
+
+  // Satellite network data traffic support mode.
+  // 0: Restricted, 1: Bandwidth restricted, 2: Full.
+  // Mapped from: KEY_SATELLITE_DATA_SUPPORT_MODE_INT
+  optional int32 data_support_mode = 4;
+
+  // Satellite connection method.
+  // 0: Automatic, 1: Manual, 2: Hybrid.
+  // Mapped from: KEY_CARRIER_ROAMING_NTN_CONNECT_TYPE_INT
+  optional int32 ntn_connect_type = 5;
+
+  // Whether satellite emergency messaging is supported.
+  // Mapped from: KEY_EMERGENCY_MESSAGING_SUPPORTED_BOOL
+  optional bool emergency_messaging_supported = 6;
+
+  // Whether satellite entitlement is supported.
+  // Mapped from: KEY_SATELLITE_ENTITLEMENT_SUPPORTED_BOOL
+  optional bool entitlement_supported = 7;
+
+  // The URL of the entitlement server.
+  // Mapped from: KEY_ENTITLEMENT_SERVER_URL_STRING
+  optional string entitlement_server_url = 8;
 }
 
+// Detailed satellite settings per PLMN.
+// Some of fields are mapped from: KEY_SATELLITE_CONFIGS_PER_PLMN_BUNDLE
 message SatelliteProviderCapabilityProto{
+  // The PLMN identifier.
   optional string carrier_plmn = 1;
   repeated int32 allowed_services = 2;
+
+  // Satellite connection method.
+  // 0: Automatic, 1: Manual, 2: Hybrid.
+  // Mapped from: KEY_CARRIER_ROAMING_NTN_CONNECT_TYPE_INT
+  optional int32 ntn_connect_type = 3;
 }
 
 message SatelliteRegionProto {
@@ -49,4 +124,91 @@ message SatelliteRegionProto {
   repeated string country_codes = 2;
   optional bool is_allowed = 3;
   optional bytes satellite_access_config_file = 4;
+}
+
+// 2. Container for all data-related configs that can be dynamically updated.
+//
+// version:
+//   The version of this configuration file. Used to prevent applying older
+//   configs.
+//
+// connection_capability_configs:
+//   Maps NetworkCapability to ConnectionCapability.
+//
+// home_metered_capability_configs:
+//   List of capabilities treated as metered on home network.
+//
+// roam_metered_capability_configs:
+//   List of capabilities treated as metered on roaming network.
+//
+message DataConfigProto {
+  optional int32 version = 1;
+  optional ConnectionCapabilityConfig connection_capability_configs = 2;
+  optional MeteredCapabilityConfig home_metered_capability_configs = 3;
+  optional MeteredCapabilityConfig roam_metered_capability_configs = 4;
+}
+
+// Configuration wrapper for Connection Capability mapping rules.
+// Contains both default rules and carrier-specific overrides.
+//
+// default_connection_capability_config:
+//   Default mapping rules applied to all carriers.
+//   The 'carrier_id' field inside this message is ignored.
+//
+// carrier_connection_capability_configs:
+//   List of carrier-specific mapping rules.
+//   The 'carrier_id' field inside each message acts as the key and is required.
+message ConnectionCapabilityConfig {
+  optional ConnectionCapabilityMap default_connection_capability_config = 1;
+  repeated ConnectionCapabilityMap carrier_connection_capability_configs = 2;
+}
+
+// Defines the mapping rules between NetworkCapability and ConnectionCapability.
+// Reused for both default (no carrier_id) and carrier-specific (with
+// carrier_id) configs.
+//
+// carrier_id:
+//   The Android Canonical Carrier ID.
+//   - Required when used in 'carrier_connection_capability_configs'.
+//   - Ignored when used in 'default_connection_capability_config'.
+//
+// rules:
+//   List of mapping rule strings.
+//   Format: "NetworkCapability:ConnectionCapability:ApnRequired"
+//   Example: "12:8:true" (NET_CAPABILITY_INTERNET -> CONNECTION_CAPABILITY_INTERNET)
+message ConnectionCapabilityMap {
+  optional int32 carrier_id = 1;
+  repeated string rules = 2;
+}
+
+// Configuration wrapper for Metered Capabilities.
+// Contains both default rules and carrier-specific overrides.
+//
+// default_metered_capability_config:
+//   Default metered capabilities applied to all carriers.
+//   The 'carrier_id' field inside this message is ignored.
+//
+// carrier_metered_capability_configs:
+//   List of carrier-specific metered capabilities.
+//   The 'carrier_id' field inside each message acts as the key and is required.
+message MeteredCapabilityConfig {
+  optional MeteredCapabilities default_metered_capability_config = 1;
+  repeated MeteredCapabilities carrier_metered_capability_configs = 2;
+}
+
+// Defines the set of metered network capabilities for a single carrier.
+// Reused for both default (no carrier_id) and carrier-specific (with
+// carrier_id) configs.
+//
+// carrier_id:
+//   The Android Canonical Carrier ID.
+//   - Required when used in 'carrier_metered_capability_configs'.
+//   - Ignored when used in 'default_metered_capability_config'.
+//
+// capability_ids:
+//   List of NetworkCapability constants treated as metered.
+//   Example: 12 for NET_CAPABILITY_INTERNET.
+message MeteredCapabilities {
+  optional int32 carrier_id = 1;
+  repeated int32 capability_ids = 2;
 }

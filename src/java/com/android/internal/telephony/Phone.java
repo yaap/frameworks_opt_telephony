@@ -16,6 +16,7 @@
 
 package com.android.internal.telephony;
 
+import static android.telephony.TelephonyManager.HAL_SERVICE_NETWORK;
 import static android.telephony.TelephonyManager.HAL_SERVICE_RADIO;
 import static android.telephony.ims.ImsService.CAPABILITY_SUPPORTS_SIMULTANEOUS_CALLING;
 
@@ -29,11 +30,14 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.hardware.radio.modem.ImeiInfo;
+import android.hardware.radio.network.PrioritizedNetworkScanRequest;
+import android.hardware.radio.network.SatelliteNetworkInfo;
 import android.net.Uri;
 import android.os.AsyncResult;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Handler;
+import android.os.HandlerExecutor;
 import android.os.Looper;
 import android.os.Message;
 import android.os.PersistableBundle;
@@ -50,6 +54,7 @@ import android.telecom.VideoProfile;
 import android.telephony.AccessNetworkConstants;
 import android.telephony.Annotation.SrvccState;
 import android.telephony.CarrierConfigManager;
+import android.telephony.CarrierConfigManager.CarrierConfigChangeListener;
 import android.telephony.CarrierRestrictionRules;
 import android.telephony.CellBroadcastIdRange;
 import android.telephony.CellIdentity;
@@ -261,7 +266,9 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
     protected static final int EVENT_SET_IDENTIFIER_DISCLOSURE_ENABLED_DONE = 73;
     protected static final int EVENT_SECURITY_ALGORITHM_UPDATE = 74;
     protected static final int EVENT_SET_SECURITY_ALGORITHMS_UPDATED_ENABLED_DONE = 75;
-    protected static final int EVENT_LAST = EVENT_SET_SECURITY_ALGORITHMS_UPDATED_ENABLED_DONE;
+    protected static final int EVENT_NETWORK_SECURITY_EVENTS = 76;
+    protected static final int EVENT_SET_ALLOWED_NETWORK_TYPES_FOR_2G_DISABLED_DONE = 77;
+    protected static final int EVENT_LAST = EVENT_SET_ALLOWED_NETWORK_TYPES_FOR_2G_DISABLED_DONE;
 
     // For shared prefs.
     private static final String GSM_ROAMING_LIST_OVERRIDE_PREFIX = "gsm_roaming_list_";
@@ -350,7 +357,13 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
     // We will need to restart it after the emergency call ends.
     protected boolean mEcmCanceledForEmergency = false;
     private volatile long mTimeLastEmergencySmsSentMs = EMERGENCY_SMS_NO_TIME_RECORDED;
+    private volatile int mEmergencySmsModeTimerMs = 0;
+    private boolean mEmergencySmsModeInitialized = false;
 
+    private final CarrierConfigChangeListener mCarrierConfigChangeListener =
+            (slotIndex, subId, carrierId, specificCarrierId) -> {
+                sendMessage(obtainMessage(EVENT_CARRIER_CONFIG_CHANGED));
+            };
     // Variable to cache the video capability. When RAT changes, we lose this info and are unable
     // to recover from the state. We cache it and notify listeners when they register.
     protected boolean mIsVideoCapable = false;
@@ -623,8 +636,13 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
         * This will be false on "data only" devices which can't make voice
         * calls and don't support any in-call UI.
         */
-        mIsVoiceCapable = ((TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE))
-                .isVoiceCapable();
+        if (mFeatureFlags.offloadStartupBinderCalls()) {
+            mIsVoiceCapable = context.getResources().getBoolean(
+                    com.android.internal.R.bool.config_voice_capable);
+        } else {
+            mIsVoiceCapable = context.getSystemService(TelephonyManager.class)
+                    .isVoiceCapable();
+        }
 
         /**
          *  Some RIL's don't always send RIL_UNSOL_CALL_RING so it needs
@@ -675,6 +693,19 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
         mTelephonyAnalytics = new TelephonyAnalytics(this);
     }
 
+    private void updateEmergencySmsModeTimer() {
+        CarrierConfigManager configManager = mContext.getSystemService(CarrierConfigManager.class);
+        if (configManager != null) {
+            PersistableBundle b = configManager.getConfigForSubId(getSubId(),
+                    CarrierConfigManager.KEY_EMERGENCY_SMS_MODE_TIMER_MS_INT);
+            if (b != null) {
+                mEmergencySmsModeTimerMs = b.getInt(
+                        CarrierConfigManager.KEY_EMERGENCY_SMS_MODE_TIMER_MS_INT, 0);
+                mEmergencySmsModeInitialized = true;
+            }
+        }
+    }
+
     /**
      * Start setup of ImsPhone, which will start trying to connect to the ImsResolver. Will not be
      * called if this device does not support FEATURE_IMS_TELEPHONY.
@@ -687,7 +718,7 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
         synchronized(Phone.lockForRadioTechnologyChange) {
             if (mImsPhone == null) {
                 mImsPhone = PhoneFactory.makeImsPhone(mNotifier, this);
-                CallManager.getInstance().registerPhone(mImsPhone);
+                CallManager.getInstance(mContext).registerPhone(mImsPhone);
                 mImsPhone.registerForSilentRedial(
                         this, EVENT_INITIATE_SILENT_REDIAL, null);
             }
@@ -807,6 +838,10 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
 
             case EVENT_ICC_CHANGED:
                 onUpdateIccAvailability();
+                break;
+
+            case EVENT_CARRIER_CONFIG_CHANGED:
+                updateEmergencySmsModeTimer();
                 break;
 
             case EVENT_INITIATE_SILENT_REDIAL:
@@ -1086,20 +1121,27 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
      * @return true if the device is in emergency SMS mode, false otherwise.
      */
     public boolean isInEmergencySmsMode() {
+        if (!mEmergencySmsModeInitialized) {
+            CarrierConfigManager ccm = mContext.getSystemService(CarrierConfigManager.class);
+            if (ccm != null) {
+                ccm.registerCarrierConfigChangeListener(new HandlerExecutor(this),
+                        mCarrierConfigChangeListener);
+            }
+            try {
+                updateEmergencySmsModeTimer();
+            } catch (IllegalStateException ex) {
+                Rlog.d(mLogTag, "Got exception when loading carrier config, ex=", ex);
+                // Default for KEY_EMERGENCY_SMS_MODE_TIMER_MS_INT is 0 and CarrierConfig isn't
+                // available yet, so return false.
+                return false;
+            }
+        }
         long lastSmsTimeMs = mTimeLastEmergencySmsSentMs;
         if (lastSmsTimeMs == EMERGENCY_SMS_NO_TIME_RECORDED) {
             // an emergency SMS hasn't been sent since the last check.
             return false;
         }
-        CarrierConfigManager configManager = (CarrierConfigManager)
-                getContext().getSystemService(Context.CARRIER_CONFIG_SERVICE);
-        PersistableBundle b = configManager.getConfigForSubId(getSubId());
-        if (b == null) {
-            // default for KEY_EMERGENCY_SMS_MODE_TIMER_MS_INT is 0 and CarrierConfig isn't
-            // available, so return false.
-            return false;
-        }
-        int eSmsTimerMs = b.getInt(CarrierConfigManager.KEY_EMERGENCY_SMS_MODE_TIMER_MS_INT, 0);
+        int eSmsTimerMs = mEmergencySmsModeTimerMs;
         if (eSmsTimerMs == 0) {
             // We do not support this feature for this carrier.
             return false;
@@ -1150,7 +1192,7 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
             // only those registrants to the registrant list which are not
             // coming from the CallManager.
             if (msg != null) {
-                if (msg.obj == CallManager.getInstance().getRegistrantIdentifier()) {
+                if (msg.obj == CallManager.getInstance(mContext).getRegistrantIdentifier()) {
                     continue;
                 } else {
                     to.add((Registrant) from.get(i));
@@ -2332,7 +2374,8 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
      */
     public void notifyAllowedNetworkTypesChanged(
             @TelephonyManager.AllowedNetworkTypesReason int reason) {
-        logd("SubId" + getSubId() + ",notifyAllowedNetworkTypesChanged: reason: " + reason
+        logd("SubId" + getSubId() + ",notifyAllowedNetworkTypesChanged: reason: "
+                + convertAllowedNetworkTypeMapIndexToDbName(reason)
                 + " value:" + TelephonyManager.convertNetworkTypeBitmaskToString(
                 getAllowedNetworkTypes(reason)));
         mNotifier.notifyAllowedNetworkTypesChanged(this, reason, getAllowedNetworkTypes(reason));
@@ -2707,13 +2750,19 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
     }
 
     /**
-     * Perform the radio modem reboot. The radio will be taken offline. Used for device
-     * configuration by some CDMA operators.
+     * Perform the radio modem reboot. The radio will be taken offline.
      *
      * @param response Callback message.
      */
     public void rebootModem(Message response) {
-        mCi.nvResetConfig(1/* 1: reload NV reset, trigger a modem reboot */, response);
+        RadioConfig radioConfig = RadioConfig.getInstance();
+        RadioConfigProxy radioConfigProxy = radioConfig.getRadioConfigProxy(null);
+        if (radioConfigProxy != null
+                && radioConfigProxy.getVersion().greaterOrEqual(RIL.RADIO_HAL_VERSION_2_4)) {
+            radioConfig.rebootModem(response);
+        } else {
+            mCi.nvResetConfig(1/* 1: reload NV reset, trigger a modem reboot */, response);
+        }
     }
 
     /**
@@ -3602,7 +3651,7 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
     /**
      * Retrieves the EF_PNN from the UICC For GSM/UMTS phones.
      */
-    public String getPlmn() {
+    public String getPnnHomeNetworkName() {
         return null;
     }
 
@@ -4339,7 +4388,6 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
     }
 
     public boolean isImsServiceSimultaneousCallingSupportCapable(Context context) {
-        if (!mFeatureFlags.simultaneousCallingIndications()) return false;
         boolean capable = false;
         ImsManager imsManager = ImsManager.getInstance(context, mPhoneId);
         if (imsManager != null) {
@@ -4921,6 +4969,13 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
     }
 
     /**
+     * @return the supported network alert categories.
+     */
+    public int[] getSupportedNetworkAlertCategories() {
+        return new int[0];
+    }
+
+    /**
      * @return whether this Phone interacts with a modem that supports the null cipher
      * notification feature.
      */
@@ -5084,6 +5139,21 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
     }
 
     /**
+     * Notify external listeners that satellite purchase mode changed.
+     *
+     * @param isEnabled {@code true} If satellite purchase mode is in progress,
+     *                         {@code false} otherwise.
+     * @param purchaseModeState State of the purchase mode. Network setup, teardown and Purchase
+     *                          Mode active or inactive. Inactive by default.
+     */
+    public void notifySatellitePurchaseModeChanged(boolean isEnabled,
+            @TelephonyManager.SatellitePurchaseModeState int purchaseModeState) {
+        logd("notifySatellitePurchaseModeChanged inEnabled:" + isEnabled
+                + " purchaseModeState:" + purchaseModeState);
+        mNotifier.notifySatellitePurchaseModeChanged(this, isEnabled, purchaseModeState);
+    }
+
+    /**
      * Set the non-terrestrial PLMN with lower priority than terrestrial networks.
      *
      * @param simSlot Indicates the SIM slot to which this API will be applied. The modem will use
@@ -5102,6 +5172,54 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
                 + " carrierPlmnList=" + carrierPlmnList.toString()
                 + " allSatellitePlmnList=" + allSatellitePlmnList.toString());
         mCi.setSatellitePlmn(simSlot, carrierPlmnList, allSatellitePlmnList, result);
+    }
+
+    /**
+     * Set the non-terrestrial PLMN with lower priority than terrestrial networks.
+     *
+     * @param simSlot Indicates the SIM slot to which this API will be applied. The modem will use
+     *                this information to determine the relevant carrier.
+     * @param satelliteNetworkInfo The list of roaming PLMN used for connecting to satellite
+     *                             networks supported by user subscription.
+     * @param result Callback message to receive the result.
+     */
+    public void setSatelliteNetworkInfo(int simSlot,
+            @NonNull SatelliteNetworkInfo satelliteNetworkInfo, Message result) {
+        logd("setSatelliteNetworkInfo: simSlot=" + simSlot
+                + " satelliteNetworkInfo=" + satelliteNetworkInfo);
+        mCi.setSatelliteNetworkInfo(simSlot, satelliteNetworkInfo, result);
+    }
+
+    /**
+     * Enable a prioritized, aggressive scanning mode for specific networks.
+     *
+     * @param simSlot Indicates the SIM slot to which this method will be applied.
+     *                The modem will use this information to determine the relevant carrier.
+     * @param scanRequest The list of roaming PLMN used for connecting to satellite networks
+     *                    supported by user subscription.
+     * @param result Callback message to receive the result.
+     */
+    public void enablePrioritizedNetworkScan(int simSlot,
+            @NonNull PrioritizedNetworkScanRequest scanRequest, Message result) {
+        logd("enablePrioritizedNetworkScan: simSlot=" + simSlot
+                + " prioritizedNetworkScanRequest=" + scanRequest.toString());
+        mCi.enablePrioritizedNetworkScan(simSlot, scanRequest, result);
+    }
+
+    /**
+     * Disable a prioritized, aggressive scanning mode for specific networks.
+     *
+     * <p>If the device is already attached to a prioritized network provided
+     * by enablePrioritizedNetworkScan, it should detach from it.
+     *
+     * @param simSlot Indicates the SIM slot to which this method will be applied.
+     *                The modem will use this information to determine the relevant carrier.
+     *
+     * Response function is IRadioNetworkResponse.disablePrioritizedNetworkScanResponse()
+     */
+    public void disablePrioritizedNetworkScan(int simSlot, Message result) {
+        logd("disablePrioritizedNetworkScan: simSlot=" + simSlot);
+        mCi.disablePrioritizedNetworkScan(simSlot, result);
     }
 
     /**
@@ -5184,6 +5302,30 @@ public abstract class Phone extends Handler implements PhoneInternalInterface {
         Rlog.d(mLogTag, "clearAllowedImsServices");
         mAllowedImsServicesAny.clear();
         mAllowedImsServicesHomeOnly.clear();
+    }
+
+    /**
+     * Notify emergency mode has been entered when AP domain selection is enabled.
+     *
+     * @param type for the emergency mode entry
+     *             See {@link TelephonyManager.DomainSelectionEmergencyType}.
+     */
+    public void notifyDomainSelectionEmergencyModeEntered(
+            @TelephonyManager.DomainSelectionEmergencyType int type) {
+        logd("notifyDomainSelectionEmergencyModeEntered: type=" + type);
+        mNotifier.notifyDomainSelectionEmergencyModeEntered(this, type);
+    }
+
+    /**
+     * Notify emergency mode has been exited when AP domain selection is enabled.
+     *
+     * @param type for the emergency mode exit
+     *             See {@link TelephonyManager.DomainSelectionEmergencyType}.
+     */
+    public void notifyDomainSelectionEmergencyModeExited(
+            @TelephonyManager.DomainSelectionEmergencyType int type) {
+        logd("notifyDomainSelectionEmergencyModeExited: type=" + type);
+        mNotifier.notifyDomainSelectionEmergencyModeExited(this, type);
     }
 
     public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {

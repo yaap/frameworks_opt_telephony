@@ -102,7 +102,7 @@ public class SetUpCallCommandHandler extends Handler {
             return;
         }
 
-        final CallManager callManager = CallManager.getInstance();
+        final CallManager callManager = CallManager.getInstance(mContext);
         try {
             callManager.dial(callManager.getPhone(mSubId), settings.address,
                     new DialArgs.Builder<>()
@@ -117,12 +117,12 @@ public class SetUpCallCommandHandler extends Handler {
 
         Bundle extras = new Bundle();
         extras.putString(TelecomManager.EXTRA_CALL_SUBJECT, settings.callMsg.text);
-        TelecomManager.from(mContext).addNewUnknownCall(handle, extras);
+        mContext.getSystemService(TelecomManager.class).addNewUnknownCall(handle, extras);
     }
 
     private boolean canDial(CatCmdMessage.SetUpCallType cmdType) {
-        final TelecomManager telecomManager = TelecomManager.from(mContext);
-        final CallManager callManager = CallManager.getInstance();
+        final TelecomManager telecomManager = mContext.getSystemService(TelecomManager.class);
+        final CallManager callManager = CallManager.getInstance(mContext);
 
         if (telecomManager.isInEmergencyCall()) {
             return false;
@@ -138,7 +138,7 @@ public class SetUpCallCommandHandler extends Handler {
     }
 
     private void disconnectAll() {
-        final CallManager callManager = CallManager.getInstance();
+        final CallManager callManager = CallManager.getInstance(mContext);
         callManager.getForegroundCalls().stream().forEach(Call::hangupIfAlive);
         callManager.getBackgroundCalls().stream().forEach(Call::hangupIfAlive);
         callManager.getRingingCalls().stream().forEach(Call::hangupIfAlive);

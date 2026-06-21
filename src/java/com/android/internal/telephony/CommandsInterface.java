@@ -19,6 +19,8 @@ package com.android.internal.telephony;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.compat.annotation.UnsupportedAppUsage;
+import android.hardware.radio.network.PrioritizedNetworkScanRequest;
+import android.hardware.radio.network.SatelliteNetworkInfo;
 import android.net.KeepalivePacketData;
 import android.net.LinkProperties;
 import android.os.Build;
@@ -249,6 +251,12 @@ public interface CommandsInterface {
 
     /** Single Radio Voice Call State progress notifications */
     void registerForSrvccStateChanged(Handler h, int what, Object obj);
+
+    /** register for Data Call List updated events */
+    void registerForDataCallListUpdated(Handler h, int what, Object obj);
+
+    /** Unregister from data call list updated event */
+    void unregisterForDataCallListUpdated(Handler h);
 
     /**
      * fires on any change in hardware configuration.
@@ -1737,6 +1745,17 @@ public interface CommandsInterface {
     void setDataProfile(DataProfile[] dps, Message result);
 
     /**
+     * Fires when the prioritized scan mode changes.
+     */
+    void registerForPrioritizedScanModeChanged(Handler h, int what, Object obj);
+
+    /**
+     * Unregisters the handler for prioritized scan mode updates.
+     */
+    void unregisterForPrioritizedScanModeChanged(Handler h);
+
+
+    /**
      * Notifiy that we are testing an emergency call
      */
     public void testingEmergencyCall();
@@ -2632,6 +2651,19 @@ public interface CommandsInterface {
     default void isSecurityAlgorithmsUpdatedEnabled(Message result) {}
 
     /**
+     * Get the list of supported network security alerts.
+     *
+     * @param result Callback message to receive the result.
+     */
+    default void getSupportedNetworkAlertCategories(Message result) {}
+
+    /**
+     * Registers for network security events.
+     */
+    default void registerForNetworkSecurityEvents(
+            @NonNull Handler h, int what, @Nullable Object obj) {}
+
+    /**
      * Registers for cellular identifier disclosure events.
      */
     default void registerForCellularIdentifierDisclosures(
@@ -2657,6 +2689,42 @@ public interface CommandsInterface {
     default void setSatellitePlmn(int simSlot,
             @NonNull List<String> carrierPlmnList, @NonNull List<String> allSatellitePlmnList,
             Message result) {}
+
+    /**
+     * Set the non-terrestrial network info with lower priority than terrestrial networks.
+     *
+     * @param simSlot Indicates the SIM slot to which this API will be applied. The modem will use
+     *                this information to determine the relevant carrier.
+     * @param satelliteNetworkInfo Indicates satellite network info the user is allowed to
+     *                             connect to, and a comprehensive list of all known satellite
+     *                             network info for identification.
+     * @param result Callback message to receive the result.
+     */
+    default void setSatelliteNetworkInfo(int simSlot,
+            @NonNull SatelliteNetworkInfo satelliteNetworkInfo, Message result) {}
+
+    /**
+     * Enable a prioritized, aggressive scanning mode for specific networks.
+     *
+     * @param simSlot Indicates the SIM slot to which this API will be applied. The modem will use
+     *                this information to determine the relevant carrier.
+     * @param prioritizedNetworkScanRequest defines the parameters for the prioritized scan.
+     *                                      It specifies the list of networks to search for,
+     *                                      the scan interval, and the duration for which the scan
+     *                                      request is valid.
+     * @param result Callback message to receive the result.
+     */
+    default void enablePrioritizedNetworkScan(int simSlot,
+            @NonNull PrioritizedNetworkScanRequest prioritizedNetworkScanRequest, Message result) {}
+
+    /**
+     * Disable a prioritized, aggressive scanning mode for specific networks.
+     *
+     * @param simSlot Indicates the SIM slot to which this API will be applied. The modem will use
+     *                this information to determine the relevant carrier.
+     * @param result Callback message to receive the result.
+     */
+    default void disablePrioritizedNetworkScan(int simSlot, Message result) {}
 
     /**
      * Enable or disable satellite in the cellular modem associated with a carrier.

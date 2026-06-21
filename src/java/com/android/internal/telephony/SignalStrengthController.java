@@ -43,6 +43,7 @@ import android.telephony.SignalStrength;
 import android.telephony.SignalStrengthUpdateRequest;
 import android.telephony.SignalThresholdInfo;
 import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.util.LocalLog;
 import android.util.Pair;
@@ -117,6 +118,7 @@ public class SignalStrengthController extends Handler {
     private long mSignalStrengthUpdatedTime;
     @Nullable
     private SignalStrength mLastSignalStrength = null;
+    private int mLastSubId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
 
     /**
      * List of LTE EARFCNs (E-UTRAN Absolute Radio Frequency Channel Number,
@@ -152,9 +154,12 @@ public class SignalStrengthController extends Handler {
 
     private final AtomicBoolean mNTNConnected = new AtomicBoolean(false);
 
+    private final String mLogTag;
+
     public SignalStrengthController(@NonNull Phone phone) {
         mPhone = phone;
         mCi = mPhone.mCi;
+        mLogTag = TAG + "-" + mPhone.getPhoneId();
 
         mCi.registerForRilConnected(this, EVENT_RIL_CONNECTED, null);
         mCi.registerForAvailable(this, EVENT_RADIO_AVAILABLE, null);
@@ -477,9 +482,13 @@ public class SignalStrengthController extends Handler {
                                 (lteMeasurementEnabled & CellSignalStrengthLte.USE_RSSNR) != 0));
             }
 
-            int nrMeasurementEnabled = mCarrierConfig.getInt(CarrierConfigManager
-                    .KEY_PARAMETERS_USE_FOR_5G_NR_SIGNAL_BAR_INT, CellSignalStrengthNr.USE_SSRSRP);
-            int[] nrSsrsrpThresholds = mCarrierConfig.getIntArray(
+            int nrMeasurementEnabled = mCarrierConfig.getInt(isUsingNonTerrestrialNetwork()
+                    ? CarrierConfigManager.KEY_PARAMETERS_USE_FOR_NTN_5G_NR_SIGNAL_BAR_INT
+                    : CarrierConfigManager.KEY_PARAMETERS_USE_FOR_5G_NR_SIGNAL_BAR_INT,
+                    CellSignalStrengthNr.USE_SSRSRP);
+
+            int[] nrSsrsrpThresholds = mCarrierConfig.getIntArray(isUsingNonTerrestrialNetwork()
+                    ? CarrierConfigManager.KEY_NTN_5G_NR_SSRSRP_THRESHOLDS_INT_ARRAY :
                     CarrierConfigManager.KEY_5G_NR_SSRSRP_THRESHOLDS_INT_ARRAY);
             if (nrSsrsrpThresholds != null) {
                 signalThresholdInfos.add(
@@ -491,7 +500,8 @@ public class SignalStrengthController extends Handler {
                                 (nrMeasurementEnabled & CellSignalStrengthNr.USE_SSRSRP) != 0));
             }
 
-            int[] nrSsrsrqThresholds = mCarrierConfig.getIntArray(
+            int[] nrSsrsrqThresholds = mCarrierConfig.getIntArray(isUsingNonTerrestrialNetwork()
+                    ? CarrierConfigManager.KEY_NTN_5G_NR_SSRSRQ_THRESHOLDS_INT_ARRAY :
                     CarrierConfigManager.KEY_5G_NR_SSRSRQ_THRESHOLDS_INT_ARRAY);
             if (nrSsrsrqThresholds != null) {
                 signalThresholdInfos.add(
@@ -503,7 +513,8 @@ public class SignalStrengthController extends Handler {
                                 (nrMeasurementEnabled & CellSignalStrengthNr.USE_SSRSRQ) != 0));
             }
 
-            int[] nrSssinrThresholds = mCarrierConfig.getIntArray(
+            int[] nrSssinrThresholds = mCarrierConfig.getIntArray(isUsingNonTerrestrialNetwork()
+                    ? CarrierConfigManager.KEY_NTN_5G_NR_SSSINR_THRESHOLDS_INT_ARRAY :
                     CarrierConfigManager.KEY_5G_NR_SSSINR_THRESHOLDS_INT_ARRAY);
             if (nrSssinrThresholds != null) {
                 signalThresholdInfos.add(
@@ -771,11 +782,13 @@ public class SignalStrengthController extends Handler {
     }
 
     void notifySignalStrength() {
-        if (!mSignalStrength.equals(mLastSignalStrength)) {
+        int subId = mPhone.getSubId();
+        if (!mSignalStrength.equals(mLastSignalStrength) || subId != mLastSubId) {
             try {
                 mSignalStrengthChangedRegistrants.notifyRegistrants();
                 mPhone.notifySignalStrength();
                 mLastSignalStrength = mSignalStrength;
+                mLastSubId = subId;
             } catch (NullPointerException ex) {
                 loge("updateSignalStrength() Phone already destroyed: " + ex
                         + "SignalStrength not notified");
@@ -819,6 +832,7 @@ public class SignalStrengthController extends Handler {
         ipw.increaseIndent();
         pw.println("mSignalRequestRecords=" + mSignalRequestRecords);
         pw.println(" mLastSignalStrength=" + mLastSignalStrength);
+        pw.println(" mLastSubId=" + mLastSubId);
         pw.println(" mSignalStrength=" + mSignalStrength);
         pw.println(" mLteRsrpBoost=" + mLteRsrpBoost);
         pw.println(" mNrRsrpBoost=" + Arrays.toString(mNrRsrpBoost));
@@ -1126,7 +1140,7 @@ public class SignalStrengthController extends Handler {
      * "earfcn2_start-earfcn2_end" ... }
      */
     @Nullable
-    private static ArrayList<Pair<Integer, Integer>> convertEarfcnStringArrayToPairList(
+    private ArrayList<Pair<Integer, Integer>> convertEarfcnStringArrayToPairList(
             @Nullable String[] earfcnsList) {
         ArrayList<Pair<Integer, Integer>> earfcnPairList = new ArrayList<Pair<Integer, Integer>>();
 
@@ -1374,17 +1388,17 @@ public class SignalStrengthController extends Handler {
         return mPhone.getServiceState().isUsingNonTerrestrialNetwork();
     }
 
-    private static void log(String msg) {
-        if (DBG) Rlog.d(TAG, msg);
+    private void log(String msg) {
+        if (DBG) Rlog.d(mLogTag, msg);
     }
 
-    private static void loge(String msg) {
-        Rlog.e(TAG, msg);
+    private void loge(String msg) {
+        Rlog.e(mLogTag, msg);
     }
 
     /** Print to both Radio log and LocalLog, used only for critical but non-sensitive msg. */
     private void localLog(String msg) {
-        Rlog.d(TAG, msg);
-        mLocalLog.log(TAG + ": " + msg);
+        Rlog.d(mLogTag, msg);
+        mLocalLog.log(mLogTag + ": " + msg);
     }
 }

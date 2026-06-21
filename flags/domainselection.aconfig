@@ -32,36 +32,53 @@ flag {
     namespace: "telephony"
     description: "This flag controls the addition of EMERGENCY_REDIAL_ON_IMS and EMERGENCY_REDIAL_ON_VOWIFI redial codes for normal routed emergency calls."
     bug:"357980439"
+    is_exported: true
 }
 
-# OWNER=hwangoo TARGET=25Q2
+# OWNER=hwangoo TARGET=26Q2
 flag {
-    name: "hangup_active_call_based_on_emergency_call_domain"
+    name: "domain_selection_emergency_mode_notification"
     namespace: "telephony"
-    description: "This flag disconnects an active call if the domain selected for the emergency call is different from the domain of the currently active call."
-    bug:"391287237"
+    description: "Used to notify the emergency mode for call/SMS to other applications when AP domain selection is enabled."
+    bug:"423761083"
+    metadata {
+        purpose: PURPOSE_FEATURE
+    }
+}
+
+#OWNER=jaesikkong TARGET=26Q2
+flag {
+    name: "emergency_over_nr_requires_vonr_enabled"
+    namespace: "telephony"
+    description: "This flag specifies whether emergency call over NR requires VoNR setting enabled."
+    bug:"461166509"
+}
+
+#OWNER=hwangoo TARGET=26Q2
+flag {
+    name: "handle_second_emergency_call"
+    namespace: "telephony"
+    description: "Used to prevent the device from accidently exiting emergency mode when second emergency call is made when already emergency call is in progress."
+    bug:"472298557"
     metadata {
         purpose: PURPOSE_BUGFIX
     }
 }
 
-# OWNER=hwangoo TARGET=25Q2
+# OWNER=kimjiny TARGET=26Q2
 flag {
-    name: "perform_cross_stack_redial_check_for_emergency_call"
+    name: "enable_emergency_sms_roaming_pdn_selection"
     namespace: "telephony"
-    description: "This flag performs a quick cross stack redial if the subscription is being invalid and an exception occurs, while an emergency call is in progress."
-    bug:"389190613"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
+    description: "This flag controls the PDN selection for sending emergency SMS while roaming."
+    bug:"461740128"
 }
 
-#OWNER=hwangoo TARGET=25Q4
+#OWNER=hwangoo TARGET=26Q3
 flag {
-    name: "ignore_state_details_update_for_domain_reselection"
+    name: "enforce_emergency_exit_multi_call"
     namespace: "telephony"
-    description: "This flag ignores the state details update of the connection while domain reselection is performing due to a call failure."
-    bug:"429443154"
+    description: "Ensures emergency mode exit even when an emergency connection is not properly managed due to a second emergency call."
+    bug:"492062910"
     metadata {
         purpose: PURPOSE_BUGFIX
     }

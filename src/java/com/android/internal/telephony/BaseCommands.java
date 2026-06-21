@@ -56,6 +56,7 @@ public abstract class BaseCommands implements CommandsInterface {
     protected RegistrantList mCallStateRegistrants = new RegistrantList();
     protected RegistrantList mNetworkStateRegistrants = new RegistrantList();
     protected RegistrantList mDataCallListChangedRegistrants = new RegistrantList();
+    protected RegistrantList mDataCallListUpdatedRegistrants = new RegistrantList();
     protected RegistrantList mApnUnthrottledRegistrants = new RegistrantList();
     protected RegistrantList mSlicingConfigChangedRegistrants = new RegistrantList();
     @UnsupportedAppUsage
@@ -107,6 +108,8 @@ public abstract class BaseCommands implements CommandsInterface {
     protected RegistrantList mCellularIdentifierDisclosedRegistrants = new RegistrantList();
     protected RegistrantList mSecurityAlgorithmUpdatedRegistrants = new RegistrantList();
     protected RegistrantList mDisplayNetworkTypeChangedRegistrants = new RegistrantList();
+    protected RegistrantList mPrioritizedScanModeChangedRegistrants = new RegistrantList();
+    protected RegistrantList mNetworkSecurityEventsRegistrants = new RegistrantList();
 
     @UnsupportedAppUsage
     protected Registrant mGsmSmsRegistrant;
@@ -295,6 +298,16 @@ public abstract class BaseCommands implements CommandsInterface {
     @Override
     public void unregisterForDataCallListChanged(Handler h) {
         mDataCallListChangedRegistrants.remove(h);
+    }
+
+    @Override
+    public void registerForDataCallListUpdated(Handler h, int what, Object obj) {
+        mDataCallListUpdatedRegistrants.addUnique(h, what, obj);
+    }
+
+    @Override
+    public void unregisterForDataCallListUpdated(Handler h) {
+        mDataCallListUpdatedRegistrants.remove(h);
     }
 
     @Override
@@ -745,6 +758,16 @@ public abstract class BaseCommands implements CommandsInterface {
     }
 
     @Override
+    public void unregisterForPrioritizedScanModeChanged(Handler h) {
+        mPrioritizedScanModeChangedRegistrants.remove(h);
+    }
+
+    @Override
+    public void registerForPrioritizedScanModeChanged(Handler h, int what, Object obj) {
+        mPrioritizedScanModeChangedRegistrants.addUnique(h, what, obj);
+    }
+
+    @Override
     public void testingEmergencyCall() {}
 
     @Override
@@ -958,5 +981,10 @@ public abstract class BaseCommands implements CommandsInterface {
     @Override
     public void registerForSecurityAlgorithmUpdates(Handler h, int what, Object obj) {
         mSecurityAlgorithmUpdatedRegistrants.add(h, what, obj);
+    }
+
+    @Override
+    public void registerForNetworkSecurityEvents(Handler h, int what, Object obj) {
+        mNetworkSecurityEventsRegistrants.add(h, what, obj);
     }
 }

@@ -19,6 +19,8 @@ import static android.telephony.euicc.EuiccCardManager.RESET_OPTION_DELETE_OPERA
 import static android.telephony.euicc.EuiccManager.EUICC_OTA_STATUS_UNAVAILABLE;
 import static android.telephony.euicc.EuiccManager.SWITCH_WITHOUT_PORT_INDEX_EXCEPTION_ON_DISABLE;
 
+import static com.android.internal.telephony.util.TelephonyUtils.TELEPHONY_FEATURE_ENFORCEMENT_VENDOR_API_LEVEL;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -47,13 +49,17 @@ import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
-import android.os.Build;
+import android.database.Cursor;
+import android.database.MatrixCursor;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Parcelable;
 import android.os.RemoteException;
 import android.os.UserManager;
 import android.platform.test.flag.junit.SetFlagsRule;
 import android.provider.Settings;
+import android.provider.Telephony;
+import android.service.carrier.CarrierIdentifier;
 import android.service.euicc.DownloadSubscriptionResult;
 import android.service.euicc.EuiccService;
 import android.service.euicc.GetDefaultDownloadableSubscriptionListResult;
@@ -67,6 +73,8 @@ import android.telephony.UiccPortInfo;
 import android.telephony.euicc.DownloadableSubscription;
 import android.telephony.euicc.EuiccInfo;
 import android.telephony.euicc.EuiccManager;
+import android.test.mock.MockContentProvider;
+import android.test.mock.MockContentResolver;
 
 import androidx.test.runner.AndroidJUnit4;
 
@@ -76,6 +84,7 @@ import com.android.internal.telephony.TelephonyTest;
 import com.android.internal.telephony.euicc.EuiccConnector.GetOtaStatusCommandCallback;
 import com.android.internal.telephony.euicc.EuiccConnector.OtaStatusChangedCallback;
 import com.android.internal.telephony.flags.FeatureFlags;
+import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.uicc.UiccSlot;
 
 import libcore.junit.util.compat.CoreCompatChangeRule.DisableCompatChanges;
@@ -155,8 +164,65 @@ public class EuiccControllerTest extends TelephonyTest {
     @Mock private EuiccConnector mMockConnector;
     @Captor private ArgumentCaptor<Bundle> mBundleCaptor;
 
+    private CarrierIdContentProvider mCarrierIdContentProvider;
     private TestEuiccController mController;
     private int mSavedEuiccProvisionedValue;
+
+    private static class CarrierIdContentProvider extends MockContentProvider {
+        private String mPlmnId;
+        private int mCarrierId;
+
+        void setCarrierId(String plmnId, int carrierId) {
+            this.mPlmnId = plmnId;
+            this.mCarrierId = carrierId;
+        }
+
+        @Override
+        public Cursor query(
+                Uri uri,
+                String[] projection,
+                String selection,
+                String[] selectionArgs,
+                String sortOrder) {
+            MatrixCursor mc =
+                    new MatrixCursor(
+                            new String[] {
+                                Telephony.CarrierId._ID,
+                                Telephony.CarrierId.All.MCCMNC,
+                                Telephony.CarrierId.All.GID1,
+                                Telephony.CarrierId.All.GID2,
+                                Telephony.CarrierId.All.PLMN,
+                                Telephony.CarrierId.All.IMSI_PREFIX_XPATTERN,
+                                Telephony.CarrierId.All.ICCID_PREFIX,
+                                Telephony.CarrierId.All.PRIVILEGE_ACCESS_RULE,
+                                Telephony.CarrierId.All.SPN,
+                                Telephony.CarrierId.All.APN,
+                                Telephony.CarrierId.CARRIER_NAME,
+                                Telephony.CarrierId.CARRIER_ID,
+                                Telephony.CarrierId.PARENT_CARRIER_ID
+                            });
+
+            if (mPlmnId != null) {
+                mc.addRow(
+                        new Object[] {
+                            1,
+                            mPlmnId,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            "test name",
+                            mCarrierId,
+                            mCarrierId
+                        });
+            }
+            return mc;
+        }
+    }
 
     private static class TestEuiccController extends EuiccController {
         // Captured arguments to addResolutionIntent
@@ -197,6 +263,12 @@ public class EuiccControllerTest extends TelephonyTest {
         }
 
         @Override
+        public boolean checkCarrierPrivilegeInMetadata(
+                DownloadableSubscription subscription, String callingPackage) {
+            return super.checkCarrierPrivilegeInMetadata(subscription, callingPackage);
+        }
+
+        @Override
         public void refreshSubscriptionsAndSendResult(
                 PendingIntent callbackIntent, int resultCode, Intent extrasIntent) {
             mCalledRefreshSubscriptionsAndSendResult = true;
@@ -226,6 +298,10 @@ public class EuiccControllerTest extends TelephonyTest {
     public void setUp() throws Exception {
         super.setUp(getClass().getSimpleName());
         mController = new TestEuiccController(mContext, mMockConnector, mFeatureFlags);
+
+        mCarrierIdContentProvider = new CarrierIdContentProvider();
+        ((MockContentResolver) mContext.getContentResolver())
+                .addProvider(Telephony.CarrierId.AUTHORITY, mCarrierIdContentProvider);
 
         PackageInfo pi = new PackageInfo();
         pi.packageName = PACKAGE_NAME;
@@ -1650,10 +1726,9 @@ public class EuiccControllerTest extends TelephonyTest {
     @EnableCompatChanges({EuiccManager.INACTIVE_PORT_AVAILABILITY_CHECK,
             TelephonyManager.ENABLE_FEATURE_MAPPING})
     public void testIsSimPortAvailable_WithTelephonyFeatureMapping() throws Exception {
-        // Replace field to set SDK version of vendor partition to Android V
-        int vendorApiLevel = Build.VERSION_CODES.VANILLA_ICE_CREAM;
+        // Replace field to set vendor API level to the one where the exceptions are enabled.
         replaceInstance(EuiccController.class, "mVendorApiLevel", (EuiccController) mController,
-                vendorApiLevel);
+                TELEPHONY_FEATURE_ENFORCEMENT_VENDOR_API_LEVEL);
 
         // Feature flag enabled, device has required telephony feature.
         doReturn(true).when(mPackageManager).hasSystemFeature(
@@ -1791,6 +1866,114 @@ public class EuiccControllerTest extends TelephonyTest {
         assertFalse(mController.isSimPortAvailable(CARD_ID, 0, TEST_PACKAGE_NAME));
     }
 
+    @Test
+    public void testIsPrivilegedFromCarrierIdentifier_success() {
+        mSetFlagsRule.enableFlags(
+                Flags.FLAG_DOWNLOADABLE_SUBSCRIPTION_INCLUDE_CARRIER_IDENTIFIER_INTERNAL);
+        when(mFeatureFlags.downloadableSubscriptionIncludeCarrierIdentifierInternal())
+                .thenReturn(true);
+
+        String mcc = "123";
+        String mnc = "456";
+        int carrierId = 1;
+        CarrierIdentifier identifier = new CarrierIdentifier(mcc, mnc, null, null, null, null);
+        DownloadableSubscription sub =
+                new DownloadableSubscription.Builder("").setCarrierIdentifier(identifier).build();
+
+        mCarrierIdContentProvider.setCarrierId(mcc + mnc, carrierId);
+
+        // Mock Phone and CarrierPrivilegesTracker
+        doReturn(carrierId).when(mPhone).getCarrierId();
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS)
+                .when(mCarrierPrivilegesTracker)
+                .getCarrierPrivilegeStatusForPackage(PACKAGE_NAME);
+
+        assertTrue(mController.isPrivilegedFromCarrierIdentifier(sub, PACKAGE_NAME));
+    }
+
+    @Test
+    public void testIsPrivilegedFromCarrierIdentifier_mismatch() {
+        mSetFlagsRule.enableFlags(
+                Flags.FLAG_DOWNLOADABLE_SUBSCRIPTION_INCLUDE_CARRIER_IDENTIFIER_INTERNAL);
+        when(mFeatureFlags.downloadableSubscriptionIncludeCarrierIdentifierInternal())
+                .thenReturn(true);
+
+        String mcc = "123";
+        String mnc = "456";
+        int carrierId = 1;
+        int otherCarrierId = 2;
+        CarrierIdentifier identifier = new CarrierIdentifier(mcc, mnc, null, null, null, null);
+        DownloadableSubscription sub =
+                new DownloadableSubscription.Builder("").setCarrierIdentifier(identifier).build();
+
+        mCarrierIdContentProvider.setCarrierId(mcc + mnc, carrierId);
+
+        // Mock Phone and CarrierPrivilegesTracker with different ID
+        doReturn(otherCarrierId).when(mPhone).getCarrierId();
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS)
+                .when(mCarrierPrivilegesTracker)
+                .getCarrierPrivilegeStatusForPackage(PACKAGE_NAME);
+
+        assertFalse(mController.isPrivilegedFromCarrierIdentifier(sub, PACKAGE_NAME));
+    }
+
+    @Test
+    public void testIsPrivilegedFromCarrierIdentifier_noAccess() {
+        mSetFlagsRule.enableFlags(
+                Flags.FLAG_DOWNLOADABLE_SUBSCRIPTION_INCLUDE_CARRIER_IDENTIFIER_INTERNAL);
+        when(mFeatureFlags.downloadableSubscriptionIncludeCarrierIdentifierInternal())
+                .thenReturn(true);
+
+        String mcc = "123";
+        String mnc = "456";
+        int carrierId = 1;
+        CarrierIdentifier identifier = new CarrierIdentifier(mcc, mnc, null, null, null, null);
+        DownloadableSubscription sub =
+                new DownloadableSubscription.Builder("").setCarrierIdentifier(identifier).build();
+
+        mCarrierIdContentProvider.setCarrierId(mcc + mnc, carrierId);
+
+        // Mock Phone and CarrierPrivilegesTracker with no access
+        doReturn(carrierId).when(mPhone).getCarrierId();
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_NO_ACCESS)
+                .when(mCarrierPrivilegesTracker)
+                .getCarrierPrivilegeStatusForPackage(PACKAGE_NAME);
+
+        assertFalse(mController.isPrivilegedFromCarrierIdentifier(sub, PACKAGE_NAME));
+    }
+
+    @Test
+    public void testCheckCarrierPrivilegeInMetadata() {
+        mSetFlagsRule.enableFlags(
+                Flags.FLAG_DOWNLOADABLE_SUBSCRIPTION_INCLUDE_CARRIER_IDENTIFIER_INTERNAL);
+        when(mFeatureFlags.downloadableSubscriptionIncludeCarrierIdentifierInternal())
+                .thenReturn(true);
+
+        String mcc = "123";
+        String mnc = "456";
+        int carrierId = 1;
+        CarrierIdentifier identifier = new CarrierIdentifier(mcc, mnc, null, null, null, null);
+
+        // Path 1: Privileged from UiccAccessRules
+        assertTrue(
+                mController.checkCarrierPrivilegeInMetadata(
+                        SUBSCRIPTION_WITH_METADATA, PACKAGE_NAME));
+
+        // Path 2: Privileged from CarrierIdentifier
+        DownloadableSubscription subWithId =
+                new DownloadableSubscription.Builder("").setCarrierIdentifier(identifier).build();
+        mCarrierIdContentProvider.setCarrierId(mcc + mnc, carrierId);
+        doReturn(carrierId).when(mPhone).getCarrierId();
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS)
+                .when(mCarrierPrivilegesTracker)
+                .getCarrierPrivilegeStatusForPackage(PACKAGE_NAME);
+
+        assertTrue(mController.checkCarrierPrivilegeInMetadata(subWithId, PACKAGE_NAME));
+
+        // Neither path
+        DownloadableSubscription subEmpty = new DownloadableSubscription.Builder("").build();
+        assertFalse(mController.checkCarrierPrivilegeInMetadata(subEmpty, PACKAGE_NAME));
+    }
 
     private void setUiccCardInfos(boolean isMepSupported, boolean isPortActive,
             boolean isEmptyPort) {

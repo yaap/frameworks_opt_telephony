@@ -178,5 +178,4 @@ public class DataUtilsTest extends TelephonyTest {
         String malFormatted4 = "mms||ims";
         assertThat(DataUtils.getNetworkCapabilitiesFromString(malFormatted4).contains(-1)).isTrue();
     }
-
 }

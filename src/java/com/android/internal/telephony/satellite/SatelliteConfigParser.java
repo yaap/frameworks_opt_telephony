@@ -20,8 +20,9 @@ import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.util.Log;
 
+import com.android.internal.telephony.TelephonyConfigData;
 import com.android.internal.telephony.configupdate.ConfigParser;
-import com.android.internal.telephony.satellite.nano.SatelliteConfigData;
+import com.android.internal.telephony.configupdate.TelephonyConfigUpdateInstallReceiver;
 
 import java.io.File;
 import java.io.IOException;
@@ -71,14 +72,14 @@ public class SatelliteConfigParser extends ConfigParser<SatelliteConfig> {
                 Log.d(TAG, "config data is null");
                 return;
             }
-            SatelliteConfigData.TelephonyConfigProto telephonyConfigData =
-                    SatelliteConfigData.TelephonyConfigProto.parseFrom(data);
-            if (telephonyConfigData == null || telephonyConfigData.satellite == null) {
-                Log.e(TAG, "telephonyConfigData or telephonyConfigData.satellite is null");
+            TelephonyConfigData.TelephonyConfigProto telephonyConfigData =
+                    TelephonyConfigData.TelephonyConfigProto.parseFrom(data);
+            if (!telephonyConfigData.hasSatellite()) {
+                Log.e(TAG, "telephonyConfigData does not have satellite config");
                 return;
             }
-            mVersion = telephonyConfigData.satellite.version;
-            mConfig = new SatelliteConfig(telephonyConfigData.satellite);
+            mVersion = telephonyConfigData.getSatellite().getVersion();
+            mConfig = new SatelliteConfig(telephonyConfigData.getSatellite());
             Log.d(TAG, "SatelliteConfig is created");
         } catch (Exception e) {
             parseError = true;
@@ -89,5 +90,10 @@ public class SatelliteConfigParser extends ConfigParser<SatelliteConfig> {
                 mConfig = null;
             }
         }
+    }
+
+    @Override
+    public String getDomain() {
+        return TelephonyConfigUpdateInstallReceiver.DOMAIN_SATELLITE;
     }
 }

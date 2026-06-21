@@ -94,11 +94,6 @@ public class RuimRecords extends IccRecords {
     private static final int EVENT_GET_ICCID_DONE = 5;
     private static final int EVENT_UPDATE_DONE = 14;
     private static final int EVENT_GET_SST_DONE = 17;
-    private static final int EVENT_GET_ALL_SMS_DONE = 18;
-    private static final int EVENT_MARK_SMS_READ_DONE = 19;
-
-    private static final int EVENT_SMS_ON_RUIM = 21;
-    private static final int EVENT_GET_SMS_DONE = 22;
 
     private static final int EVENT_APP_LOCKED = 32;
     private static final int EVENT_APP_NETWORK_LOCKED = 33;
@@ -685,13 +680,6 @@ public class RuimRecords extends IccRecords {
                 }
             break;
 
-            case EVENT_GET_ALL_SMS_DONE:
-            case EVENT_MARK_SMS_READ_DONE:
-            case EVENT_SMS_ON_RUIM:
-            case EVENT_GET_SMS_DONE:
-                Rlog.w(LOG_TAG, "Event not supported: " + msg.what);
-                break;
-
             // TODO: probably EF_CST should be read instead
             case EVENT_GET_SST_DONE:
                 log("Event EVENT_GET_SST_DONE Received");
@@ -768,30 +756,6 @@ public class RuimRecords extends IccRecords {
         if (DBG) log("record load complete");
 
         // Further records that can be inserted are Operator/OEM dependent
-
-        // FIXME: CSIM IMSI may not contain the MNC.
-        if (false) {
-            String operator = getRUIMOperatorNumeric();
-            if (!TextUtils.isEmpty(operator)) {
-                log("onAllRecordsLoaded set 'gsm.sim.operator.numeric' to operator='" +
-                        operator + "'");
-                log("update icc_operator_numeric=" + operator);
-                mTelephonyManager.setSimOperatorNumericForPhone(
-                        mParentApp.getPhoneId(), operator);
-            } else {
-                log("onAllRecordsLoaded empty 'gsm.sim.operator.numeric' skipping");
-            }
-
-            String imsi = getIMSI();
-
-            if (!TextUtils.isEmpty(imsi)) {
-                log("onAllRecordsLoaded set mcc imsi=" + (VDBG ? ("=" + imsi) : ""));
-                mTelephonyManager.setSimCountryIsoForPhone(mParentApp.getPhoneId(),
-                        MccTable.countryCodeForMcc(imsi.substring(0, 3)));
-            } else {
-                log("onAllRecordsLoaded empty imsi skipping setting mcc");
-            }
-        }
 
         Resources resource = Resources.getSystem();
         if (resource.getBoolean(com.android.internal.R.bool.config_use_sim_language_file)) {

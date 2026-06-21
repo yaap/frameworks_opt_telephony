@@ -31,7 +31,6 @@ public class EntitlementMetricsStats {
     private static final String TAG = EntitlementMetricsStats.class.getSimpleName();
     private static EntitlementMetricsStats sInstance = null;
     private static final int RESULT_SUCCESS = 200;
-
     private int mSubId;
     private int mResult;
     private int mEntitlementStatus;
@@ -40,6 +39,7 @@ public class EntitlementMetricsStats {
     private int[] mEntitlementServiceType;
     private int mEntitlementDataPolicy;
     private int mHttpStatusCode;
+    private @SatelliteConstants.SatelliteEntitlementQueryTrigger int mTriggerEvent;
 
     private EntitlementMetricsStats() {}
 
@@ -61,7 +61,8 @@ public class EntitlementMetricsStats {
     /** Report metrics on entitlement query request success */
     public void reportSuccess(int subId,
             @SatelliteConstants.SatelliteEntitlementStatus int entitlementStatus,
-            boolean isRetry, boolean isAllowedServiceInfo, int[] serviceType, int dataPolicy) {
+            boolean isRetry, boolean isAllowedServiceInfo, int[] serviceType, int dataPolicy,
+            @SatelliteConstants.SatelliteEntitlementQueryTrigger int triggerEvent) {
         mSubId = subId;
         mResult = RESULT_SUCCESS;
         mEntitlementStatus = entitlementStatus;
@@ -70,11 +71,13 @@ public class EntitlementMetricsStats {
         mEntitlementServiceType = serviceType;
         mEntitlementDataPolicy = dataPolicy;
         mHttpStatusCode = 0;
+        mTriggerEvent = triggerEvent;
         reportEntitlementMetrics();
     }
 
     /** Report metrics on entitlement query request error */
-    public void reportError(int subId, int result, boolean isRetry, int httpStatusCode) {
+    public void reportError(int subId, int result, boolean isRetry, int httpStatusCode,
+            @SatelliteConstants.SatelliteEntitlementQueryTrigger int triggerEvent) {
         mSubId = subId;
         mResult = result;
         mIsRetry = isRetry;
@@ -83,6 +86,7 @@ public class EntitlementMetricsStats {
         mEntitlementServiceType = new int[0];
         mEntitlementDataPolicy = SatelliteConstants.SATELLITE_ENTITLEMENT_SERVICE_POLICY_UNKNOWN;
         mHttpStatusCode = httpStatusCode;
+        mTriggerEvent = triggerEvent;
         reportEntitlementMetrics();
     }
 
@@ -101,6 +105,7 @@ public class EntitlementMetricsStats {
                         .setSupportedConnectionMode(SatelliteController.getInstance()
                                 .getSupportedConnectTypeMetrics(mSubId))
                         .setHttpStatusCode(mHttpStatusCode)
+                        .setTriggerEvent(mTriggerEvent)
                         .build();
         SatelliteStats.getInstance().onSatelliteEntitlementMetrics(entitlementParams);
         logd("reportEntitlementMetrics: " + entitlementParams);

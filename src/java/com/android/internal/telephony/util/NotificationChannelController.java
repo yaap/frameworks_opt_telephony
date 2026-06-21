@@ -149,6 +149,15 @@ public class NotificationChannelController {
                 NotificationManager.IMPORTANCE_DEFAULT);
         voiceMailChannel.enableVibration(
                 VoicemailNotificationSettingsUtil.getVibrationPreference(context));
+        // Use the default notification sound when migrating to a notification channel.
+        // This also gets called when the SIM is loaded, which could be a while after the device is
+        // first booted.  Note that the behavior of createNotificationChannel is such that if the
+        // channel already exists, it will update the existing channel, rather than creating a new
+        // one; any existing overridden sound or vibration setting made by the user is retained by
+        // NotificationManager.
+        voiceMailChannel.setSound(
+                Settings.System.DEFAULT_NOTIFICATION_URI,
+                new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).build());
         context.getSystemService(NotificationManager.class)
                 .createNotificationChannel(voiceMailChannel);
     }

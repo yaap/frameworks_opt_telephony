@@ -20,6 +20,11 @@ import static android.telephony.CellularIdentifierDisclosure.NAS_PROTOCOL_MESSAG
 import static android.telephony.SecurityAlgorithmUpdate.CONNECTION_EVENT_VOLTE_SIP;
 import static android.telephony.SecurityAlgorithmUpdate.SECURITY_ALGORITHM_EEA2;
 import static android.telephony.SecurityAlgorithmUpdate.SECURITY_ALGORITHM_HMAC_SHA1_96;
+import static android.telephony.NetworkSecurityEvent.ALERT_CATEGORY_DOWNGRADE;
+import static android.telephony.NetworkSecurityEvent.ALERT_STATUS_DETECTED;
+import static android.telephony.NetworkSecurityEvent.REASON_CODE_DOWNGRADE_FORCED_HANDOVER;
+import static android.telephony.ServiceState.RIL_RADIO_TECHNOLOGY_LTE;
+import static android.telephony.TelephonyManager.SATELLITE_PURCHASE_MODE_STATE_ACTIVE;
 
 import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,6 +39,7 @@ import android.telephony.CellIdentityGsm;
 import android.telephony.CellInfo;
 import android.telephony.CellularIdentifierDisclosure;
 import android.telephony.DisconnectCause;
+import android.telephony.NetworkSecurityEvent;
 import android.telephony.PreciseCallState;
 import android.telephony.PreciseDisconnectCause;
 import android.telephony.SecurityAlgorithmUpdate;
@@ -55,7 +61,9 @@ import org.mockito.Mockito;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class DefaultPhoneNotifierTest extends TelephonyTest {
     private static final int PHONE_ID = 1;
@@ -437,6 +445,16 @@ public class DefaultPhoneNotifierTest extends TelephonyTest {
 
     @Test
     @SmallTest
+    public void testNotifySatellitePurchaseModeChanged() {
+        int subId = mPhone.getSubId();
+        mDefaultPhoneNotifierUT.notifySatellitePurchaseModeChanged(mPhone, true,
+                SATELLITE_PURCHASE_MODE_STATE_ACTIVE);
+        verify(mTelephonyRegistryManager).notifySatellitePurchaseModeChanged(
+                eq(subId), eq(true), eq(SATELLITE_PURCHASE_MODE_STATE_ACTIVE));
+    }
+
+    @Test
+    @SmallTest
     public void testCarrierRoamingNtnEligibleStateChanged() {
         int subId = mPhone.getSubId();
         mDefaultPhoneNotifierUT.notifyCarrierRoamingNtnEligibleStateChanged(mPhone, true);
@@ -458,7 +476,6 @@ public class DefaultPhoneNotifierTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testSecurityAlgorithmsChanged() {
-        doReturn(true).when(mFeatureFlags).securityAlgorithmsUpdateIndications();
         int phoneId = mPhone.getPhoneId();
         int subId = mPhone.getSubId();
         SecurityAlgorithmUpdate update =
@@ -473,7 +490,6 @@ public class DefaultPhoneNotifierTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testCellularIdentifierDisclosedChanged() {
-        doReturn(true).when(mFeatureFlags).cellularIdentifierDisclosureIndications();
         int phoneId = mPhone.getPhoneId();
         int subId = mPhone.getSubId();
         CellularIdentifierDisclosure disclosure =
@@ -484,5 +500,53 @@ public class DefaultPhoneNotifierTest extends TelephonyTest {
         mDefaultPhoneNotifierUT.notifyCellularIdentifierDisclosedChanged(mPhone, disclosure);
         verify(mTelephonyRegistryManager).notifyCellularIdentifierDisclosedChanged(
                 eq(phoneId), eq(subId), eq(disclosure));
+    }
+
+    @Test
+    @SmallTest
+    public void testDomainSelectionEmergencyModeEntered() {
+        doReturn(true).when(mFeatureFlags).domainSelectionEmergencyModeNotification();
+        int type = TelephonyManager.DOMAIN_SELECTION_EMERGENCY_TYPE_CALL;
+        int phoneId = mPhone.getPhoneId();
+        int subId = mPhone.getSubId();
+
+        mDefaultPhoneNotifierUT.notifyDomainSelectionEmergencyModeEntered(mPhone, type);
+
+        verify(mTelephonyRegistryManager).notifyDomainSelectionEmergencyModeEntered(
+                eq(phoneId), eq(subId), eq(type));
+    }
+
+    @Test
+    @SmallTest
+    public void testDomainSelectionEmergencyModeExited() {
+        doReturn(true).when(mFeatureFlags).domainSelectionEmergencyModeNotification();
+        int type = TelephonyManager.DOMAIN_SELECTION_EMERGENCY_TYPE_CALL;
+        int phoneId = mPhone.getPhoneId();
+        int subId = mPhone.getSubId();
+
+        mDefaultPhoneNotifierUT.notifyDomainSelectionEmergencyModeExited(mPhone, type);
+
+        verify(mTelephonyRegistryManager).notifyDomainSelectionEmergencyModeExited(
+                eq(phoneId), eq(subId), eq(type));
+    }
+
+    @Test
+    @SmallTest
+    public void testNotifyNetworkSecurityEvents() {
+        doReturn(true).when(mFeatureFlags).networkSecurityEventIndications();
+        int phoneId = mPhone.getPhoneId();
+        int subId = mPhone.getSubId();
+        Set<NetworkSecurityEvent> events = new HashSet<>();
+        events.add(new NetworkSecurityEvent(
+                ALERT_CATEGORY_DOWNGRADE,
+                ALERT_STATUS_DETECTED,
+                new int[]{REASON_CODE_DOWNGRADE_FORCED_HANDOVER},
+                123L, 456, 789, "101112",
+                RIL_RADIO_TECHNOLOGY_LTE,
+                false));
+
+        mDefaultPhoneNotifierUT.notifyNetworkSecurityEvents(mPhone, events);
+        verify(mTelephonyRegistryManager).notifyNetworkSecurityEvents(
+                eq(phoneId), eq(subId), eq(events));
     }
 }

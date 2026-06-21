@@ -67,8 +67,8 @@ public class SessionMetricsStats {
     private int mMaxInactivityDurationSec;
     private SatelliteSessionStats mDatagramStats;
     private @SatelliteConstants.SatelliteGlobalConnectType int mSupportedConnectionMode;
-
     private @SatelliteConstants.SatelliteSessionConnectType int mSessionConnectionMode;
+    private String mPlmn;
 
     private SessionMetricsStats() {
         initializeSessionMetricsParam();
@@ -306,6 +306,13 @@ public class SessionMetricsStats {
         return this;
     }
 
+    /** Capture the satellite plmn of the satellite service */
+    public SessionMetricsStats setPlmn(String plmn) {
+        mPlmn = plmn;
+        logd("plmn(" + mPlmn + ")");
+        return this;
+    }
+
     /** Report the session metrics atoms to PersistAtomsStorage in telephony. */
     public void reportSessionMetrics() {
         SatelliteStats.SatelliteSessionParams sessionParams =
@@ -332,6 +339,7 @@ public class SessionMetricsStats {
                         .setMaxInactivityDurationSec(mMaxInactivityDurationSec)
                         .setSupportedConnectionMode(mSupportedConnectionMode)
                         .setSessionConnectionMode(mSessionConnectionMode)
+                        .setPlmn(mPlmn)
                         .build();
         logd("reportSessionMetrics: " + sessionParams.toString());
         SatelliteStats.getInstance().onSatelliteSessionMetrics(sessionParams);
@@ -397,6 +405,7 @@ public class SessionMetricsStats {
         mMaxInactivityDurationSec = 0;
         mSupportedConnectionMode = SatelliteConstants.GLOBAL_NTN_CONNECT_TYPE_UNKNOWN;
         mSessionConnectionMode = SatelliteConstants.SESSION_NTN_CONNECT_TYPE_UNKNOWN;
+        mPlmn = SatelliteConstants.DEFAULT_PLMN;
     }
 
     public void resetSessionStatsShadowCounters() {

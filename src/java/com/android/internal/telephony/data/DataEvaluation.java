@@ -86,6 +86,16 @@ public class DataEvaluation {
     }
 
     /**
+     * Remove all soft disallowed reasons. A soft reason means that in certain conditions, data is
+     * still allowed. Normally those reasons are due to users settings. See
+     * {@link DataDisallowedReason} for details.
+     */
+    public void removeSoftDisallowedReasons() {
+        mDataDisallowedReasons.removeIf(reason -> !reason.isHardReason());
+        mEvaluatedTime = System.currentTimeMillis();
+    }
+
+    /**
      * Add a data allowed reason. Note that adding an allowed reason will clean up the disallowed
      * reasons because they are mutual exclusive.
      *
@@ -267,7 +277,12 @@ public class DataEvaluation {
         /** Unsatisfied network request detached. */
         UNSATISFIED_REQUEST_DETACHED(true),
         /** track bootstrap sim data usage */
-        CHECK_DATA_USAGE(false);
+        CHECK_DATA_USAGE(false),
+        /**
+         * Data dynamic config changed.
+         * Used when the dynamic mapping rules (DataConfig) are updated via ConfigUpdater.
+         */
+        DATA_DYNAMIC_CONFIG_CHANGED(true);
 
         /**
          * {@code true} if the evaluation is due to environmental changes (i.e. SIM removal,
@@ -356,7 +371,9 @@ public class DataEvaluation {
         /** BootStrap sim data limit reached. */
         DATA_LIMIT_REACHED(true),
         /** Data network connectivity transport not allowed. */
-        DATA_NETWORK_TRANSPORT_NOT_ALLOWED(true);
+        DATA_NETWORK_TRANSPORT_NOT_ALLOWED(true),
+        /** Capabilities are not supported. */
+        UNSUPPORTED_NETWORK_CAPABILITIES(true);
 
         private final boolean mIsHardReason;
 

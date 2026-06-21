@@ -1,6 +1,7 @@
 package: "com.android.internal.telephony.flags"
 container: "system"
 
+# Can not be removed until 26Q2 due to CTS test dependency.
 # OWNER=breadley TARGET=24Q3
 flag {
   name: "simultaneous_calling_indications"
@@ -10,17 +11,6 @@ flag {
   is_exported: true
 }
 
-# OWNER=stevestatia TARGET=24Q4
-flag {
-    name: "national_country_code_formatting_for_local_calls"
-    namespace: "telephony"
-    description: "Make requests and bug fixes for formatting local calls based on country codes easier with a more scalable solution."
-    bug: "293993310"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
 # OWNER=tgunn TARGET=25Q2
 flag {
     name: "robust_number_verification"
@@ -28,17 +18,6 @@ flag {
     description: "Makes range matching more robust for TelephonyManager#requestNumberVerification"
     bug:"400984263"
     is_exported: true
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-# OWNER=stevestatia TARGET=24Q4
-flag {
-    name: "remove_country_code_from_local_singapore_calls"
-    namespace: "telephony"
-    description: "Fix bug where the country code is being shown when merging in local Singapore numbers to conference calls."
-    bug:"284416645"
     metadata {
         purpose: PURPOSE_BUGFIX
     }
@@ -54,17 +33,6 @@ flag {
         purpose: PURPOSE_BUGFIX
     }
     is_exported: true
-}
-
-# OWNER=breadley TARGET=24Q4
-flag {
-    name: "delay_phone_account_registration"
-    namespace: "telephony"
-    description: "Fix bug where telephony would try to register for PhoneAccounts when Telecom isn't ready yet"
-    bug: "349731543"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
 }
 
 # OWNER=yongnamcha TARGET=25Q2
@@ -88,12 +56,41 @@ flag {
     }
 }
 
-# OWNER=tjstuart TARGET=25Q2
+# OWNER=pmadapurmath TARGET=26Q2
 flag {
-    name: "vvm_async_sim_state_handling"
+    name: "support_auto_unhold"
     namespace: "telephony"
-    description: "Prevent ANRs in the VvmSimStateTracker by moving tasks to the background"
-    bug:"433343546"
+    description: "Add support for auto-unholing the bg call for remotely disconnected calls (based on carrier config key)"
+    bug:"439893979"
+    is_exported: true
+}
+
+# OWNER=yadavabhinav TARGET=26Q2
+flag {
+    name: "support_low_battery_alert"
+    namespace: "telephony"
+    description: "Add Add periodic low battery alert during voice call"
+    bug:"421990884"
+    is_exported: true
+}
+
+# OWNER=breadley TARGET=26Q1
+flag {
+    name: "ignore_incall_mmi_for_emergency"
+    namespace: "telephony"
+    description: "Do not process in-call MMI codes when there is an active emergency call."
+    bug:"444515076"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=tgunn TARGET=26Q1
+flag {
+    name: "initialize_telecom_account_registry_async"
+    namespace: "telephony"
+    description: "Move setup of telecom account registry out of the onCreate."
+    bug:"454329792"
     metadata {
         purpose: PURPOSE_BUGFIX
     }
@@ -101,8 +98,55 @@ flag {
 
 # OWNER=pmadapurmath TARGET=26Q2
 flag {
-    name: "support_auto_unhold"
+    name: "fix_unhold_fg_call"
     namespace: "telephony"
-    description: "Add support for auto-unholing the bg call for remotely disconnected calls (based on carrier config key)"
-    bug:"439893979"
+    description: "Allow the fg to be unheld if it's unheld. Normally, we should always be performing this on the bg call but it's possible for states to reach a bad state due to race conditions."
+    bug:"469349595"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=pmadapurmath TARGET=26Q2
+flag {
+    name: "allow_multiple_incoming_for_dsda"
+    namespace: "telephony"
+    description: "Modify logic in CallManager to allow multiple ringing connections on different phones so that the call can be passed through to Telecom and be marked as a missed call."
+    bug:"484342500"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=tgunn TARGET=26Q2
+flag {
+    name: "rebuild_telecom_accounts_async"
+    namespace: "telephony"
+    description: "Move rebuilding of telecom accounts to a background thread to prevent ANRs."
+    bug: "471115015"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=breadley TARGET=26Q3
+flag {
+    name: "hide_default_outgoing_account_if_not_multiple"
+    namespace: "telephony"
+    description: "Hide the 'Make calls with' setting if there is only one or zero enabled phone accounts."
+    bug: "488181004"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
+
+# OWNER=breadley TARGET=26Q3
+flag {
+    name: "support_same_uri_conference_srvcc"
+    namespace: "telephony"
+    description: "Support SRVCC of an IMS conference with the participants having the same URI."
+    bug: "485088331"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
 }

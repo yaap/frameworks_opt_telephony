@@ -38,7 +38,8 @@ import com.android.ims.internal.IImsFeatureStatusCallback;
 import com.android.ims.internal.IImsMMTelFeature;
 import com.android.ims.internal.IImsServiceController;
 import com.android.internal.annotations.VisibleForTesting;
-import com.android.internal.telephony.flags.FeatureFlagsImpl;
+
+import java.util.concurrent.ExecutorService;
 
 /**
  * Manages the Binding lifecycle of one ImsService as well as the relevant ImsFeatures that the
@@ -77,16 +78,16 @@ public class ImsServiceControllerCompat extends ImsServiceController {
     public ImsServiceControllerCompat(Context context, ComponentName componentName,
             ImsServiceController.ImsServiceControllerCallbacks callbacks,
             ImsFeatureBinderRepository repo) {
-        super(context, componentName, callbacks, repo, new FeatureFlagsImpl());
+        super(context, componentName, callbacks, repo);
         mMmTelFeatureFactory = MmTelFeatureCompatAdapter::new;
     }
 
     @VisibleForTesting
     public ImsServiceControllerCompat(Context context, ComponentName componentName,
             ImsServiceControllerCallbacks callbacks, Handler handler, RebindRetry rebindRetry,
-            ImsFeatureBinderRepository repo, MmTelFeatureCompatFactory factory) {
-        super(context, componentName, callbacks, handler, rebindRetry, repo,
-                new FeatureFlagsImpl());
+            ImsFeatureBinderRepository repo, MmTelFeatureCompatFactory factory,
+            ExecutorService executor) {
+        super(context, componentName, callbacks, handler, rebindRetry, repo, executor);
         mMmTelFeatureFactory = factory;
     }
 
@@ -172,9 +173,17 @@ public class ImsServiceControllerCompat extends ImsServiceController {
     }
 
     @Override
-    protected final void notifyImsServiceReady() {
-        Log.d(TAG, "notifyImsServiceReady");
-        // don't do anything for compat impl.
+    protected void notifyImsServiceReady() {
+        mExecutor.execute(() -> {
+            Log.d(TAG, "notifyImsServiceReady (Compat Async)");
+            if (mHandler != null) {
+                mHandler.post(() -> {
+                    if (mImsServiceConnection != null) {
+                        mImsServiceConnection.updateCapabilityAndServiceFeature();
+                    }
+                });
+            }
+        });
     }
 
     @Override

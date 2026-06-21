@@ -17,6 +17,8 @@
 package com.android.internal.telephony;
 
 import static android.telephony.NetworkRegistrationInfo.DOMAIN_PS;
+import static android.telephony.TelephonyManager.ACTION_2G_DISABLED_BY_CARRIER;
+import static android.telephony.TelephonyManager.EXTRA_SUBSCRIPTION_ID;
 
 import static com.android.internal.telephony.CommandException.Error.GENERIC_FAILURE;
 import static com.android.internal.telephony.CommandException.Error.SIM_BUSY;
@@ -37,6 +39,7 @@ import android.annotation.Nullable;
 import android.app.ActivityManager;
 import android.compat.annotation.UnsupportedAppUsage;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
@@ -78,6 +81,7 @@ import android.telephony.CellularIdentifierDisclosure;
 import android.telephony.ImsiEncryptionInfo;
 import android.telephony.LinkCapacityEstimate;
 import android.telephony.NetworkScanRequest;
+import android.telephony.NetworkSecurityEvent;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.RadioAccessFamily;
 import android.telephony.SecurityAlgorithmUpdate;
@@ -129,6 +133,7 @@ import com.android.internal.telephony.uicc.UiccPort;
 import com.android.internal.telephony.uicc.UiccProfile;
 import com.android.internal.telephony.uicc.UiccSlot;
 import com.android.internal.telephony.util.ArrayUtils;
+import com.android.internal.telephony.util.WorkerThread;
 import com.android.telephony.Rlog;
 
 import java.io.FileDescriptor;
@@ -136,6 +141,7 @@ import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -164,6 +170,9 @@ public class GsmCdmaPhone extends Phone {
     /** List of Registrants to receive Supplementary Service Notifications. */
     // Key used to read/write the current sub Id. Updated on SIM loaded.
     public static final String CURR_SUBID = "curr_subid";
+    // Key used to read/write the carrier 2g protection default state.
+    public static final String PREF_KEY_HAS_APPLIED_2G_PROTECTION_DEFAULT =
+            "pref_key_has_applied_2g_protection_default";
     private RegistrantList mSsnRegistrants = new RegistrantList();
 
     //CDMA
@@ -235,6 +244,16 @@ public class GsmCdmaPhone extends Phone {
     private boolean mIsNullCipherAndIntegritySupported = false;
     private boolean mIsIdentifierDisclosureTransparencySupported = false;
     private boolean mIsNullCipherNotificationSupported = false;
+
+    /**
+     * Queue for holding cellular events that arrive before a valid subscription ID is available.
+     * These messages are held until the SIM state is {@link TelephonyManager#SIM_STATE_LOADED},
+     * at which point they are re-processed.
+     */
+    @VisibleForTesting
+    public final List<Message> mCellularEventMessages =
+            Collections.synchronizedList(new ArrayList<>());
+    private static final Object sBlocker = new Object();
 
     // Create Cfu (Call forward unconditional) so that dialing number &
     // mOnComplete (Message object passed by client) can be packed &
@@ -391,7 +410,7 @@ public class GsmCdmaPhone extends Phone {
         if (hasCalling()) {
             loadTtyMode();
 
-            CallManager.getInstance().registerPhone(this);
+            CallManager.getInstance(context).registerPhone(this);
         }
 
         mSubscriptionsChangedListener =
@@ -421,11 +440,11 @@ public class GsmCdmaPhone extends Phone {
                 }
             } else if (TelecomManager.ACTION_CURRENT_TTY_MODE_CHANGED.equals(action)) {
                 int ttyMode = intent.getIntExtra(
-                        TelecomManager.EXTRA_CURRENT_TTY_MODE, TelecomManager.TTY_MODE_OFF);
+                        TelecomManager.EXTRA_CURRENT_TTY_MODE, TelephonyManager.TTY_MODE_OFF);
                 updateTtyMode(ttyMode);
             } else if (TelecomManager.ACTION_TTY_PREFERRED_MODE_CHANGED.equals(action)) {
                 int newPreferredTtyMode = intent.getIntExtra(
-                        TelecomManager.EXTRA_TTY_PREFERRED_MODE, TelecomManager.TTY_MODE_OFF);
+                        TelecomManager.EXTRA_TTY_PREFERRED_MODE, TelephonyManager.TTY_MODE_OFF);
                 updateUiTtyMode(newPreferredTtyMode);
             } else if (TelephonyManager.ACTION_SIM_APPLICATION_STATE_CHANGED.equals(action)
                            || TelephonyManager.ACTION_SIM_CARD_STATE_CHANGED.equals(action)) {
@@ -434,6 +453,19 @@ public class GsmCdmaPhone extends Phone {
                         SubscriptionManager.INVALID_SIM_SLOT_INDEX)) {
                     mSimState = intent.getIntExtra(TelephonyManager.EXTRA_SIM_STATE,
                             TelephonyManager.SIM_STATE_UNKNOWN);
+                    if (mSimState == TelephonyManager.SIM_STATE_LOADED
+                            && !mCellularEventMessages.isEmpty()) {
+                        synchronized (sBlocker) {
+                            logd("Executing CellularEventMessages size: "
+                                    + mCellularEventMessages.size());
+                            Iterator<Message> iterator = mCellularEventMessages.iterator();
+                            while (iterator.hasNext()) {
+                                sendMessage(iterator.next());
+                                iterator.remove();
+                            }
+                            sBlocker.notifyAll();
+                        }
+                    }
                     if (mSimState == TelephonyManager.SIM_STATE_LOADED
                             && currentSlotSubIdChanged()) {
                         setNetworkSelectionModeAutomatic(null);
@@ -504,7 +536,7 @@ public class GsmCdmaPhone extends Phone {
         mContext.registerReceiver(mBroadcastReceiver, filter,
                 android.Manifest.permission.MODIFY_PHONE_STATE, null, Context.RECEIVER_EXPORTED);
 
-        mCDM = new CarrierKeyDownloadManager(this);
+        mCDM = new CarrierKeyDownloadManager(this, WorkerThread.get().getLooper());
 
         mCIM = new CarrierInfoManager();
 
@@ -534,6 +566,8 @@ public class GsmCdmaPhone extends Phone {
                         .makeNullCipherNotifier(mSafetySource);
         mCi.registerForSecurityAlgorithmUpdates(
                 this, EVENT_SECURITY_ALGORITHM_UPDATE, null);
+        mCi.registerForNetworkSecurityEvents(this, EVENT_NETWORK_SECURITY_EVENTS, null);
+
 
         initializeCarrierApps();
     }
@@ -1505,8 +1539,14 @@ public class GsmCdmaPhone extends Phone {
         String newDialString = PhoneNumberUtils.stripSeparators(dialString);
 
         // If not emergency number, handle in-call MMI first if applicable
-        if (!dialArgs.isEmergency && handleInCallMmiCommands(newDialString)) {
-            return null;
+        if (!dialArgs.isEmergency) {
+            if (mFeatureFlags.ignoreIncallMmiForEmergency() && isInEmergencyCall()) {
+                logd("dialInternal: ignore InCall MMI command during emergency call");
+                return null;
+            }
+            if (handleInCallMmiCommands(newDialString)) {
+                return null;
+            }
         }
 
         // Only look at the Network portion for mmi
@@ -1951,7 +1991,7 @@ public class GsmCdmaPhone extends Phone {
     }
 
     @Override
-    public String getPlmn() {
+    public String getPnnHomeNetworkName() {
         IccRecords r = mIccRecords.get();
         return (r != null) ? r.getPnnHomeName() : null;
     }
@@ -2837,8 +2877,8 @@ public class GsmCdmaPhone extends Phone {
                         getContext().getSystemService(Context.CARRIER_CONFIG_SERVICE);
                 final PersistableBundle b = configMgr.getConfigForSubId(getSubId());
                 if (b != null) {
+                    updateNrSettingsAfterCarrierConfigChanged(b);
                     if (hasCalling()) {
-                        updateNrSettingsAfterCarrierConfigChanged(b);
                         updateVoNrSettings(b);
                     }
                     updateCarrierN1ModeSupported(b);
@@ -2846,8 +2886,13 @@ public class GsmCdmaPhone extends Phone {
                     loge("Failed to retrieve a carrier config bundle for subId=" + getSubId());
                 }
                 loadAllowedNetworksFromSubscriptionDatabase();
+
+                if (b != null && mFeatureFlags.keyCarrier2gToggle()) {
+                    updateDefaultEnable2gSettings(b);
+                }
                 // Obtain new radio capabilities from the modem, since some are SIM-dependent
                 mCi.getRadioCapability(obtainMessage(EVENT_GET_RADIO_CAPABILITY));
+                super.handleMessage(msg);
                 break;
 
             case EVENT_SET_ROAMING_PREFERENCE_DONE:
@@ -3202,20 +3247,20 @@ public class GsmCdmaPhone extends Phone {
                 }
 
                 CellularIdentifierDisclosure disclosure = (CellularIdentifierDisclosure) ar.result;
-                if (mIdentifierDisclosureNotifier != null
-                        && disclosure != null) {
-                    int subId = getSubId();
-                    if (SubscriptionManager.isValidSubscriptionId(subId)) {
-                        mIdentifierDisclosureNotifier.addDisclosure(mContext, subId, disclosure);
-                    }
+                if (mIdentifierDisclosureNotifier == null ||  disclosure == null) {
+                    logd("EVENT_CELL_IDENTIFIER_DISCLOSURE mIdentifierDisclosureNotifier or"
+                            + " disclosure is null.");
+                    return;
                 }
-                if (mFeatureFlags.cellularIdentifierDisclosureIndications()
-                        && mIdentifierDisclosureNotifier != null
-                        && disclosure != null) {
-                    logd("EVENT_CELL_IDENTIFIER_DISCLOSURE for non-Safety Center listeners "
-                            + "phoneId = " + getPhoneId());
-                    mNotifier.notifyCellularIdentifierDisclosedChanged(this, disclosure);
+
+                if (queueCellularEventIfSubIdInvalid(msg, "EVENT_CELL_IDENTIFIER_DISCLOSURE")) {
+                    return;
                 }
+
+                mIdentifierDisclosureNotifier.addDisclosure(mContext, getSubId(), disclosure);
+                logd("EVENT_CELL_IDENTIFIER_DISCLOSURE for non-Safety Center listeners "
+                        + "phoneId = " + getPhoneId());
+                mNotifier.notifyCellularIdentifierDisclosedChanged(this, disclosure);
                 break;
 
             case EVENT_SET_IDENTIFIER_DISCLOSURE_ENABLED_DONE:
@@ -3230,19 +3275,20 @@ public class GsmCdmaPhone extends Phone {
                 ar = (AsyncResult) msg.obj;
                 SecurityAlgorithmUpdate update = (SecurityAlgorithmUpdate) ar.result;
 
-                if (mNullCipherNotifier != null) {
-                    int subId = getSubId();
-                    if (SubscriptionManager.isValidSubscriptionId(subId)) {
-                        mNullCipherNotifier.onSecurityAlgorithmUpdate(mContext, getPhoneId(), subId,
-                                update);
-                    }
+                if (mNullCipherNotifier == null) {
+                    logd("EVENT_SECURITY_ALGORITHM_UPDATE mNullCipherNotifier is null.");
+                    return;
                 }
-                if (mFeatureFlags.securityAlgorithmsUpdateIndications()
-                        && mNullCipherNotifier != null) {
-                    logd("EVENT_SECURITY_ALGORITHM_UPDATE for non-Safety Center listeners "
-                              + "phoneId = " + getPhoneId());
-                    mNotifier.notifySecurityAlgorithmsChanged(this, update);
+
+                if (queueCellularEventIfSubIdInvalid(msg, "EVENT_SECURITY_ALGORITHM_UPDATE")) {
+                    return;
                 }
+
+                mNullCipherNotifier.onSecurityAlgorithmUpdate(mContext, getPhoneId(), getSubId(),
+                        update);
+                logd("EVENT_SECURITY_ALGORITHM_UPDATE for non-Safety Center listeners "
+                          + "phoneId = " + getPhoneId());
+                mNotifier.notifySecurityAlgorithmsChanged(this, update);
                 break;
 
             case EVENT_SET_SECURITY_ALGORITHMS_UPDATED_ENABLED_DONE:
@@ -3251,9 +3297,57 @@ public class GsmCdmaPhone extends Phone {
                 mIsNullCipherNotificationSupported = doesResultIndicateModemSupport(ar);
                 break;
 
+            case EVENT_NETWORK_SECURITY_EVENTS:
+                logd("EVENT_NETWORK_SECURITY_EVENTS phoneId = " + getPhoneId());
+                ar = (AsyncResult) msg.obj;
+                if (ar == null) {
+                    Rlog.e(LOG_TAG, "EVENT_NETWORK_SECURITY_EVENTS: ar is null");
+                    break;
+                }
+
+                if (ar.result == null || ar.exception != null) {
+                    Rlog.e(
+                            LOG_TAG,
+                            "Failed to process network security events",
+                            ar.exception);
+                    break;
+                }
+                Set<NetworkSecurityEvent> events = (Set<NetworkSecurityEvent>) ar.result;
+
+                if (queueCellularEventIfSubIdInvalid(msg, "EVENT_NETWORK_SECURITY_EVENTS")) {
+                    return;
+                }
+
+                if (mFeatureFlags.networkSecurityEventIndications()) {
+                    logd("EVENT_NETWORK_SECURITY_EVENTS for non-Safety Center listeners "
+                            + "phoneId = " + getPhoneId());
+                    mNotifier.notifyNetworkSecurityEvents(this, events);
+                }
+                break;
+            case EVENT_SET_ALLOWED_NETWORK_TYPES_FOR_2G_DISABLED_DONE:
+                logd("EVENT_SET_ALLOWED_NETWORK_TYPES_FOR_2G_DISABLED_DONE");
+                ar = (AsyncResult) msg.obj;
+                if (ar.exception == null) {
+                    // Send a notification that 2G has been disabled by the carrier.
+                    sendNotification2gDisabledByCarrier();
+                } else {
+                    set2gProtectionDefaultUpdated(false);
+                    loge("Failed to execute setAllowedNetworkTypesForReason:" + ar.exception);
+                }
+                break;
+
             default:
                 super.handleMessage(msg);
         }
+    }
+
+    private boolean queueCellularEventIfSubIdInvalid(Message msg, String eventName) {
+        if (!SubscriptionManager.isValidSubscriptionId(getSubId())) {
+            logd("Adding event to message queue with event name: " + eventName);
+            mCellularEventMessages.add(msg.obtain(msg));
+            return true;
+        }
+        return false;
     }
 
     private boolean doesResultIndicateModemSupport(AsyncResult ar) {
@@ -4033,25 +4127,25 @@ public class GsmCdmaPhone extends Phone {
 
     private void updateTtyMode(int ttyMode) {
         logi(String.format("updateTtyMode ttyMode=%d", ttyMode));
-        setTTYMode(telecomModeToPhoneMode(ttyMode), null);
+        setTTYMode(ttyModeToPhoneMode(ttyMode), null);
     }
     private void updateUiTtyMode(int ttyMode) {
         logi(String.format("updateUiTtyMode ttyMode=%d", ttyMode));
-        setUiTTYMode(telecomModeToPhoneMode(ttyMode), null);
+        setUiTTYMode(ttyModeToPhoneMode(ttyMode), null);
     }
 
     /**
-     * Given a telecom TTY mode, convert to a Telephony mode equivalent.
-     * @param telecomMode Telecom TTY mode.
+     * Given a TTY mode, convert to a Telephony mode equivalent.
+     * @param ttyMode TTY mode.
      * @return Telephony phone TTY mode.
      */
-    private static int telecomModeToPhoneMode(int telecomMode) {
-        switch (telecomMode) {
+    private static int ttyModeToPhoneMode(int ttyMode) {
+        switch (ttyMode) {
             // AT command only has 0 and 1, so mapping VCO
             // and HCO to FULL
-            case TelecomManager.TTY_MODE_FULL:
-            case TelecomManager.TTY_MODE_VCO:
-            case TelecomManager.TTY_MODE_HCO:
+            case TelephonyManager.TTY_MODE_FULL:
+            case TelephonyManager.TTY_MODE_VCO:
+            case TelephonyManager.TTY_MODE_HCO:
                 return Phone.TTY_MODE_FULL;
             default:
                 return Phone.TTY_MODE_OFF;
@@ -4064,15 +4158,15 @@ public class GsmCdmaPhone extends Phone {
     private void loadTtyMode() {
         if (!hasCalling()) return;
 
-        int ttyMode = TelecomManager.TTY_MODE_OFF;
-        TelecomManager telecomManager = mContext.getSystemService(TelecomManager.class);
-        if (telecomManager != null) {
-            ttyMode = telecomManager.getCurrentTtyMode();
+        int ttyMode = TelephonyManager.TTY_MODE_OFF;
+        TelephonyManager telephonyManager = mContext.getSystemService(TelephonyManager.class);
+        if (telephonyManager != null) {
+            ttyMode = telephonyManager.getCurrentTtyMode();
         }
         updateTtyMode(ttyMode);
         //Get preferred TTY mode from settings as UI Tty mode is always user preferred Tty mode.
         ttyMode = Settings.Secure.getInt(mContext.getContentResolver(),
-                Settings.Secure.PREFERRED_TTY_MODE, TelecomManager.TTY_MODE_OFF);
+                Settings.Secure.PREFERRED_TTY_MODE, TelephonyManager.TTY_MODE_OFF);
         updateUiTtyMode(ttyMode);
     }
 
@@ -4166,7 +4260,8 @@ public class GsmCdmaPhone extends Phone {
     }
 
     private void updateVoNrSettings(@NonNull PersistableBundle config) {
-        if (getIccCard().getState() != IccCardConstants.State.LOADED) {
+        if (!CarrierConfigManager.isConfigForIdentifiedCarrier(config)
+                || getIccCard().getState() != IccCardConstants.State.LOADED) {
             return;
         }
 
@@ -4193,6 +4288,78 @@ public class GsmCdmaPhone extends Phone {
                 && (setting == 1 || (setting == -1 && mDefaultVonr));
         mCi.setVoNrEnabled(enbleVonr, obtainMessage(EVENT_SET_VONR_ENABLED_DONE), null);
         super.setAllowedImsServicesForAny(ImsRegistrationImplBase.REGISTRATION_TECH_NR, enbleVonr);
+    }
+
+    private void updateDefaultEnable2gSettings(@NonNull PersistableBundle config) {
+        if (!SubscriptionManager.isValidSubscriptionId(getSubId())) {
+            logd("updateDefaultEnable2gSettings subId is invalid subId:" + getSubId());
+            return;
+        }
+
+        if (RadioInterfaceCapabilityController.getInstance().getCapabilities().contains(
+                TelephonyManager.CAPABILITY_USES_ALLOWED_NETWORK_TYPES_BITMASK)) {
+            // Get the value for whether 2G is disabled by the carrier from carrier configuration.
+            boolean is2gProtectionDefaultEnabled = config.getBoolean(
+                    CarrierConfigManager.KEY_CARRIER_DEFAULT_2G_PROTECTION_ENABLED_BOOL);
+            if (is2gProtectionDefaultEnabled && !is2gProtectionDefaultUpdated()) {
+                // This code will be executed if the carrier has disabled 2G and it is the first
+                // time, as we are validating if 2g disabled by carrier previously from
+                // SharedPreferences 'is2gProtectionDefaultUpdated()'.
+                // While rebooting, multiple EVENT_CARRIER_CONFIG_CHANGED events are received.
+                // To handle this race condition, SharedPreferences is updated before updating the
+                // network allowed type.
+                set2gProtectionDefaultUpdated(true);
+                long currentlyAllowedNetworkTypes = getAllowedNetworkTypes(
+                        TelephonyManager.ALLOWED_NETWORK_TYPES_REASON_ENABLE_2G);
+
+                if ((currentlyAllowedNetworkTypes & TelephonyManager.NETWORK_CLASS_BITMASK_2G)
+                        != 0) {
+                    disable2gNetworkType(currentlyAllowedNetworkTypes);
+                }
+            }
+        }
+    }
+
+    private void disable2gNetworkType(long currentlyAllowedNetworkTypes) {
+        setAllowedNetworkTypes(TelephonyManager.ALLOWED_NETWORK_TYPES_REASON_ENABLE_2G,
+                currentlyAllowedNetworkTypes & ~TelephonyManager.NETWORK_CLASS_BITMASK_2G,
+                obtainMessage(EVENT_SET_ALLOWED_NETWORK_TYPES_FOR_2G_DISABLED_DONE));
+        logi("2G is disabled by carrier.");
+    }
+
+    private void sendNotification2gDisabledByCarrier() {
+        String componentString = getContext().getResources().getString(
+                com.android.internal.R.string.config_network_change_notification);
+        ComponentName componentName = ComponentName.unflattenFromString(componentString);
+        if (componentName != null) {
+            final Intent intent = new Intent();
+            intent.setAction(ACTION_2G_DISABLED_BY_CARRIER);
+            intent.setComponent(componentName);
+            intent.putExtra(EXTRA_SUBSCRIPTION_ID, getSubId());
+            if (mContext.getPackageManager().queryBroadcastReceivers(intent, 0).size() > 0) {
+                mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
+            }
+        }
+    }
+
+    private boolean is2gProtectionDefaultUpdated() {
+        int subId = getSubId();
+        if (SubscriptionManager.isValidSubscriptionId(subId)) {
+            SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(mContext);
+            return sp.getBoolean(PREF_KEY_HAS_APPLIED_2G_PROTECTION_DEFAULT + subId, false);
+        }
+        return false;
+    }
+
+    private void set2gProtectionDefaultUpdated(boolean is2gProtectionDefaultUpdated) {
+        int subId = getSubId();
+        if (SubscriptionManager.isValidSubscriptionId(subId)) {
+            SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(mContext);
+            SharedPreferences.Editor editor = sp.edit();
+            editor.putBoolean(PREF_KEY_HAS_APPLIED_2G_PROTECTION_DEFAULT + subId,
+                    is2gProtectionDefaultUpdated);
+            editor.apply();
+        }
     }
 
     /**

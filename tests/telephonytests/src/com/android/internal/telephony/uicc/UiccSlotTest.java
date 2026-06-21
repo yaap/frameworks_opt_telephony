@@ -23,6 +23,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -64,7 +65,7 @@ public class UiccSlotTest extends TelephonyTest {
 
         @Override
         public void onLooperPrepared() {
-            mUiccSlot = new UiccSlot(mContext, true /* isActive */);
+            mUiccSlot = new UiccSlot(mContext, true /* isActive */, mFeatureFlags);
             mTestHandler = new Handler(mTestHandlerThread.getLooper()) {
                 @Override
                 public void handleMessage(Message msg) {
@@ -614,5 +615,68 @@ public class UiccSlotTest extends TelephonyTest {
         Arrays.sort(expectedSimTypes);
         Arrays.sort(actualSimTypes);
         assertArrayEquals(expectedSimTypes, actualSimTypes);
+    }
+
+    @Test
+    @SmallTest
+    public void testUpdateIccCardStatusRemappedPhoneId() {
+        int initialPhoneId = 0;
+        int remappedPhoneId = 1;
+        int slotIndex = 0;
+
+        doReturn(true).when(mFeatureFlags).slotPortSwitchFailureFix();
+        // Set up the initial card status and update the slot with the initial phoneId
+        mIccCardStatus.mCardState = IccCardStatus.CardState.CARDSTATE_PRESENT;
+        mIccCardStatus.mSlotPortMapping.mPhysicalSlotIndex = slotIndex;
+        mIccCardStatus.mSlotPortMapping.mPortIndex = 0;
+        mUiccSlot.update(mSimulatedCommands, mIccCardStatus, initialPhoneId, slotIndex);
+
+        // Verify the initial state
+        assertEquals(IccCardStatus.CardState.CARDSTATE_PRESENT, mUiccSlot.getCardState());
+        assertNotNull(mUiccSlot.getUiccCard());
+
+        // Update the slot with the remapped phoneId without an ABSENT state
+        mUiccSlot.update(mSimulatedCommands, mIccCardStatus, remappedPhoneId, slotIndex);
+
+        // Verify that the state for the original phoneId is updated to ABSENT
+        verify(mUiccController).updateSimState(
+                initialPhoneId, IccCardConstants.State.ABSENT, null);
+    }
+
+    @Test
+    @SmallTest
+    public void testUpdateIccSlotStatusRemappedPhoneId() {
+        int initialPhoneId = 0;
+        int remappedPhoneId = 1;
+        int slotIndex = 0;
+        int portIndex = 0;
+
+        doReturn(true).when(mFeatureFlags).slotPortSwitchFailureFix();
+        // Active card with an initial phoneId using an IccCardStatus update.
+        mIccCardStatus.mCardState = IccCardStatus.CardState.CARDSTATE_PRESENT;
+        mIccCardStatus.mSlotPortMapping.mPhysicalSlotIndex = slotIndex;
+        mIccCardStatus.mSlotPortMapping.mPortIndex = portIndex;
+        mUiccSlot.update(mSimulatedCommands, mIccCardStatus, initialPhoneId, slotIndex);
+
+        // Verify the initial state is correct.
+        assertNotNull(mUiccSlot.getUiccCard());
+        assertEquals(IccCardStatus.CardState.CARDSTATE_PRESENT, mUiccSlot.getCardState());
+
+        // Create an IccSlotStatus that remaps the port to a new phoneId, while the card state
+        // remains PRESENT.
+        IccSlotStatus iss = new IccSlotStatus();
+        IccSimPortInfo simPortInfo = new IccSimPortInfo();
+        simPortInfo.mPortActive = true;
+        simPortInfo.mLogicalSlotIndex = remappedPhoneId; // The new, remapped phoneId
+        iss.mSimPortInfos = new IccSimPortInfo[]{simPortInfo};
+        iss.cardState = IccCardStatus.CardState.CARDSTATE_PRESENT;
+
+        // Update the slot with the IccSlotStatus.
+        mUiccSlot.update(new CommandsInterface[]{mSimulatedCommands, mSimulatedCommands}, iss,
+                slotIndex);
+
+        // Verify that the state for the original phoneId is updated to ABSENT
+        verify(mUiccController).updateSimState(
+                initialPhoneId, IccCardConstants.State.ABSENT, null);
     }
 }

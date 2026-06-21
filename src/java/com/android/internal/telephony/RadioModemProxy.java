@@ -193,6 +193,8 @@ public class RadioModemProxy extends RadioServiceProxy {
      * @param serial Serial number of request
      * @param resetType Reset type; 1: reload NV reset, 2: erase NV reset, 3: factory NV reset
      * @throws RemoteException
+     *
+     * @deprecated use IRadioConfig.rebootModem()
      */
     public void nvResetConfig(int serial, int resetType) throws RemoteException {
         if (resetType != 1) return;

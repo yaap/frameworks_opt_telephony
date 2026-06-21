@@ -83,6 +83,8 @@ public class CarrierActionAgent extends Handler {
     private Boolean mCarrierActionReportDefaultNetworkStatus = false;
     /** content observer for APM change */
     private final SettingsObserver mSettingsObserver;
+    /** tracks for EVENT_DATA_ROAMING_OFF registration status */
+    private boolean mIsDataRoamingOffRegistered = false;
 
     private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
         @Override
@@ -164,6 +166,7 @@ public class CarrierActionAgent extends Handler {
                 break;
             case EVENT_SIM_STATE_CHANGED:
                 String iccState = (String) msg.obj;
+                ServiceStateTracker serviceStateTracker = mPhone.getServiceStateTracker();
                 if (IccCardConstants.INTENT_VALUE_ICC_LOADED.equals(iccState)) {
                     log("EVENT_SIM_STATE_CHANGED status: " + iccState);
                     carrierActionReset();
@@ -178,17 +181,20 @@ public class CarrierActionAgent extends Handler {
                             EVENT_APM_SETTINGS_CHANGED);
                     mSettingsObserver.observe(
                             Telephony.Carriers.CONTENT_URI, EVENT_APN_SETTINGS_CHANGED);
-                    if (mPhone.getServiceStateTracker() != null) {
-                        mPhone.getServiceStateTracker().registerForDataRoamingOff(
+                    if (serviceStateTracker != null && !mIsDataRoamingOffRegistered) {
+                        serviceStateTracker.registerForDataRoamingOff(
                                 this, EVENT_DATA_ROAMING_OFF, null, false);
+                        mIsDataRoamingOffRegistered = true;
                     }
                 } else if (IccCardConstants.INTENT_VALUE_ICC_ABSENT.equals(iccState)
-                        || IccCardConstants.INTENT_VALUE_ICC_NOT_READY.equals(iccState)) {
+                        || IccCardConstants.INTENT_VALUE_ICC_NOT_READY.equals(iccState)
+                        || IccCardConstants.INTENT_VALUE_ICC_UNKNOWN.equals(iccState)) {
                     log("EVENT_SIM_STATE_CHANGED status: " + iccState);
                     carrierActionReset();
                     mSettingsObserver.unobserve();
-                    if (mPhone.getServiceStateTracker() != null) {
-                        mPhone.getServiceStateTracker().unregisterForDataRoamingOff(this);
+                    if (serviceStateTracker != null && mIsDataRoamingOffRegistered) {
+                        serviceStateTracker.unregisterForDataRoamingOff(this);
+                        mIsDataRoamingOffRegistered = false;
                     }
                 }
                 break;

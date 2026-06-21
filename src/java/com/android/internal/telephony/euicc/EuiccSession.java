@@ -21,7 +21,6 @@ import android.util.ArraySet;
 
 import com.android.internal.annotations.GuardedBy;
 import com.android.internal.annotations.VisibleForTesting;
-import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.uicc.euicc.apdu.ApduSender;
 import com.android.telephony.Rlog;
 
@@ -63,7 +62,7 @@ public class EuiccSession {
      * This is gated by both an aconfig flag and a device-specific flag.
      */
     private boolean optimizeApduSender() {
-        return Flags.optimizationApduSender() && mContext.getResources().getBoolean(
+        return mContext.getResources().getBoolean(
                 com.android.internal.R.bool.euicc_optimize_apdu_sender);
     }
 

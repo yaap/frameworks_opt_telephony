@@ -28,13 +28,16 @@ import android.telephony.CellInfo;
 import android.telephony.CellularIdentifierDisclosure;
 import android.telephony.LinkCapacityEstimate;
 import android.telephony.NetworkRegistrationInfo;
+import android.telephony.NetworkSecurityEvent;
 import android.telephony.PhoneCapability;
 import android.telephony.PhysicalChannelConfig;
 import android.telephony.PreciseDataConnectionState;
 import android.telephony.SecurityAlgorithmUpdate;
 import android.telephony.ServiceState;
 import android.telephony.TelephonyDisplayInfo;
+import android.telephony.TelephonyManager;
 import android.telephony.TelephonyManager.DataEnabledReason;
+import android.telephony.TelephonyManager.DomainSelectionEmergencyType;
 import android.telephony.TelephonyManager.EmergencyCallbackModeStopReason;
 import android.telephony.TelephonyManager.EmergencyCallbackModeType;
 import android.telephony.emergency.EmergencyNumber;
@@ -177,10 +180,25 @@ public interface PhoneNotifier {
     void notifyCarrierRoamingNtnSignalStrengthChanged(Phone sender,
             @NonNull NtnSignalStrength ntnSignalStrength);
 
+    /** Notify satellite purchase mode changed. */
+    void notifySatellitePurchaseModeChanged(Phone sender, boolean inProgress,
+            @TelephonyManager.SatellitePurchaseModeState int purchaseModeState);
+
     /** Notify of a cellular identifier disclosure change. */
     void notifyCellularIdentifierDisclosedChanged(Phone sender,
             CellularIdentifierDisclosure disclosure);
 
     /** Notify of a security algorithm update change. */
     void notifySecurityAlgorithmsChanged(Phone sender, SecurityAlgorithmUpdate update);
+
+    /** Notify emergency mode has been entered when AP domain selection is enabled. */
+    void notifyDomainSelectionEmergencyModeEntered(Phone sender,
+            @DomainSelectionEmergencyType int type);
+
+    /** Notify emergency mode has been exited when AP domain selection is enabled. */
+    void notifyDomainSelectionEmergencyModeExited(Phone sender,
+            @DomainSelectionEmergencyType int type);
+
+    /** Notify of a network security event. */
+    void notifyNetworkSecurityEvents(Phone sender, Set<NetworkSecurityEvent> events);
 }

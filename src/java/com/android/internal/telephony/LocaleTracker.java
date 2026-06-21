@@ -56,6 +56,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * The locale tracker keeps tracking the current locale of the phone.
@@ -305,9 +306,7 @@ public class LocaleTracker extends Handler {
         mPhone.registerForServiceStateChanged(this, EVENT_SERVICE_STATE_CHANGED, null);
         mPhone.registerForCellInfo(this, EVENT_UNSOL_CELL_INFO, null);
 
-        if (mFeatureFlags.allowMultiCountryMcc()) {
-            nitzStateMachine.registerCountryDetection(mCountryDetectionListener);
-        }
+        nitzStateMachine.registerCountryDetection(mCountryDetectionListener);
     }
 
     /**
@@ -535,182 +534,107 @@ public class LocaleTracker extends Handler {
      */
     private synchronized void updateLocale() {
         // If MCC is available from network service state, use it first.
-        String countryIso = "";
+        MccMnc mccMnc = null;
         MobileCountries mobileCountries = null;
         String countryIsoDebugInfo = "empty as default";
 
         if (!TextUtils.isEmpty(mOperatorNumeric)) {
-            MccMnc mccMnc = MccMnc.fromOperatorNumeric(mOperatorNumeric);
+            mccMnc = MccMnc.fromOperatorNumeric(mOperatorNumeric);
             if (mccMnc != null) {
-                if (!mFeatureFlags.allowMultiCountryMcc()) {
-                    countryIso = MccTable.geoCountryCodeForMccMnc(mccMnc);
-                    countryIsoDebugInfo =
-                            "OperatorNumeric("
-                                    + mOperatorNumeric
-                                    + "): MccTable.geoCountryCodeForMccMnc(\""
-                                    + mccMnc
-                                    + "\")";
-                } else {
-                    mobileCountries = getMobileCountriesFromNetworkId(mccMnc);
-                    countryIsoDebugInfo =
-                            "OperatorNumeric("
-                                    + mOperatorNumeric
-                                    + "): getMobileCountriesFromNetworkId(\""
-                                    + mccMnc
-                                    + "\")";
-                }
-
+                mobileCountries = getMobileCountriesFromNetworkId(mccMnc);
+                countryIsoDebugInfo =
+                        "OperatorNumeric("
+                                + mOperatorNumeric
+                                + "): getMobileCountriesFromNetworkId(\""
+                                + mccMnc
+                                + "\")";
             } else {
                 loge("updateLocale: Can't get country from operator numeric. mOperatorNumeric = "
                         + mOperatorNumeric);
             }
         }
 
-        if (!mFeatureFlags.allowMultiCountryMcc()) {
-            // If for any reason we can't get country from operator numeric, try to get it from cell
-            // info.
-            if (TextUtils.isEmpty(countryIso)) {
-                // Find the most prevalent MCC from surrounding cell towers.
-                String mcc = getMccFromCellInfo();
-                if (mcc != null) {
-                    countryIso = MccTable.countryCodeForMcc(mcc);
-                    countryIsoDebugInfo = "CellInfo: MccTable.countryCodeForMcc(\"" + mcc + "\")";
-
-                    // Some MCC+MNC combinations are known to be used in countries other than those
-                    // that the MCC alone would suggest. Do a second pass of nearby cells that match
-                    // the most frequently observed MCC to see if this could be one of those cases.
-                    MccMnc mccMnc = getMccMncFromCellInfo(mcc);
-                    if (mccMnc != null) {
-                        countryIso = MccTable.geoCountryCodeForMccMnc(mccMnc);
-                        countryIsoDebugInfo =
-                                "CellInfo: MccTable.geoCountryCodeForMccMnc(" + mccMnc + ")";
-                    }
-                }
-            }
-        } else {
-            if (mobileCountries == null) {
-                // Find the most prevalent MCC from surrounding cell towers.
-                String mcc = getMccFromCellInfo();
-                if (mcc != null) {
-                    // Some MCC+MNC combinations are known to be used in countries other than those
-                    // that the MCC alone would suggest. Do a second pass of nearby cells that match
-                    // the most frequently observed MCC to see if this could be one of those cases.
-                    MccTable.MccMnc mccMnc = getMccMncFromCellInfo(mcc);
-                    if (mccMnc != null) {
-                        mobileCountries = getMobileCountriesFromNetworkId(mccMnc);
-                        countryIsoDebugInfo =
-                                "CellInfo: getMobileCountriesFromNetworkId(" + mccMnc + ")";
-                    } else {
-                        mobileCountries = getMobileCountriesFromMcc(mcc);
-                        countryIsoDebugInfo =
-                                "CellInfo: getMobileCountriesFromMcc(\"" + mcc + "\")";
-                    }
+        if (mobileCountries == null) {
+            // Find the most prevalent MCC from surrounding cell towers.
+            String mcc = getMccFromCellInfo();
+            if (mcc != null) {
+                // Some MCC+MNC combinations are known to be used in countries other than those
+                // that the MCC alone would suggest. Do a second pass of nearby cells that match
+                // the most frequently observed MCC to see if this could be one of those cases.
+                mccMnc = getMccMncFromCellInfo(mcc);
+                if (mccMnc != null) {
+                    mobileCountries = getMobileCountriesFromNetworkId(mccMnc);
+                    countryIsoDebugInfo =
+                            "CellInfo: getMobileCountriesFromNetworkId(" + mccMnc + ")";
+                } else {
+                    mccMnc = new MccMnc(mcc, null);
+                    mobileCountries = getMobileCountriesFromMcc(mcc);
+                    countryIsoDebugInfo = "CellInfo: getMobileCountriesFromMcc(\"" + mcc + "\")";
                 }
             }
         }
 
-        if (mCountryOverride != null) {
-            countryIso = mCountryOverride;
+        if (mccMnc != null && mCountryOverride != null) {
+            mobileCountries = MobileCountries.createForTest(
+                    mccMnc.mcc,
+                    mccMnc.mnc,
+                    Set.of(mCountryOverride),
+                    mCountryOverride);
             countryIsoDebugInfo = "mCountryOverride = \"" + mCountryOverride + "\"";
         }
 
         if (!mPhone.isRadioOn()) {
-            if (!mFeatureFlags.allowMultiCountryMcc()) {
-                countryIso = "";
-            } else {
-                mobileCountries = null;
-            }
+            mobileCountries = null;
             countryIsoDebugInfo = "radio off";
 
             // clear cell infos, we don't know where the next network to camp on.
             mCellInfoList = null;
         }
 
-        if (!mFeatureFlags.allowMultiCountryMcc()) {
-            log("updateLocale: countryIso = " + countryIso
-                    + ", countryIsoDebugInfo = " + countryIsoDebugInfo);
-            if (!Objects.equals(countryIso, mCurrentCountryIso)) {
-                String msg = "updateLocale: Change the current country to \"" + countryIso + "\""
-                        + ", countryIsoDebugInfo = " + countryIsoDebugInfo
-                        + ", mCellInfoList = " + mCellInfoList;
-                log(msg);
-                mLocalLog.log(msg);
-                mCurrentCountryIso = countryIso;
+        log("updateLocale: mobileCountries = " + mobileCountries
+                + ", countryIsoDebugInfo = " + countryIsoDebugInfo);
+        if (mCurrentCountryIso == null
+                || !Objects.equals(mobileCountries, mLastKnownMobileCountries)) {
+            String msg =
+                    "updateLocale: Updating the mobile country list to \""
+                            + mobileCountries
+                            + "\""
+                            + ", countryIsoDebugInfo = "
+                            + countryIsoDebugInfo
+                            + ", mCellInfoList = "
+                            + mCellInfoList;
+            log(msg);
+            mLocalLog.log(msg);
+            mLastKnownMobileCountries = mobileCountries;
 
-                // Update the last known country ISO
-                updateLastKnownCountryIso(mCurrentCountryIso);
-                updateTelephonyProperties();
-                updateTelephonyCountryDetector(countryIso);
-                sendBroadcastCountryIsoChanged(countryIso);
-            }
-
-            // Pass the geographical country information to the telephony time zone detection code.
-            String timeZoneCountryIso = countryIso;
-            String timeZoneCountryIsoDebugInfo = countryIsoDebugInfo;
-            boolean isTestMcc = false;
-            if (!TextUtils.isEmpty(mOperatorNumeric)) {
-                // For a test cell (MCC 001), the NitzStateMachine requires handleCountryDetected
-                // ("") in order to pass compliance tests. http://b/142840879
-                if (mOperatorNumeric.startsWith("001")) {
-                    isTestMcc = true;
-                    timeZoneCountryIso = "";
-                    timeZoneCountryIsoDebugInfo = "Test cell: " + mOperatorNumeric;
-                }
-            }
-            log("updateLocale: timeZoneCountryIso = " + timeZoneCountryIso
-                    + ", timeZoneCountryIsoDebugInfo = " + timeZoneCountryIsoDebugInfo);
-
-            if (TextUtils.isEmpty(timeZoneCountryIso) && !isTestMcc) {
-                mNitzStateMachine.handleCountryUnavailable();
+            if (mobileCountries != null && mobileCountries.getCountryIsoCodes().size() == 1) {
+                mCountryDetectionListener.onCountryDetected(
+                        mobileCountries.getDefaultCountryIsoCode());
             } else {
-                mNitzStateMachine.handleCountryDetected(timeZoneCountryIso);
+                mCountryDetectionListener.onCountryDetected("");
             }
+        }
+
+        // Pass the geographical country information to the telephony time zone detection code.
+        MobileCountries timeZoneMobileCountries = mobileCountries;
+        String timeZoneCountryIsoDebugInfo = countryIsoDebugInfo;
+        boolean isTestMcc = false;
+        if (!TextUtils.isEmpty(mOperatorNumeric)) {
+            // For a test cell (MCC 001), the NitzStateMachine requires a mock {@link
+            // MobileCountries} in order to pass compliance tests. http://b/142840879
+            if (mOperatorNumeric.startsWith("001")) {
+                isTestMcc = true;
+                timeZoneMobileCountries = MobileCountries.createTestCell("001");
+                timeZoneCountryIsoDebugInfo = "Test cell: " + mOperatorNumeric;
+            }
+        }
+
+        log("updateLocale: timeZoneCountryIso = " + timeZoneMobileCountries
+                + ", timeZoneCountryIsoDebugInfo = " + timeZoneCountryIsoDebugInfo);
+        if (mobileCountries == null && !isTestMcc) {
+            mNitzStateMachine.handleCountryUnavailable();
         } else {
-            log("updateLocale: mobileCountries = " + mobileCountries
-                    + ", countryIsoDebugInfo = " + countryIsoDebugInfo);
-            if (mCurrentCountryIso == null
-                    || !Objects.equals(mobileCountries, mLastKnownMobileCountries)) {
-                String msg =
-                        "updateLocale: Updating the mobile country list to \""
-                                + mobileCountries
-                                + "\""
-                                + ", countryIsoDebugInfo = "
-                                + countryIsoDebugInfo
-                                + ", mCellInfoList = "
-                                + mCellInfoList;
-                log(msg);
-                mLocalLog.log(msg);
-                mLastKnownMobileCountries = mobileCountries;
-
-                if (mobileCountries != null && mobileCountries.getCountryIsoCodes().size() == 1) {
-                    mCountryDetectionListener.onCountryDetected(
-                            mobileCountries.getDefaultCountryIsoCode());
-                } else {
-                    mCountryDetectionListener.onCountryDetected("");
-                }
-            }
-
-            // Pass the geographical country information to the telephony time zone detection code.
-            MobileCountries timeZoneMobileCountries = mobileCountries;
-            String timeZoneCountryIsoDebugInfo = countryIsoDebugInfo;
-            boolean isTestMcc = false;
-            if (!TextUtils.isEmpty(mOperatorNumeric)) {
-                // For a test cell (MCC 001), the NitzStateMachine requires a mock {@link
-                // MobileCountries} in order to pass compliance tests. http://b/142840879
-                if (mOperatorNumeric.startsWith("001")) {
-                    isTestMcc = true;
-                    timeZoneMobileCountries = MobileCountries.createTestCell("001");
-                    timeZoneCountryIsoDebugInfo = "Test cell: " + mOperatorNumeric;
-                }
-            }
-
-            log("updateLocale: timeZoneCountryIso = " + timeZoneMobileCountries
-                    + ", timeZoneCountryIsoDebugInfo = " + timeZoneCountryIsoDebugInfo);
-            if (mobileCountries == null && !isTestMcc) {
-                mNitzStateMachine.handleCountryUnavailable();
-            } else {
-                mNitzStateMachine.handleMobileCountriesDetected(timeZoneMobileCountries);
-            }
+            mNitzStateMachine.handleMobileCountriesDetected(timeZoneMobileCountries);
         }
     }
 
@@ -793,9 +717,7 @@ public class LocaleTracker extends Handler {
         ipw.println("mCellInfoList = " + mCellInfoList);
         ipw.println("mCurrentCountryIso = " + mCurrentCountryIso);
 
-        if (mFeatureFlags.allowMultiCountryMcc()) {
-            ipw.println("mLastKnownMobileCountries = " + mLastKnownMobileCountries);
-        }
+        ipw.println("mLastKnownMobileCountries = " + mLastKnownMobileCountries);
 
         ipw.println("mFailCellInfoCount = " + mFailCellInfoCount);
         ipw.println("Local logs:");

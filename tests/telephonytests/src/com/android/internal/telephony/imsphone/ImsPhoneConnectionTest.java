@@ -104,6 +104,7 @@ public class ImsPhoneConnectionTest extends TelephonyTest {
         replaceInstance(ImsPhoneCallTracker.class, "mBackgroundCall", mImsCT, mBackGroundCall);
         replaceInstance(ImsPhoneCallTracker.class, "mRingingCall", mImsCT, mRingGroundCall);
         replaceInstance(ImsPhoneCallTracker.class, "mPhone", mImsCT, mImsPhone);
+        doReturn(mImsPhone).when(mImsCT).getPhone();
 
         mImsCallProfile.mCallExtras = mBundle;
         doReturn(ImsPhoneCall.State.IDLE).when(mForeGroundCall).getState();
@@ -581,7 +582,7 @@ public class ImsPhoneConnectionTest extends TelephonyTest {
     }
 
     private void setUserEnabledBusinessComposer(boolean isEnabled) {
-        when(mPhone.getContext()).thenReturn(mContext);
+        when(mImsPhone.getContext()).thenReturn(mContext);
         when(mContext.getSystemService(TelephonyManager.class)).thenReturn(mTelephonyManager);
         if (isEnabled) {
             when(mTelephonyManager.getCallComposerStatus()).thenReturn(
@@ -593,12 +594,12 @@ public class ImsPhoneConnectionTest extends TelephonyTest {
     }
 
     private void setCarrierConfigBusinessComposer(boolean isEnabled) {
-        when(mPhone.getContext()).thenReturn(mContext);
+        when(mImsPhone.getContext()).thenReturn(mContext);
         when(mContext.getSystemService(CarrierConfigManager.class)).thenReturn(
                 mCarrierConfigManager);
         PersistableBundle b = new PersistableBundle();
         b.putBoolean(CarrierConfigManager.KEY_SUPPORTS_BUSINESS_CALL_COMPOSER_BOOL, isEnabled);
-        when(mCarrierConfigManager.getConfigForSubId(mPhone.getSubId())).thenReturn(b);
+        when(mCarrierConfigManager.getConfigForSubId(mImsPhone.getSubId())).thenReturn(b);
     }
 
     private Bundle getBusinessExtras() {

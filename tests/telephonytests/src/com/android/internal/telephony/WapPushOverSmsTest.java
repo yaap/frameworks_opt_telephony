@@ -66,7 +66,6 @@ public class WapPushOverSmsTest extends TelephonyTest {
         // in the cache, a real instance is used.
         mServiceManagerMockedServices.put("isms", mISmsStub);
         mFeatureFlags = Mockito.mock(FeatureFlags.class);
-        doReturn(true).when(mFeatureFlags).smsMmsDeliverBroadcastsRedirectToMainUser();
         doReturn(mISmsStub).when(mISmsStub).queryLocalInterface(anyString());
 
         UserManager userManager = (UserManager) mContext.getSystemService(Context.USER_SERVICE);

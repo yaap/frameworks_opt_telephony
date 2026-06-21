@@ -22,8 +22,6 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assume.assumeTrue;
 
 import android.content.Context;
-import android.platform.test.annotations.UsesFlags;
-import android.platform.test.flag.junit.FlagsParameterization;
 import android.platform.test.flag.junit.SetFlagsRule;
 import android.timezone.MobileCountries;
 import android.timezone.TelephonyNetworkFinder;
@@ -35,35 +33,15 @@ import com.android.internal.telephony.MccTable.MccMnc;
 import com.android.internal.telephony.flags.Flags;
 import com.android.internal.telephony.util.LocaleUtils;
 
-import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
-import java.util.List;
 import java.util.Locale;
 
-@RunWith(Parameterized.class)
-@UsesFlags({
-        com.android.internal.telephony.flags.Flags.class,
-        com.android.icu.Flags.class
-})
 public class MccTableTest {
-    @ClassRule
-    public static final SetFlagsRule.ClassRule mSetFlagsClassRule = new SetFlagsRule.ClassRule();
-
-    @Parameterized.Parameters(name = "{0}")
-    public static List<FlagsParameterization> getParams() {
-        return FlagsParameterization.allCombinationsOf(Flags.FLAG_USE_I18N_FOR_MCC_MAPPING);
-    }
 
     @Rule
-    public final SetFlagsRule mSetFlagsRule;
-
-    public MccTableTest(FlagsParameterization flags) {
-        mSetFlagsRule = mSetFlagsClassRule.createSetFlagsRule(flags);
-    }
+    public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
 
     @SmallTest
     @Test
@@ -94,40 +72,49 @@ public class MccTableTest {
     @SmallTest
     @Test
     public void testLang() throws Exception {
-        assertEquals("en", LocaleUtils.defaultLanguageForMcc(311));
-        assertEquals("de", LocaleUtils.defaultLanguageForMcc(232));
-        assertEquals("cs", LocaleUtils.defaultLanguageForMcc(230));
-        assertEquals("nl", LocaleUtils.defaultLanguageForMcc(204));
-        assertEquals("is", LocaleUtils.defaultLanguageForMcc(274));
+        mSetFlagsRule.enableFlags(Flags.FLAG_MCC_MNC_LOCALE_RESOLUTION);
+        assertEquals("en", LocaleUtils.defaultLanguageForMccMnc(311, null));
+        assertEquals("de", LocaleUtils.defaultLanguageForMccMnc(232, null));
+        assertEquals("cs", LocaleUtils.defaultLanguageForMccMnc(230, null));
+        assertEquals("nl", LocaleUtils.defaultLanguageForMccMnc(204, null));
+        assertEquals("is", LocaleUtils.defaultLanguageForMccMnc(274, null));
+        assertEquals("sv", LocaleUtils.defaultLanguageForMccMnc(244, "14")); // ALCOM (Åland)
+        assertEquals("en", LocaleUtils.defaultLanguageForMccMnc(234, "03")); // Jersey
         // mcc not defined, hence default
-        assertNull(LocaleUtils.defaultLanguageForMcc(0));
+        assertNull(LocaleUtils.defaultLanguageForMccMnc(0, null));
         // mcc not defined, hence default
-        assertNull(LocaleUtils.defaultLanguageForMcc(2000));
+        assertNull(LocaleUtils.defaultLanguageForMccMnc(2000, null));
     }
 
     @SmallTest
     @Test
     public void testLang_India() throws Exception {
-        assertEquals("en", LocaleUtils.defaultLanguageForMcc(404));
-        assertEquals("en", LocaleUtils.defaultLanguageForMcc(405));
-        assertEquals("en", LocaleUtils.defaultLanguageForMcc(406));
+        assertEquals("en", LocaleUtils.defaultLanguageForMccMnc(404, null));
+        assertEquals("en", LocaleUtils.defaultLanguageForMccMnc(405, null));
+        assertEquals("en", LocaleUtils.defaultLanguageForMccMnc(406, null));
     }
 
     @SmallTest
     @Test
     public void testLocale() throws Exception {
+        mSetFlagsRule.enableFlags(Flags.FLAG_MCC_MNC_LOCALE_RESOLUTION);
         assertEquals(Locale.forLanguageTag("en-CA"),
-                LocaleUtils.getLocaleFromMcc(getContext(), 302, null));
+                LocaleUtils.getLocaleFromMccMnc(getContext(), 302, null, null));
         assertEquals(Locale.forLanguageTag("en-GB"),
-                LocaleUtils.getLocaleFromMcc(getContext(), 234, null));
+                LocaleUtils.getLocaleFromMccMnc(getContext(), 234, null, null));
         assertEquals(Locale.forLanguageTag("en-US"),
-                LocaleUtils.getLocaleFromMcc(getContext(), 0, "en"));
+                LocaleUtils.getLocaleFromMccMnc(getContext(), 0, null, "en"));
         assertEquals(Locale.forLanguageTag("zh-HK"),
-                LocaleUtils.getLocaleFromMcc(getContext(), 454, null));
+                LocaleUtils.getLocaleFromMccMnc(getContext(), 454, null, null));
         assertEquals(Locale.forLanguageTag("en-HK"),
-                LocaleUtils.getLocaleFromMcc(getContext(), 454, "en"));
+                LocaleUtils.getLocaleFromMccMnc(getContext(), 454, null, "en"));
         assertEquals(Locale.forLanguageTag("zh-TW"),
-                LocaleUtils.getLocaleFromMcc(getContext(), 466, null));
+                LocaleUtils.getLocaleFromMccMnc(getContext(), 466, null, null));
+        // ALCOM (Åland): MCC 244, MNC 14 -> Country "ax" -> Swedish
+        assertEquals(Locale.forLanguageTag("sv-AX"),
+                LocaleUtils.getLocaleFromMccMnc(getContext(), 244, "14", null));
+        assertEquals(Locale.forLanguageTag("en-JE"),
+                LocaleUtils.getLocaleFromMccMnc(getContext(), 234, "03", null)); // Jersey
     }
 
     private Context getContext() {
@@ -147,21 +134,6 @@ public class MccTableTest {
         assertEquals(2, MccTable.smallestDigitsMccForMnc(0));
         // mcc not defined, hence default
         assertEquals(2, MccTable.smallestDigitsMccForMnc(2000));
-    }
-
-    @Test
-    public void telephonyFinder_shouldBeIdenticalToTelephonyMccTable() {
-        assumeTrue(Flags.useI18nForMccMapping());
-
-        TelephonyNetworkFinder telephonyNetworkFinder = TelephonyNetworkFinder.getInstance();
-
-        MccTable.getAllMccEntries().forEach(mccEntry -> {
-                MobileCountries telephonyCountry =
-                        telephonyNetworkFinder.findCountriesByMcc(
-                                String.valueOf(mccEntry.mMcc));
-
-                assertEquals(mccEntry.mIso, telephonyCountry.getDefaultCountryIsoCode());
-        });
     }
 
     @SmallTest

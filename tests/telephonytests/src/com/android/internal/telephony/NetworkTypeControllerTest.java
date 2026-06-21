@@ -2369,4 +2369,159 @@ public class NetworkTypeControllerTest extends TelephonyTest {
         assertEquals(TelephonyManager.NETWORK_TYPE_LTE,
                 mNetworkTypeController.getDataNetworkType());
     }
+
+    @Test
+    public void testModemOverrideReleaseDuringEndcHandover() throws Exception {
+        // Enable the modem override feature via CarrierConfig
+        mBundle.putBoolean(CarrierConfigManager.KEY_USE_MODEM_DISPLAY_NETWORK_TYPE_BOOL, true);
+        sendCarrierConfigChanged();
+
+        // --- Step 1: Start in 5G SA (NR Connected + mmWave) ---
+        // Mock Physical RAT as NR (SA) and set frequency to mmWave so we start with 5G UW.
+        doReturn(NetworkRegistrationInfo.NR_STATE_CONNECTED).when(mServiceState).getNrState();
+        doReturn(ServiceState.FREQUENCY_RANGE_MMWAVE).when(mServiceState).getNrFrequencyRange();
+        mNetworkRegistrationInfo = new NetworkRegistrationInfo.Builder()
+            .setAccessNetworkTechnology(TelephonyManager.NETWORK_TYPE_NR)
+            .setRegistrationState(NetworkRegistrationInfo.REGISTRATION_STATE_HOME)
+            .build();
+        doReturn(mNetworkRegistrationInfo).when(mServiceState).getNetworkRegistrationInfo(
+            anyInt(), anyInt());
+
+        mNetworkTypeController.sendMessage(3 /* EVENT_SERVICE_STATE_CHANGED */);
+        processAllMessages();
+
+        // Verify initial state is 5G UW (NR_ADVANCED).
+        assertEquals("Initial state should be 5G UW",
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED,
+            mNetworkTypeController.getOverrideNetworkType());
+
+        // --- Step 2: Modem forces "5G UW" (Override Active) ---
+        // Send a modem override event for NR_ADVANCED. This masks subsequent changes.
+        mNetworkTypeController.sendMessage(14 /* EVENT_MODEM_DISPLAY_NETWORK_TYPE_OVERRIDE */,
+            new AsyncResult(null, DisplayNetworkType.NR_ADVANCED, null));
+        processAllMessages();
+
+        // Verify override is active and forces getDataNetworkType() to report NR.
+        assertEquals("Override should be NR_ADVANCED",
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED,
+            mNetworkTypeController.getOverrideNetworkType());
+        assertEquals(TelephonyManager.NETWORK_TYPE_NR, mNetworkTypeController.getDataNetworkType());
+
+        // --- Step 3: Handover to LTE (EN-DC) happens while override is active ---
+        // Update ServiceState to reflect Physical RAT = LTE and NR Connected (EN-DC).
+        // mmWave is lost (Frequency Range Low).
+        mNetworkRegistrationInfo = new NetworkRegistrationInfo.Builder()
+            .setAccessNetworkTechnology(TelephonyManager.NETWORK_TYPE_LTE)
+            .setRegistrationState(NetworkRegistrationInfo.REGISTRATION_STATE_HOME)
+            .build();
+        doReturn(mNetworkRegistrationInfo).when(mServiceState).getNetworkRegistrationInfo(
+            anyInt(), anyInt());
+        doReturn(NetworkRegistrationInfo.NR_STATE_CONNECTED).when(mServiceState).getNrState();
+        doReturn(ServiceState.FREQUENCY_RANGE_LOW).when(mServiceState).getNrFrequencyRange();
+
+        // Trigger update.
+        // The controller should now calculate the internal state based on the physical RAT (LTE),
+        // ignoring the override "NR" to avoid the "SA without mmWave" trap.
+        mNetworkTypeController.sendMessage(3 /* EVENT_SERVICE_STATE_CHANGED */);
+        processAllMessages();
+
+        // Verify override is STILL active (masking the internal calculation).
+        assertEquals("Display should still be 5G UW due to override",
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED,
+            mNetworkTypeController.getOverrideNetworkType());
+
+        // --- Step 4: Modem releases the override ---
+        // Modem reports UNKNOWN to release the override.
+        mNetworkTypeController.sendMessage(14 /* EVENT_MODEM_DISPLAY_NETWORK_TYPE_OVERRIDE */,
+            new AsyncResult(null, DisplayNetworkType.UNKNOWN, null));
+        processAllMessages();
+
+        // --- Step 5: Verify the Fallback State ---
+        // The controller should immediately reveal the correctly calculated internal state (NR_NSA)
+        // Without the fix, this would have dropped to NONE (LTE icon).
+        assertEquals("Should fallback to NR_NSA (5G) after override release",
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA,
+            mNetworkTypeController.getOverrideNetworkType());
+
+        // Verify public API now reports the true physical state (LTE).
+        assertEquals(TelephonyManager.NETWORK_TYPE_LTE,
+            mNetworkTypeController.getDataNetworkType());
+    }
+
+    @Test
+    public void testNrTimerResetWhenTransitToEndcToSa() throws Exception {
+        // Enable the feature
+        mBundle.putBoolean(CarrierConfigManager.KEY_NR_TIMERS_RESET_ON_ENDC_TO_SA_TRANSIT_BOOL,
+            true);
+        // Configure grace periods so timers are active during the transition
+        mBundle.putString(CarrierConfigManager.KEY_5G_ICON_DISPLAY_GRACE_PERIOD_STRING,
+            "connected_mmwave,any,10;connected,any,10");
+        sendCarrierConfigChanged();
+
+        // 1. Establish NR Advanced (NSA mmWave)
+        // This sets mWasPreviousStateEndc = true in the next transition
+        doReturn(TelephonyManager.NETWORK_TYPE_LTE).when(mServiceState).getDataNetworkType();
+        doReturn(NetworkRegistrationInfo.NR_STATE_CONNECTED).when(mServiceState).getNrState();
+        doReturn(ServiceState.FREQUENCY_RANGE_MMWAVE).when(mServiceState).getNrFrequencyRange();
+
+        mNetworkTypeController.sendMessage(3 /* EVENT_SERVICE_STATE_CHANGED */);
+        processAllMessages();
+        assertEquals(TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED,
+            mNetworkTypeController.getOverrideNetworkType());
+
+        // 2. Trigger a grace period timer by dropping to plain NR NSA (Sub-6)
+        // IMPORTANT: We must stay in an ENDC state (LTE + NR state != NONE)
+        // so that mWasPreviousStateEndc remains true for the SA transition.
+        doReturn(ServiceState.FREQUENCY_RANGE_HIGH).when(mServiceState).getNrFrequencyRange();
+
+        mNetworkTypeController.sendMessage(3 /* EVENT_SERVICE_STATE_CHANGED */);
+        processAllMessages();
+
+        // Verify that the timer is active
+        assertTrue(mNetworkTypeController.areAnyTimersActive());
+
+        // 3. Transit to NR SA (RAT becomes NR)
+        doReturn(TelephonyManager.NETWORK_TYPE_NR).when(mServiceState).getDataNetworkType();
+        // NR SA logic in NetworkRegistrationInfo
+        mNetworkRegistrationInfo = new NetworkRegistrationInfo.Builder()
+            .setAccessNetworkTechnology(TelephonyManager.NETWORK_TYPE_NR)
+            .setRegistrationState(NetworkRegistrationInfo.REGISTRATION_STATE_HOME)
+            .build();
+        doReturn(mNetworkRegistrationInfo).when(mServiceState).getNetworkRegistrationInfo(
+            anyInt(), anyInt());
+        // In SA, the NSA-specific NR state is usually NONE
+        doReturn(NetworkRegistrationInfo.NR_STATE_NONE).when(mServiceState).getNrState();
+
+        mNetworkTypeController.sendMessage(3 /* EVENT_SERVICE_STATE_CHANGED */);
+        processAllMessages();
+
+        // 4. Verify timers are reset because previousIsEndc was true
+        assertFalse(mNetworkTypeController.areAnyTimersActive());
+        assertEquals(TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NONE,
+            mNetworkTypeController.getOverrideNetworkType());
+    }
+
+    @Test
+    public void testUpdateBandwidthConstrainedStatus() throws Exception {
+        // Verify initial state
+        assertFalse(mNetworkTypeController.getSatelliteConstrainedData());
+
+        // Invoke updateBandwidthConstrainedStatus(true) via reflection
+        // to bypass the StateMachine handler which might be outdated in the test environment.
+        Method method = NetworkTypeController.class.getDeclaredMethod(
+                "updateBandwidthConstrainedStatus", boolean.class);
+        method.setAccessible(true);
+        method.invoke(mNetworkTypeController, true);
+        processAllMessages();
+
+        // Verify state changed to true
+        assertTrue(mNetworkTypeController.getSatelliteConstrainedData());
+
+        // Invoke updateBandwidthConstrainedStatus(false)
+        method.invoke(mNetworkTypeController, false);
+        processAllMessages();
+
+        // Verify state changed to false
+        assertFalse(mNetworkTypeController.getSatelliteConstrainedData());
+    }
 }

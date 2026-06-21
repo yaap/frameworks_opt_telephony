@@ -19,7 +19,7 @@ package com.android.internal.telephony.d2d;
 import android.annotation.NonNull;
 import android.net.Uri;
 import android.os.Handler;
-import android.telecom.Log;
+import com.android.telephony.Rlog;
 import android.telephony.ims.ImsCallProfile;
 import android.telephony.ims.RtpHeaderExtension;
 import android.telephony.ims.RtpHeaderExtensionType;
@@ -57,6 +57,8 @@ import java.util.stream.Collectors;
  * transport to have failed.
  */
 public class RtpTransport implements TransportProtocol, RtpAdapter.Callback {
+    private static final String TAG = "RtpTransport";
+
     /**
      * {@link Uri} identifier for an RTP header extension used to communicate device state during
      * calls.
@@ -342,7 +344,7 @@ public class RtpTransport implements TransportProtocol, RtpAdapter.Callback {
                 mRtpAdapter.getAcceptedRtpHeaderExtensions();
         mSupportedRtpHeaderExtensionTypes.addAll(acceptedExtensions);
 
-        Log.i(this, "startNegotiation: supportedExtensions=%s", mSupportedRtpHeaderExtensionTypes
+        Rlog.i(TAG, "startNegotiation: supportedExtensions=" + mSupportedRtpHeaderExtensionTypes
                 .stream()
                 .map(e -> e.toString())
                 .collect(Collectors.joining(",")));
@@ -357,18 +359,18 @@ public class RtpTransport implements TransportProtocol, RtpAdapter.Callback {
                 // Headers were negotiated during SDP, so we can assume negotiation is complete and
                 // signal to the communicator that we can use this transport.
                 mProtocolStatus = PROTOCOL_STATUS_NEGOTIATION_COMPLETE;
-                Log.i(this, "startNegotiation: header extensions available, negotiation success");
+                Rlog.i(TAG, "startNegotiation: header extensions available, negotiation success");
                 notifyProtocolReady();
             } else {
                 // Headers failed to be negotiated during SDP.   Assume protocol is not available.
                 // TODO: Implement fallback logic where we still try an SDP probe/response.
                 mProtocolStatus = PROTOCOL_STATUS_NEGOTIATION_FAILED;
-                Log.i(this,
+                Rlog.i(TAG,
                         "startNegotiation: header extensions not available; negotiation failed");
                 notifyProtocolUnavailable();
             }
         } else {
-            Log.i(this, "startNegotiation: SDP negotiation not supported; negotiation complete");
+            Rlog.i(TAG, "startNegotiation: SDP negotiation not supported; negotiation complete");
             // TODO: This is temporary; we will need to implement a probe/response in this scenario
             // if SDP is not supported.  For now we will just assume the protocol is ready.
             notifyProtocolReady();
@@ -384,7 +386,7 @@ public class RtpTransport implements TransportProtocol, RtpAdapter.Callback {
     public void sendMessages(Set<Communicator.Message> messages) {
         Set<RtpHeaderExtension> toSend = messages.stream().map(m -> generateRtpHeaderExtension(m))
                 .collect(Collectors.toSet());
-        Log.i(this, "sendMessages: sending=%s", messages);
+        Rlog.i(TAG, "sendMessages: sending=" + messages);
         mRtpAdapter.sendRtpHeaderExtensions(toSend);
     }
 
@@ -441,14 +443,14 @@ public class RtpTransport implements TransportProtocol, RtpAdapter.Callback {
                 .map(et -> et.getUri())
                 .findFirst();
         if (!foundUri.isPresent()) {
-            Log.w(this, "extractMessage: localIdentifier=%d not supported.",
-                    extension.getLocalIdentifier());
+            Rlog.w(TAG, "extractMessage: localIdentifier=" + extension.getLocalIdentifier()
+                    + " not supported.");
             return null;
         }
 
         if (extension.getExtensionData() == null || extension.getExtensionData().length != 1) {
-            Log.w(this, "extractMessage: localIdentifier=%d message with invalid data length.",
-                    extension.getLocalIdentifier());
+            Rlog.w(TAG, "extractMessage: localIdentifier=" + extension.getLocalIdentifier()
+                    + "  message with invalid data length.");
             return null;
         }
 
@@ -464,8 +466,8 @@ public class RtpTransport implements TransportProtocol, RtpAdapter.Callback {
         if (DEVICE_STATE_RTP_HEADER_EXTENSION.equals(uri)) {
             Integer type = DEVICE_STATE_MSG_TYPE_TO_RTP_BITS.getKey(messageTypeBits);
             if (type == null) {
-                Log.w(this, "extractMessage: localIdentifier=%d message with invalid type %s.",
-                        extension.getLocalIdentifier(), Integer.toBinaryString(messageTypeBits));
+                Rlog.w(TAG, "extractMessage: localIdentifier=" + extension.getLocalIdentifier()
+                        + " message with invalid type= " + Integer.toBinaryString(messageTypeBits));
                 return null;
             }
             messageType = type;
@@ -473,10 +475,10 @@ public class RtpTransport implements TransportProtocol, RtpAdapter.Callback {
                 case Communicator.MESSAGE_DEVICE_BATTERY_STATE:
                     Integer val = BATTERY_STATE_VALUE_TO_RTP_BITS.getKey(messageValueBits);
                     if (val == null) {
-                        Log.w(this, "extractMessage: localIdentifier=%d, battery state msg with "
-                                        + "invalid value=%s",
-                                extension.getLocalIdentifier(),
-                                Integer.toBinaryString(messageValueBits));
+                        Rlog.w(TAG,
+                                "extractMessage: localIdentifier=" + extension.getLocalIdentifier()
+                                        + ", battery state msg with invalid value="
+                                        + Integer.toBinaryString(messageValueBits));
                         return null;
                     }
                     messageValue = val;
@@ -484,27 +486,26 @@ public class RtpTransport implements TransportProtocol, RtpAdapter.Callback {
                 case Communicator.MESSAGE_DEVICE_NETWORK_COVERAGE:
                     Integer val2 = NETWORK_COVERAGE_VALUE_TO_RTP_BITS.getKey(messageValueBits);
                     if (val2 == null) {
-                        Log.w(this, "extractMessage: localIdentifier=%d, network coverage msg with "
-                                        + "invalid value=%s",
-                                extension.getLocalIdentifier(),
-                                Integer.toBinaryString(messageValueBits));
+                        Rlog.w(TAG,
+                                "extractMessage: localIdentifier=" + extension.getLocalIdentifier()
+                                        + ", network coverage msg with invalid value="
+                                        + Integer.toBinaryString(messageValueBits));
                         return null;
                     }
                     messageValue = val2;
                     break;
                 default:
-                    Log.w(this, "messageType=%s, value=%s; invalid value",
-                            Integer.toBinaryString(messageTypeBits),
-                            Integer.toBinaryString(messageValueBits));
+                    Rlog.w(TAG,
+                            "messageType=" + Integer.toBinaryString(messageTypeBits) + ", value="
+                                    + Integer.toBinaryString(messageValueBits) + "; invalid value");
                     return null;
             }
         } else if (CALL_STATE_RTP_HEADER_EXTENSION.equals(uri)) {
             Integer typeValue = CALL_STATE_MSG_TYPE_TO_RTP_BITS.getKey(messageTypeBits);
             if (typeValue == null) {
-                Log.w(this, "extractMessage: localIdentifier=%d, network coverage msg with "
-                                + "invalid type=%s",
-                        extension.getLocalIdentifier(),
-                        Integer.toBinaryString(messageTypeBits));
+                Rlog.w(TAG, "extractMessage: localIdentifier=" + extension.getLocalIdentifier()
+                        + ", network coverage msg with invalid type=" + Integer.toBinaryString(
+                        messageTypeBits));
                 return null;
             }
             messageType = typeValue;
@@ -512,10 +513,10 @@ public class RtpTransport implements TransportProtocol, RtpAdapter.Callback {
                 case Communicator.MESSAGE_CALL_AUDIO_CODEC:
                     Integer val = CODEC_VALUE_TO_RTP_BITS.getKey(messageValueBits);
                     if (val == null) {
-                        Log.w(this, "extractMessage: localIdentifier=%d, audio codec msg with "
-                                        + "invalid value=%s",
-                                extension.getLocalIdentifier(),
-                                Integer.toBinaryString(messageValueBits));
+                        Rlog.w(TAG,
+                                "extractMessage: localIdentifier=" + extension.getLocalIdentifier()
+                                        + ", audio codec msg with invalid value="
+                                        + Integer.toBinaryString(messageValueBits));
                         return null;
                     }
                     messageValue = val;
@@ -523,27 +524,27 @@ public class RtpTransport implements TransportProtocol, RtpAdapter.Callback {
                 case Communicator.MESSAGE_CALL_RADIO_ACCESS_TYPE:
                     Integer val2 = RAT_VALUE_TO_RTP_BITS.getKey(messageValueBits);
                     if (val2 == null) {
-                        Log.w(this, "extractMessage: localIdentifier=%d, rat type msg with "
-                                        + "invalid value=%s",
-                                extension.getLocalIdentifier(),
-                                Integer.toBinaryString(messageValueBits));
+                        Rlog.w(TAG,
+                                "extractMessage: localIdentifier=" + extension.getLocalIdentifier()
+                                        + ", rat type msg with invalid value="
+                                        + Integer.toBinaryString(messageValueBits));
                         return null;
                     }
                     messageValue = val2;
                     break;
                 default:
-                    Log.w(this, "messageType=%s, value=%s; invalid value",
-                            Integer.toBinaryString(messageTypeBits),
-                            Integer.toBinaryString(messageValueBits));
+                    Rlog.w(TAG,
+                            "messageType=" + Integer.toBinaryString(messageTypeBits) + ", value="
+                                    + Integer.toBinaryString(messageValueBits) + "; invalid value");
                     return null;
             }
         } else {
-            Log.w(this, "invalid uri=%s", uri);
+            Rlog.w(TAG, "invalid uri=" + uri);
             return null;
         }
-        Log.i(this, "extractMessage: messageType=%s, value=%s --> message=%d, value=%d",
-                Integer.toBinaryString(messageTypeBits), Integer.toBinaryString(messageValueBits),
-                messageType, messageValue);
+        Rlog.i(TAG, "extractMessage: messageType=" + Integer.toBinaryString(messageTypeBits)
+                + ", value=" + Integer.toBinaryString(messageValueBits) + " --> message="
+                + messageType + ", value=" + messageValue);
         return new Communicator.Message(messageType, messageValue);
     }
 

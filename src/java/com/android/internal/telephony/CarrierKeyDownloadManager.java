@@ -32,6 +32,7 @@ import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.Uri;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.os.PersistableBundle;
 import android.os.UserManager;
@@ -46,7 +47,6 @@ import android.util.Pair;
 
 
 import com.android.internal.annotations.VisibleForTesting;
-import com.android.internal.telephony.flags.Flags;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -120,32 +120,36 @@ public class CarrierKeyDownloadManager extends Handler {
     private boolean mAllowedOverMeteredNetwork = false;
     private boolean mDeleteOldKeyAfterDownload = false;
     private boolean mIsRequiredToHandleUnlock;
-    private TelephonyManager mTelephonyManager;
+    private volatile TelephonyManager mTelephonyManager;
     private UserManager mUserManager;
     @VisibleForTesting
-    public String mMccMncForDownload = "";
-    public int mCarrierId = TelephonyManager.UNKNOWN_CARRIER_ID;
+    public volatile String mMccMncForDownload = "";
+    public volatile int mCarrierId = TelephonyManager.UNKNOWN_CARRIER_ID;
     @VisibleForTesting
-    public long mDownloadId;
+    public volatile long mDownloadId;
     private DefaultNetworkCallback mDefaultNetworkCallback;
     private ConnectivityManager mConnectivityManager;
     private KeyguardManager mKeyguardManager;
     // This key will be used to track to send the IMSI key to modem.
     private boolean mIsKeySent = false;
 
-    public CarrierKeyDownloadManager(Phone phone) {
+    public CarrierKeyDownloadManager(Phone phone, Looper looper) {
+        super(looper);
         mPhone = phone;
         mContext = phone.getContext();
         IntentFilter filter = new IntentFilter();
         filter.addAction(INTENT_KEY_RENEWAL_ALARM_PREFIX);
         filter.addAction(TelephonyIntents.ACTION_CARRIER_CERTIFICATE_DOWNLOAD);
         filter.addAction(Intent.ACTION_USER_UNLOCKED);
-        mContext.registerReceiver(mBroadcastReceiver, filter, null, phone);
+
         mDownloadManager = (DownloadManager) mContext.getSystemService(Context.DOWNLOAD_SERVICE);
         mTelephonyManager = mContext.getSystemService(TelephonyManager.class)
                 .createForSubscriptionId(mPhone.getSubId());
         mKeyguardManager = mContext.getSystemService(KeyguardManager.class);
         mUserManager = mContext.getSystemService(UserManager.class);
+
+        mConnectivityManager = mContext.getSystemService(ConnectivityManager.class);
+        mContext.registerReceiver(mBroadcastReceiver, filter, null, this);
 
         CarrierConfigManager carrierConfigManager = mContext.getSystemService(
                 CarrierConfigManager.class);
@@ -188,7 +192,6 @@ public class CarrierKeyDownloadManager extends Handler {
                         }
                     });
         }
-        mConnectivityManager = mContext.getSystemService(ConnectivityManager.class);
     }
 
     private void printDeviceLockStatus() {
@@ -297,7 +300,7 @@ public class CarrierKeyDownloadManager extends Handler {
                 }
             } else {
                 logd("handleAlarmOrConfigChange :: mIsKeySent " + mIsKeySent);
-                if (Flags.sendImsiKeyForDuplicateSim() && !mIsKeySent) {
+                if (!mIsKeySent) {
                     ImsiEncryptionInfo imsiEncryptionInfo = getExistingKey();
                     if (imsiEncryptionInfo != null) {
                         logd("handleAlarmOrConfigChange :: saving public key");
@@ -728,7 +731,7 @@ public class CarrierKeyDownloadManager extends Handler {
         try {
             // register the broadcast receiver to listen for download complete
             IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
-            mContext.registerReceiver(mDownloadReceiver, filter, null, mPhone,
+            mContext.registerReceiver(mDownloadReceiver, filter, null, this,
                     Context.RECEIVER_EXPORTED);
 
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(mURL));

@@ -48,8 +48,11 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.location.Location;
+import android.location.LocationManager;
 import android.os.AsyncResult;
 import android.os.Build;
+import android.os.CancellationSignal;
 import android.os.HandlerExecutor;
 import android.os.IBinder;
 import android.os.Looper;
@@ -86,6 +89,8 @@ import com.android.internal.util.StateMachine;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -138,6 +143,13 @@ public class SatelliteSessionController extends StateMachine {
     private static final int EVENT_ENABLE_CELLULAR_MODEM_WHILE_SATELLITE_MODE_IS_ON_DONE = 12;
     private static final int EVENT_SERVICE_STATE_CHANGED = 13;
     protected static final int EVENT_P2P_SMS_INACTIVITY_TIMER_TIMED_OUT = 14;
+    private static final int EVENT_SUSPEND_SATELLITE_MODE_DONE = 15;
+    private static final int EVENT_RESUME_SATELLITE_MODE_DONE = 16;
+    protected static final int EVENT_PERIODIC_SUSPENSION_TIMER_EXPIRED = 17;
+    private static final int EVENT_WAIT_FOR_CURRENT_LOCATION_TIMEOUT = 18;
+    private static final int EVENT_WAIT_FOR_SUSPEND_SATELLITE_MODE_RESPONSE_TIMEOUT = 19;
+    private static final int EVENT_WAIT_FOR_RESUME_SATELLITE_MODE_RESPONSE_TIMEOUT = 20;
+
 
     private static final long REBIND_INITIAL_DELAY = 2 * 1000; // 2 seconds
     private static final long REBIND_MAXIMUM_DELAY = 64 * 1000; // 1 minute
@@ -146,6 +158,8 @@ public class SatelliteSessionController extends StateMachine {
     private static final int DEFAULT_P2P_SMS_INACTIVITY_TIMEOUT_SEC = 180;
     private static final int DEFAULT_ESOS_INACTIVITY_TIMEOUT_SEC = 600;
     private static final long UNDEFINED_TIMESTAMP = 0L;
+    private static final long LOCATION_TIMEOUT_MS = TimeUnit.SECONDS.toMillis(180);
+    private static final int MAX_LOCATION_ATTEMPTS = 2;
 
     /** All the atomic variables are declared here. */
     private AtomicBoolean mIsBound = new AtomicBoolean(false);
@@ -167,6 +181,7 @@ public class SatelliteSessionController extends StateMachine {
     @NonNull private final EnablingState mEnablingState = new EnablingState();
     @NonNull private final DisablingState mDisablingState = new DisablingState();
     @NonNull private final IdleState mIdleState = new IdleState();
+    @NonNull private final SuspensionState mSuspensionState = new SuspensionState();
     @NonNull private final TransferringState mTransferringState = new TransferringState();
     @NonNull private final ListeningState mListeningState = new ListeningState();
     @NonNull private final NotConnectedState mNotConnectedState = new NotConnectedState();
@@ -176,6 +191,8 @@ public class SatelliteSessionController extends StateMachine {
     private long mSatelliteStayAtListeningFromSendingMillis;
     private long mSatelliteStayAtListeningFromReceivingMillis;
     private long mSatelliteNbIotInactivityTimeoutMillis;
+    private long mWaitTimeForSatelliteSuspendingResponse;
+    protected long mSuspensionIntervalMillis;
     private boolean mIgnoreCellularServiceState = false;
     private Boolean mIsConcurrentTnScanningSupportedForCtsTest = null;
     private Boolean mIsTnScanningDuringSatelliteSessionAllowedForCtsTest = null;
@@ -201,6 +218,8 @@ public class SatelliteSessionController extends StateMachine {
     @NonNull private SessionMetricsStats mSessionMetricsStats;
     @NonNull private FeatureFlags mFeatureFlags;
     @NonNull private AlarmManager mAlarmManager;
+    @NonNull private LocationManager mLocationManager;
+    @NonNull private final Executor mExecutor;
     private final AlarmManager.OnAlarmListener mAlarmListener = new AlarmManager.OnAlarmListener() {
         @Override
         public void onAlarm() {
@@ -287,6 +306,9 @@ public class SatelliteSessionController extends StateMachine {
                 getSatelliteStayAtListeningFromReceivingMillis();
         mSatelliteNbIotInactivityTimeoutMillis =
                 getSatelliteNbIotInactivityTimeoutMillis();
+        mWaitTimeForSatelliteSuspendingResponse =
+                getWaitForSatelliteSuspensionResponseTimeoutMillis();
+        mSuspensionIntervalMillis = getSuspensionIntervalMillis();
         mListeners = new ConcurrentHashMap<>();
         mIsSendingTriggeredDuringTransferringState = new AtomicBoolean(false);
         mPreviousState = SATELLITE_MODEM_STATE_UNKNOWN;
@@ -313,6 +335,8 @@ public class SatelliteSessionController extends StateMachine {
         mDeviceStateMonitor = satellitePhone.getDeviceStateMonitor();
         mSessionMetricsStats = SessionMetricsStats.getInstance();
         mAlarmManager = mContext.getSystemService(AlarmManager.class);
+        mLocationManager = mContext.getSystemService(LocationManager.class);
+        mExecutor = command -> getHandler().post(command);
 
         addState(mUnavailableState);
         addState(mPowerOffState);
@@ -323,6 +347,9 @@ public class SatelliteSessionController extends StateMachine {
         addState(mListeningState);
         addState(mNotConnectedState);
         addState(mConnectedState);
+        if (mFeatureFlags.satelliteSuspend()) {
+            addState(mSuspensionState);
+        }
         setInitialState(isSatelliteSupported);
         start();
     }
@@ -433,6 +460,8 @@ public class SatelliteSessionController extends StateMachine {
     public void registerForSatelliteModemStateChanged(
             @NonNull ISatelliteModemStateCallback callback) {
         try {
+            plogd("registerForSatelliteModemStateChanged: callback=" + callback
+                    + ", mCurrentState=" + mCurrentState);
             callback.onSatelliteModemStateChanged(mCurrentState);
             callback.onEmergencyModeChanged(mSatelliteController.getRequestIsEmergency());
             mListeners.put(callback.asBinder(), callback);
@@ -683,6 +712,15 @@ public class SatelliteSessionController extends StateMachine {
         return mIsDemoMode;
     }
 
+    private void transitionToSuspensionOrIdle() {
+        if (mFeatureFlags.satelliteSuspend()
+                    && isSuspendAllowedDuringSatelliteSession()) {
+            transitionTo(mSuspensionState);
+        } else {
+            transitionTo(mIdleState);
+        }
+    }
+
     private static class DatagramTransferState {
         @SatelliteManager.SatelliteDatagramTransferState public int sendState;
         @SatelliteManager.SatelliteDatagramTransferState public int receiveState;
@@ -812,7 +850,7 @@ public class SatelliteSessionController extends StateMachine {
                 if (mSatelliteController.isSatelliteAttachRequired()) {
                     transitionTo(mNotConnectedState);
                 } else {
-                    transitionTo(mIdleState);
+                    transitionToSuspensionOrIdle();
                 }
                 DemoSimulator.getInstance().onSatelliteModeOn();
 
@@ -847,7 +885,6 @@ public class SatelliteSessionController extends StateMachine {
             mPreviousState = mCurrentState;
             mCurrentState = SatelliteManager.SATELLITE_MODEM_STATE_DISABLING_SATELLITE;
             notifyStateChangedEvent(SatelliteManager.SATELLITE_MODEM_STATE_DISABLING_SATELLITE);
-
             unregisterForScreenStateChanged();
         }
 
@@ -927,7 +964,10 @@ public class SatelliteSessionController extends StateMachine {
             mCurrentState = SatelliteManager.SATELLITE_MODEM_STATE_IDLE;
             mIsSendingTriggeredDuringTransferringState.set(false);
             stopNbIotInactivityTimer();
-
+            if (mFeatureFlags.satelliteSuspend()
+                    && isSuspendAllowedDuringSatelliteSession()) {
+                startPeriodicSuspensionTimer();
+            }
             //Enable Cellular Modem scanning
             boolean configSatelliteAllowTnScanningDuringSatelliteSession =
                     isTnScanningAllowedDuringSatelliteSession();
@@ -989,9 +1029,23 @@ public class SatelliteSessionController extends StateMachine {
                         plogd("IdleState: processing: ignore EVENT_SERVICE_STATE_CHANGED");
                     }
                     break;
+                case EVENT_PERIODIC_SUSPENSION_TIMER_EXPIRED:
+                    plogd("IdleState: EVENT_PERIODIC_SUSPENSION_TIMER_EXPIRED received");
+                    transitionTo(mSuspensionState);
+                    break;
             }
             // Ignore all unexpected events.
             return HANDLED;
+        }
+
+        private void startPeriodicSuspensionTimer() {
+            removeMessages(EVENT_PERIODIC_SUSPENSION_TIMER_EXPIRED);
+            sendMessageDelayed(EVENT_PERIODIC_SUSPENSION_TIMER_EXPIRED,
+                    mSuspensionIntervalMillis);
+        }
+
+        private void stopPeriodicSuspensionTimer() {
+            removeMessages(EVENT_PERIODIC_SUSPENSION_TIMER_EXPIRED);
         }
 
         private void handleEventDatagramTransferStateChanged(
@@ -1079,6 +1133,215 @@ public class SatelliteSessionController extends StateMachine {
             if (DBG) plogd("Exiting IdleState");
             // Disable cellular modem scanning
             mSatelliteModemInterface.enableCellularModemWhileSatelliteModeIsOn(false, null);
+            // Stop the periodic suspend timer
+            stopPeriodicSuspensionTimer();
+        }
+    }
+
+    class SuspensionState extends State {
+
+        private int mLocationAttemptCount;
+        @Nullable private CancellationSignal mCancellationSignal;
+        @NonNull private List<Message> mDeferredMessages = new ArrayList<>();
+
+        @Override
+        public void enter() {
+            if (DBG) plogd("Entering SuspensionState");
+            mPreviousState = mCurrentState;
+            mCurrentState = SatelliteManager.SATELLITE_MODEM_STATE_SUSPENSION;
+            mLocationAttemptCount = 0;
+            mDeferredMessages.clear();
+            suspendSatelliteMode();
+            notifyStateChangedEvent(SatelliteManager.SATELLITE_MODEM_STATE_SUSPENSION);
+        }
+
+        @Override
+        public boolean processMessage(Message msg) {
+            if (DBG) plogd("SuspensionState: processing " + getWhatToString(msg.what));
+            switch (msg.what) {
+                case EVENT_WAIT_FOR_CURRENT_LOCATION_TIMEOUT:
+                    loge("queryCurrentLocation: Location fetch timed out, attempt "
+                            + mLocationAttemptCount);
+                    queryCurrentLocation();
+                    break;
+                case EVENT_RESUME_SATELLITE_MODE_DONE:
+                    plogd("SuspensionState: EVENT_RESUME_SATELLITE_MODE_DONE received");
+                    AsyncResult ar = (msg.obj != null) ? (AsyncResult) msg.obj : null;
+                    int err = SatelliteServiceUtils.getSatelliteError(ar,
+                            "SatelliteSessionController Resume");
+                    if (err != SATELLITE_RESULT_SUCCESS)  {
+                        ploge("Modem suspend failed with result: " + err);
+                        mSatelliteController.requestSatelliteEnabled(
+                                false /*enableSatellite*/,
+                                false /*enableDemoMode*/,
+                                mSatelliteController.getRequestIsEmergency() /*isEmergency*/,
+                                new IIntegerConsumer.Stub() {
+                                    @Override
+                                    public void accept(int result) {
+                                        plogd("SuspensionState: requestSatelliteEnabled result="
+                                                + result);
+                                    }
+                                });
+                    }
+                    transitionTo(mIdleState);
+                    break;
+                case EVENT_SUSPEND_SATELLITE_MODE_DONE:
+                    plogd("SuspensionState: EVENT_SUSPEND_SATELLITE_MODE_DONE received");
+                    removeMessages(EVENT_WAIT_FOR_SUSPEND_SATELLITE_MODE_RESPONSE_TIMEOUT);
+                    AsyncResult ars = (msg.obj != null) ? (AsyncResult) msg.obj : null;
+                    int error = SatelliteServiceUtils.getSatelliteError(ars,
+                            "SatelliteSessionController SuspensionState");
+                    if (error == SATELLITE_RESULT_SUCCESS)  {
+                        queryCurrentLocation();
+                    } else {
+                        ploge("Modem suspend failed with result: " + error);
+                        transitionTo(mIdleState);
+                    }
+                    break;
+                case EVENT_WAIT_FOR_SUSPEND_SATELLITE_MODE_RESPONSE_TIMEOUT:
+                    plogd("SuspensionState:EVENT_WAIT_FOR_SUSPEND_SATELLITE_MODE_RESPONSE_TIMEOUT");
+                    transitionTo(mIdleState);
+                    break;
+                case EVENT_WAIT_FOR_RESUME_SATELLITE_MODE_RESPONSE_TIMEOUT:
+                    plogd("SuspensionState:EVENT_WAIT_FOR_RESUME_SATELLITE_MODE_RESPONSE_TIMEOUT");
+                    mSatelliteController.requestSatelliteEnabled(
+                            false /*enableSatellite*/,
+                            false /*enableDemoMode*/,
+                            mSatelliteController.getRequestIsEmergency() /*isEmergency*/,
+                            new IIntegerConsumer.Stub() {
+                                @Override
+                                public void accept(int result) {
+                                    plogd("SuspensionState: requestSatelliteEnabled result="
+                                            + result);
+                                }
+                            });
+                    transitionTo(mIdleState);
+                    break;
+                case EVENT_DATAGRAM_TRANSFER_STATE_CHANGED:
+                case EVENT_SATELLITE_ENABLED_STATE_CHANGED:
+                case EVENT_SATELLITE_ENABLEMENT_STARTED:
+                case EVENT_SCREEN_STATE_CHANGED:
+                case EVENT_SCREEN_OFF_INACTIVITY_TIMER_TIMED_OUT:
+                case EVENT_SATELLITE_MODEM_STATE_CHANGED:
+                    plogd("Deferring message: " + getWhatToString(msg.what));
+                    mDeferredMessages.add(Message.obtain(msg));
+                    resumeSatelliteMode();
+                    break;
+            }
+            return HANDLED;
+        }
+
+        private void suspendSatelliteMode() {
+            Message onCompleted =
+                    obtainMessage(EVENT_SUSPEND_SATELLITE_MODE_DONE);
+            try {
+                logd("Calling requestSatelliteSuspended(true)");
+                mSatelliteModemInterface.requestSatelliteSuspended(true, onCompleted);
+                sendMessageDelayed(EVENT_WAIT_FOR_SUSPEND_SATELLITE_MODE_RESPONSE_TIMEOUT,
+                        mWaitTimeForSatelliteSuspendingResponse);
+            } catch (Exception e) {
+                loge("SuspensionState: Failed to suspend satellite mode: " + e);
+                // Suspension call failed, move back to Idle.
+                transitionTo(mIdleState);
+            }
+        }
+
+        private void cancelOngoingLocationQuery() {
+            if (mCancellationSignal != null && !mCancellationSignal.isCanceled()) {
+                try {
+                    mCancellationSignal.cancel();
+                } catch (Exception e) {
+                    loge("Error cancelling signal: " + e);
+                }
+            }
+            removeMessages(EVENT_WAIT_FOR_CURRENT_LOCATION_TIMEOUT);
+        }
+
+
+        private void queryCurrentLocation() {
+            if (mLocationAttemptCount >= MAX_LOCATION_ATTEMPTS) {
+                logd("queryCurrentLocation: Max location attempts reached.");
+                resumeSatelliteMode();
+                return;
+            }
+            mLocationAttemptCount++;
+            logd("queryCurrentLocation: Attempt " + mLocationAttemptCount
+                    + "/" + MAX_LOCATION_ATTEMPTS);
+
+            cancelOngoingLocationQuery();
+            mCancellationSignal = new CancellationSignal();
+
+            try {
+                mLocationManager.getCurrentLocation(
+                        LocationManager.GPS_PROVIDER,
+                        mCancellationSignal,
+                        mExecutor,
+                        this::onCurrentLocationAvailable
+                );
+                sendMessageDelayed(EVENT_WAIT_FOR_CURRENT_LOCATION_TIMEOUT, LOCATION_TIMEOUT_MS);
+            } catch (Exception e) {
+                loge("queryCurrentLocation: Exception while requesting location: " + e);
+                // Post to handler to treat as a failure on the StateMachine thread
+                onCurrentLocationAvailable(null);
+            }
+        }
+
+        private void onCurrentLocationAvailable(@Nullable Location location) {
+            cancelOngoingLocationQuery();
+            if (location != null) {
+                logd("queryCurrentLocation: Location fetched successfully: " + location);
+                resumeSatelliteMode();
+            } else {
+                loge("queryCurrentLocation: Location fetch failed (result = null), attempt "
+                        + mLocationAttemptCount);
+                queryCurrentLocation();
+
+            }
+        }
+
+        private void deferMessages() {
+            if (!mDeferredMessages.isEmpty()) {
+                plogd("Processing " + mDeferredMessages.size() + " deferred messages.");
+                for (Message deferredMsg : mDeferredMessages) {
+                    plogd("Re-routing deferred message: "
+                            + getWhatToString(deferredMsg.what));
+                    deferMessage(deferredMsg);
+                }
+                mDeferredMessages.clear();
+            }
+        }
+
+        private void resumeSatelliteMode() {
+            // This function might be called multiple times while waiting for
+            // the response of the resume request from modem.
+            // So send this message only if it already hasn't been sent
+            if (!hasMessages(EVENT_RESUME_SATELLITE_MODE_DONE)) {
+                Message onCompleted =
+                        obtainMessage(EVENT_RESUME_SATELLITE_MODE_DONE);
+                try {
+                    logd("Calling requestSatelliteSuspended(false)");
+                    mSatelliteModemInterface.requestSatelliteSuspended(
+                            false, onCompleted);
+                    sendMessageDelayed(EVENT_WAIT_FOR_RESUME_SATELLITE_MODE_RESPONSE_TIMEOUT,
+                            mWaitTimeForSatelliteSuspendingResponse);
+                } catch (Exception e) {
+                    loge("SuspensionState: Failed to resume satellite mode: " + e);
+                    transitionTo(mIdleState);
+                }
+            }
+        }
+
+        private void stopAllTimersInSuspendedState() {
+            removeMessages(EVENT_WAIT_FOR_RESUME_SATELLITE_MODE_RESPONSE_TIMEOUT);
+            removeMessages(EVENT_WAIT_FOR_SUSPEND_SATELLITE_MODE_RESPONSE_TIMEOUT);
+        }
+
+        @Override
+        public void exit() {
+            if (DBG) plogd("Exiting SuspensionState");
+            cancelOngoingLocationQuery();
+            deferMessages();
+            stopAllTimersInSuspendedState();
         }
     }
 
@@ -1135,7 +1398,7 @@ public class SatelliteSessionController extends StateMachine {
                             == SATELLITE_DATAGRAM_TRANSFER_STATE_SEND_FAILED)
                             || (datagramTransferState.receiveState
                             == SATELLITE_DATAGRAM_TRANSFER_STATE_RECEIVE_FAILED)) {
-                        transitionTo(mIdleState);
+                        transitionToSuspensionOrIdle();
                     } else {
                         transitionTo(mListeningState);
                     }
@@ -1179,7 +1442,7 @@ public class SatelliteSessionController extends StateMachine {
             if (DBG) plogd("ListeningState: processing " + getWhatToString(msg.what));
             switch (msg.what) {
                 case EVENT_LISTENING_TIMER_TIMEOUT:
-                    transitionTo(mIdleState);
+                    transitionToSuspensionOrIdle();
                     break;
                 case EVENT_DATAGRAM_TRANSFER_STATE_CHANGED:
                     handleEventDatagramTransferStateChanged((DatagramTransferState) msg.obj);
@@ -1267,14 +1530,14 @@ public class SatelliteSessionController extends StateMachine {
                         plogd("NotConnectedState: processing: P2P_SMS inactivity timer running "
                                 + "can not move to IDLE");
                     } else {
-                        transitionTo(mIdleState);
+                        transitionToSuspensionOrIdle();
                     }
                     break;
                 case EVENT_P2P_SMS_INACTIVITY_TIMER_TIMED_OUT:
                     handleEventP2pSmsInactivityTimerTimedOut();
                     break;
                 case EVENT_NB_IOT_INACTIVITY_TIMER_TIMED_OUT:
-                    transitionTo(mIdleState);
+                    transitionToSuspensionOrIdle();
                     break;
                 case EVENT_DATAGRAM_TRANSFER_STATE_CHANGED:
                     handleEventDatagramTransferStateChanged((DatagramTransferState) msg.obj);
@@ -1368,7 +1631,7 @@ public class SatelliteSessionController extends StateMachine {
                     handleEventSatelliteModemStateChanged(msg.arg1);
                     break;
                 case EVENT_NB_IOT_INACTIVITY_TIMER_TIMED_OUT:
-                    transitionTo(mIdleState);
+                    transitionToSuspensionOrIdle();
                     break;
                 case EVENT_DATAGRAM_TRANSFER_STATE_CHANGED:
                     handleEventDatagramTransferStateChanged((DatagramTransferState) msg.obj);
@@ -1387,7 +1650,7 @@ public class SatelliteSessionController extends StateMachine {
                         plogd("ConnectedState: processing: P2P_SMS inactivity timer running "
                                 + "can not move to IDLE");
                     } else {
-                        transitionTo(mIdleState);
+                        transitionToSuspensionOrIdle();
                     }
                     break;
                 case EVENT_P2P_SMS_INACTIVITY_TIMER_TIMED_OUT:
@@ -1464,6 +1727,24 @@ public class SatelliteSessionController extends StateMachine {
                 break;
             case EVENT_SERVICE_STATE_CHANGED:
                 whatString = "EVENT_SERVICE_STATE_CHANGED";
+                break;
+            case EVENT_SUSPEND_SATELLITE_MODE_DONE:
+                whatString = "EVENT_SUSPEND_SATELLITE_MODE_DONE";
+                break;
+            case EVENT_RESUME_SATELLITE_MODE_DONE:
+                whatString = "EVENT_RESUME_SATELLITE_MODE_DONE";
+                break;
+            case EVENT_PERIODIC_SUSPENSION_TIMER_EXPIRED:
+                whatString = "EVENT_PERIODIC_SUSPENSION_TIMER_EXPIRED";
+                break;
+            case EVENT_WAIT_FOR_CURRENT_LOCATION_TIMEOUT:
+                whatString = "EVENT_WAIT_FOR_CURRENT_LOCATION_TIMEOUT";
+                break;
+            case EVENT_WAIT_FOR_SUSPEND_SATELLITE_MODE_RESPONSE_TIMEOUT:
+                whatString = "EVENT_WAIT_FOR_SUSPEND_SATELLITE_MODE_RESPONSE_TIMEOUT";
+                break;
+            case EVENT_WAIT_FOR_RESUME_SATELLITE_MODE_RESPONSE_TIMEOUT:
+                whatString = "EVENT_WAIT_FOR_RESUME_SATELLITE_MODE_RESPONSE_TIMEOUT";
                 break;
             default:
                 whatString = "UNKNOWN EVENT " + what;
@@ -1706,7 +1987,7 @@ public class SatelliteSessionController extends StateMachine {
         } else {
             if (isTnScanningAllowedDuringSatelliteSession()) {
                 plogd("handleEventP2pSmsInactivityTimerTimedOut: Transition to IDLE state");
-                transitionTo(mIdleState);
+                transitionToSuspensionOrIdle();
             } else {
                 if (mSatelliteController.getRequestIsEmergency()) {
                     plogd("handleEventP2pSmsInactivityTimerTimedOut: Emergency mode");
@@ -1905,7 +2186,7 @@ public class SatelliteSessionController extends StateMachine {
     }
 
     private boolean isMockModemAllowed() {
-        return (DEBUG || SystemProperties.getBoolean(ALLOW_MOCK_MODEM_PROPERTY, false));
+        return (DEBUG || SystemProperties.getBoolean(ALLOW_MOCK_MODEM_PROPERTY, true));
     }
 
     private long getSatelliteStayAtListeningFromSendingMillis() {
@@ -1936,6 +2217,16 @@ public class SatelliteSessionController extends StateMachine {
         }
     }
 
+    private long getWaitForSatelliteSuspensionResponseTimeoutMillis() {
+        return mContext.getResources().getInteger(
+                R.integer.config_wait_for_satellite_suspension_response_timeout_millis);
+    }
+
+    private long getSuspensionIntervalMillis() {
+        return mContext.getResources().getInteger(
+                R.integer.config_satellite_suspension_interval_millis);
+    }
+
     private void restartNbIotInactivityTimer() {
         stopNbIotInactivityTimer();
         startNbIotInactivityTimer();
@@ -1956,6 +2247,7 @@ public class SatelliteSessionController extends StateMachine {
         DatagramController datagramController = DatagramController.getInstance();
         if (datagramController.isSendingInIdleState()
                 && datagramController.isPollingInIdleState()) {
+            plogd("NB IOT  timer is started " + mSatelliteNbIotInactivityTimeoutMillis);
             sendMessageDelayed(
                     EVENT_NB_IOT_INACTIVITY_TIMER_TIMED_OUT,
                     mSatelliteNbIotInactivityTimeoutMillis);
@@ -2028,6 +2320,16 @@ public class SatelliteSessionController extends StateMachine {
                     R.bool.config_satellite_allow_tn_scanning_during_satellite_session);
         } catch (RuntimeException e) {
             plogd("isTnScanningAllowedDuringSatelliteSession: ex=" + e);
+            return false;
+        }
+    }
+
+    private boolean isSuspendAllowedDuringSatelliteSession() {
+        try {
+            return mContext.getResources().getBoolean(
+                    R.bool.config_satellite_allow_suspend_during_satellite_session);
+        } catch (RuntimeException e) {
+            plogd("isSuspendAllowedDuringSatelliteSession: ex=" + e);
             return false;
         }
     }

@@ -54,7 +54,6 @@ import android.net.wifi.WifiManager;
 import android.os.PersistableBundle;
 import android.os.SystemClock;
 import android.telecom.VideoProfile;
-import android.telecom.VideoProfile.VideoState;
 import android.telephony.Annotation.NetworkType;
 import android.telephony.AnomalyReporter;
 import android.telephony.CarrierConfigManager;
@@ -340,7 +339,7 @@ public class VoiceCallSessionStats {
 
     /** Updates internal states when video state changes. */
     public synchronized void onVideoStateChange(
-            ImsPhoneConnection conn, @VideoState int videoState) {
+            ImsPhoneConnection conn, /*@VideoState*/ int videoState) {
         int id = getConnectionId(conn);
         VoiceCallSession proto = mCallProtos.get(id);
         if (proto == null) {
@@ -475,7 +474,7 @@ public class VoiceCallSessionStats {
         int bearer = getBearer(conn);
         ServiceState serviceState = getServiceState();
         @NetworkType int rat = getVoiceRatWithVoNRFix(mPhone, serviceState, bearer);
-        @VideoState int videoState = conn.getVideoState();
+        /*@VideoState*/ int videoState = conn.getVideoState();
         VoiceCallSession proto = new VoiceCallSession();
 
         mVonrHelper.updateVonrEnabledState();

@@ -61,13 +61,18 @@ public class SatelliteConstants {
     public static final int CONFIG_UPDATE_RESULT_NO_DATA = 4;
     public static final int CONFIG_UPDATE_RESULT_NO_SATELLITE_DATA = 5;
     public static final int CONFIG_UPDATE_RESULT_PARSE_ERROR = 6;
-    public static final int CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_PLMN = 7;
+    public static final int CONFIG_UPDATE_RESULT_INVALID_PLMN = 7;
     public static final int CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_SUPPORTED_SERVICES = 8;
     public static final int CONFIG_UPDATE_RESULT_DEVICE_DATA_INVALID_COUNTRY_CODE = 9;
     public static final int CONFIG_UPDATE_RESULT_DEVICE_DATA_INVALID_S2_CELL_FILE = 10;
     public static final int CONFIG_UPDATE_RESULT_IO_ERROR = 11;
     public static final int CONFIG_UPDATE_RESULT_INVALID_SATELLITE_ACCESS_CONFIG_FILE = 12;
     public static final int CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_MAX_ALLOWED_DATA_MODE = 13;
+    public static final int CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_CONNECT_TYPE_PER_PLMN = 14;
+    public static final int CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_CONNECT_TYPE = 15;
+    public static final int CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_DATA_SUPPORT_MODE = 16;
+    public static final int CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_ENTITLEMENT_URL = 17;
+
 
     @IntDef(
             prefix = {"CONFIG_UPDATE_RESULT_"},
@@ -79,13 +84,17 @@ public class SatelliteConstants {
                 CONFIG_UPDATE_RESULT_NO_DATA,
                 CONFIG_UPDATE_RESULT_NO_SATELLITE_DATA,
                 CONFIG_UPDATE_RESULT_PARSE_ERROR,
-                CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_PLMN,
+                CONFIG_UPDATE_RESULT_INVALID_PLMN,
                 CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_SUPPORTED_SERVICES,
                 CONFIG_UPDATE_RESULT_DEVICE_DATA_INVALID_COUNTRY_CODE,
                 CONFIG_UPDATE_RESULT_DEVICE_DATA_INVALID_S2_CELL_FILE,
                 CONFIG_UPDATE_RESULT_IO_ERROR,
                 CONFIG_UPDATE_RESULT_INVALID_SATELLITE_ACCESS_CONFIG_FILE,
-                CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_MAX_ALLOWED_DATA_MODE
+                CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_MAX_ALLOWED_DATA_MODE,
+                CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_CONNECT_TYPE_PER_PLMN,
+                CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_CONNECT_TYPE,
+                CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_DATA_SUPPORT_MODE,
+                CONFIG_UPDATE_RESULT_CARRIER_DATA_INVALID_ENTITLEMENT_URL
             })
     @Retention(RetentionPolicy.SOURCE)
     public @interface ConfigUpdateResult {}
@@ -174,4 +183,102 @@ public class SatelliteConstants {
     })
     @Retention(RetentionPolicy.SOURCE)
     public @interface SatelliteSessionConnectType {}
+
+    public static final String DEFAULT_PLMN = "UNKNOWN";
+
+    // Entitlement refresh trigger event is unknown
+    public static final int SATELLITE_ENTITLEMENT_QUERY_TRIGGER_UNKNOWN = 0;
+    // Entitlement refresh triggered on boot up
+    public static final int SATELLITE_ENTITLEMENT_QUERY_TRIGGER_BOOTUP = 1;
+    // Entitlement refresh triggered on daily timer
+    public static final int SATELLITE_ENTITLEMENT_QUERY_TRIGGER_REFRESH_TIMER = 2;
+    // Entitlement refresh triggered on internet status change
+    public static final int SATELLITE_ENTITLEMENT_QUERY_TRIGGER_INTERNET_CONNECTED = 3;
+    // Entitlement refresh triggered on carrier config
+    public static final int SATELLITE_ENTITLEMENT_QUERY_TRIGGER_CARRIER_CONFIG_CHANGED = 4;
+    // Entitlement refresh triggered on FCM tickle
+    public static final int SATELLITE_ENTITLEMENT_QUERY_TRIGGER_FCM_TICKLE = 5;
+    // Entitlement refresh triggered on SIM refresh
+    public static final int SATELLITE_ENTITLEMENT_QUERY_TRIGGER_SIM_REFRESH = 6;
+    // Entitlement refresh triggered on toggling airplane mode
+    public static final int SATELLITE_ENTITLEMENT_QUERY_TRIGGER_AIRPLANE_MODE_TOGGLE = 7;
+    // Entitlement query retry
+    public static final int SATELLITE_ENTITLEMENT_QUERY_TRIGGER_RETRY = 8;
+    // Entitlement refresh triggered on config data updated
+    public static final int SATELLITE_ENTITLEMENT_QUERY_TRIGGER_CONFIG_UPDATED = 9;
+    @IntDef(prefix = {"SATELLITE_ENTITLEMENT_QUERY_"}, value = {
+            SATELLITE_ENTITLEMENT_QUERY_TRIGGER_UNKNOWN,
+            SATELLITE_ENTITLEMENT_QUERY_TRIGGER_BOOTUP,
+            SATELLITE_ENTITLEMENT_QUERY_TRIGGER_REFRESH_TIMER,
+            SATELLITE_ENTITLEMENT_QUERY_TRIGGER_INTERNET_CONNECTED,
+            SATELLITE_ENTITLEMENT_QUERY_TRIGGER_CARRIER_CONFIG_CHANGED,
+            SATELLITE_ENTITLEMENT_QUERY_TRIGGER_FCM_TICKLE,
+            SATELLITE_ENTITLEMENT_QUERY_TRIGGER_SIM_REFRESH,
+            SATELLITE_ENTITLEMENT_QUERY_TRIGGER_AIRPLANE_MODE_TOGGLE,
+            SATELLITE_ENTITLEMENT_QUERY_TRIGGER_RETRY,
+            SATELLITE_ENTITLEMENT_QUERY_TRIGGER_CONFIG_UPDATED
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface SatelliteEntitlementQueryTrigger {}
+
+    /**
+     * Defines the source or reason for satellite service eligibility.
+     * Matches the SatelliteEligibilitySource enum in enums.proto.
+     */
+    // Unknown or unspecified eligibility source.
+    public static final int SATELLITE_ELIGIBILITY_SOURCE_UNKNOWN = 0;
+    // Service is available because the subscription is entitled.
+    public static final int SATELLITE_ELIGIBILITY_SOURCE_ENTITLEMENT = 1;
+    // Service is available based on a carrier configuration for the subscription.
+    public static final int SATELLITE_ELIGIBILITY_SOURCE_CARRIER_CONFIG = 2;
+    // Service is available based on a configupdater for the subscription.
+    public static final int SATELLITE_ELIGIBILITY_SOURCE_CONFIGUPDATER = 3;
+
+    /** @hide */
+    @IntDef(prefix = {"SATELLITE_ELIGIBILITY_SOURCE_"}, value = {
+            SATELLITE_ELIGIBILITY_SOURCE_UNKNOWN,
+            SATELLITE_ELIGIBILITY_SOURCE_ENTITLEMENT,
+            SATELLITE_ELIGIBILITY_SOURCE_CARRIER_CONFIG,
+            SATELLITE_ELIGIBILITY_SOURCE_CONFIGUPDATER
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface SatelliteEligibilitySource {}
+
+    // Defines the source of emergency number used in emergency call handover intent
+    // Emergency number source is unknown
+    public static final int EMERGENCY_NUMBER_SOURCE_UNKNOWN = 0;
+    // Emergency number source is the number manually dialed by user
+    public static final int EMERGENCY_NUMBER_SOURCE_USER_DIALED = 1;
+    // Emergency number source is the redirection number provided by carrier
+    public static final int EMERGENCY_NUMBER_SOURCE_CARRIER_REDIRECTION = 2;
+    @IntDef(prefix = {"EMERGENCY_NUMBER_SOURCE_"}, value = {
+        EMERGENCY_NUMBER_SOURCE_UNKNOWN,
+        EMERGENCY_NUMBER_SOURCE_USER_DIALED,
+        EMERGENCY_NUMBER_SOURCE_CARRIER_REDIRECTION
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface EmergencyNumberSource {}
+
+    // Defines the trigger for a outgoing satellite message
+    // Trigger is unknown
+    public static final int SATELLITE_MESSAGE_TRIGGER_UNKNOWN = 0;
+    // User explicitly opened the messaging application to send satellite messages
+    public static final int SATELLITE_MESSAGE_TRIGGER_DIRECT_MESSAGES_UI = 1;
+    // User attempted non-emergency call and opted to use satellite messaging
+    public static final int SATELLITE_MESSAGE_TRIGGER_NON_EMERGENCY_DIALER_DIALOG = 2;
+    // User attempted emergency call and transistioned to satellite messaging by
+    // clicking user satellite messaging button in Dialer.
+    public static final int SATELLITE_MESSAGE_TRIGGER_EMERGENCY_DIALER_BUTTON = 3;
+    // User accessed satellite messaging by using satellite system notification
+    public static final int SATELLITE_MESSAGE_TRIGGER_SYSTEM_NOTIFICATION = 4;
+
+    @IntDef(prefix = {"SATELLITE_MESSAGE_TRIGGER_"}, value = {
+        SATELLITE_MESSAGE_TRIGGER_UNKNOWN,
+        SATELLITE_MESSAGE_TRIGGER_DIRECT_MESSAGES_UI,
+        SATELLITE_MESSAGE_TRIGGER_NON_EMERGENCY_DIALER_DIALOG,
+        SATELLITE_MESSAGE_TRIGGER_EMERGENCY_DIALER_BUTTON,
+        SATELLITE_MESSAGE_TRIGGER_SYSTEM_NOTIFICATION
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface SatelliteMessageTrigger {}
 }

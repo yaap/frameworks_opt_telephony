@@ -38,3 +38,15 @@ aconfig_declarations {
         "carrier.aconfig",
     ],
 }
+
+java_aconfig_library {
+    name: "com.android.internal.telephony.flags.telephony-flags-aconfig-java-export",
+    aconfig_declarations: "telephony_flags",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.permission",
+    ],
+    defaults: ["framework-minus-apex-aconfig-java-defaults"],
+    min_sdk_version: "30",
+    mode: "exported",
+}

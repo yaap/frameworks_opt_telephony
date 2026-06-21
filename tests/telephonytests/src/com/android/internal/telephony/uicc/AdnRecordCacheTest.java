@@ -17,6 +17,7 @@
 package com.android.internal.telephony.uicc;
 
 import static com.android.internal.telephony.uicc.IccConstants.EF_ADN;
+import static com.android.internal.telephony.uicc.IccConstants.EF_EXT1;
 import static com.android.internal.telephony.uicc.IccConstants.EF_MBDN;
 import static com.android.internal.telephony.uicc.IccConstants.EF_PBR;
 
@@ -35,6 +36,7 @@ import android.os.AsyncResult;
 import android.os.Handler;
 import android.os.Message;
 import android.os.test.TestLooper;
+import android.platform.test.flag.junit.SetFlagsRule;
 
 import com.android.internal.telephony.CommandException;
 import com.android.internal.telephony.TelephonyTest;
@@ -43,6 +45,7 @@ import com.android.internal.telephony.gsm.UsimPhoneBookManager;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -54,6 +57,8 @@ public class AdnRecordCacheTest extends TelephonyTest {
     private Handler mTestHandler;
     private IccFileHandler mFhMock;
     private UsimPhoneBookManager mUsimPhoneBookManager;
+
+    @Rule public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
 
     @SuppressWarnings("ClassCanBeStatic")
     private class AdnRecordCacheUT extends AdnRecordCache {
@@ -328,6 +333,66 @@ public class AdnRecordCacheTest extends TelephonyTest {
         mTestLooper.dispatchAll();
 
         verify(mFhMock, times(1)).loadEFLinearFixedAll(anyInt(), anyString(), any(Message.class));
+    }
+
+    @Test
+    public void requestLoadAllAdnLike_LoadFailure_RetriesBlocked() {
+        // Simulate failure
+        doAnswer(
+                invocation -> {
+                    Message response = invocation.getArgument(2);
+                    AsyncResult.forMessage(response, null, new RuntimeException("Load failed"));
+                    // Directly execute the handler to bypass looper threading issues
+                    response.getTarget().handleMessage(response);
+                    return response;
+                })
+                .when(mFhMock)
+                .loadEFLinearFixedAll(anyInt(), any(), any(Message.class));
+
+        java.util.concurrent.atomic.AtomicReference<AsyncResult> receivedAr =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Handler responseHandler = new Handler(mTestLooper.getLooper()) {
+            @Override
+            public void handleMessage(Message msg) {
+                receivedAr.set((AsyncResult) msg.obj);
+            }
+        };
+
+        Message message1 = Message.obtain(responseHandler);
+        mAdnRecordCache.requestLoadAllAdnLike(EF_ADN, EF_EXT1, message1);
+        mTestLooper.dispatchAll();
+
+        AsyncResult ar1 = receivedAr.get();
+        Assert.assertNotNull(ar1);
+        Assert.assertNotNull(ar1.exception);
+        Assert.assertEquals("load failed", ar1.exception.getMessage());
+
+        // Verify loadEFLinearFixedAll called once
+        verify(mFhMock, times(1)).loadEFLinearFixedAll(anyInt(), any(), any(Message.class));
+
+        // Retry
+        receivedAr.set(null);
+        Message message2 = Message.obtain(responseHandler);
+        mAdnRecordCache.requestLoadAllAdnLike(EF_ADN, EF_EXT1, message2);
+        mTestLooper.dispatchAll();
+
+        AsyncResult ar2 = receivedAr.get();
+        Assert.assertNotNull(ar2);
+        Assert.assertNotNull(ar2.exception);
+        Assert.assertEquals("load failed", ar2.exception.getMessage());
+
+        // Verify loadEFLinearFixedAll NOT called again (still 1)
+        verify(mFhMock, times(1)).loadEFLinearFixedAll(anyInt(), any(), any(Message.class));
+
+        // Reset and retry
+        mAdnRecordCache.reset();
+        receivedAr.set(null);
+        Message message3 = Message.obtain(responseHandler);
+        mAdnRecordCache.requestLoadAllAdnLike(EF_ADN, EF_EXT1, message3);
+        mTestLooper.dispatchAll();
+
+        // Verify loadEFLinearFixedAll called again (now 2)
+        verify(mFhMock, times(2)).loadEFLinearFixedAll(anyInt(), any(), any(Message.class));
     }
 
     private void setAdnLikeFiles(int ef) {

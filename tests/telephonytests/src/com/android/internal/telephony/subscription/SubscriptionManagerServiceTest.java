@@ -55,6 +55,7 @@ import static com.android.internal.telephony.subscription.SubscriptionDatabaseMa
 import static com.android.internal.telephony.subscription.SubscriptionDatabaseManagerTest.FAKE_SUBSCRIPTION_INFO1;
 import static com.android.internal.telephony.subscription.SubscriptionDatabaseManagerTest.FAKE_SUBSCRIPTION_INFO2;
 import static com.android.internal.telephony.subscription.SubscriptionDatabaseManagerTest.FAKE_UUID1;
+import static com.android.internal.telephony.util.TelephonyUtils.TELEPHONY_FEATURE_ENFORCEMENT_VENDOR_API_LEVEL;
 
 import static com.google.common.truth.Truth.assertThat;
 
@@ -72,6 +73,7 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -86,11 +88,14 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Binder;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
+import android.os.PersistableBundle;
+import android.os.Process;
 import android.os.UserHandle;
 import android.provider.Settings;
 import android.provider.Telephony;
@@ -99,9 +104,11 @@ import android.service.carrier.CarrierIdentifier;
 import android.service.euicc.EuiccProfileInfo;
 import android.service.euicc.EuiccService;
 import android.service.euicc.GetEuiccProfileInfoListResult;
+import android.telephony.CarrierConfigManager;
 import android.telephony.RadioAccessFamily;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
+import android.telephony.SubscriptionPlan;
 import android.telephony.TelephonyManager;
 import android.telephony.UiccAccessRule;
 import android.test.mock.MockContentResolver;
@@ -122,6 +129,7 @@ import com.android.internal.telephony.subscription.SubscriptionDatabaseManagerTe
 import com.android.internal.telephony.subscription.SubscriptionManagerService.BinderWrapper;
 import com.android.internal.telephony.subscription.SubscriptionManagerService.SubscriptionManagerServiceCallback;
 import com.android.internal.telephony.subscription.SubscriptionManagerService.SubscriptionMap;
+import com.android.internal.telephony.subscription.SubscriptionManagerService.SubscriptionSet;
 import com.android.internal.telephony.uicc.IccCardStatus;
 import com.android.internal.telephony.uicc.UiccSlot;
 
@@ -131,16 +139,20 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import java.io.File;
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
+import java.time.Period;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -149,6 +161,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @RunWith(AndroidTestingRunner.class)
@@ -169,9 +182,16 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
 
     private static final UserHandle FAKE_MANAGED_PROFILE_USER_HANDLE = new UserHandle(13);
 
-    private static final SubscriptionInfoInternal FAKE_REMOTE_SIM =
+    private static final SubscriptionInfoInternal FAKE_REMOTE_SIM1 =
             new SubscriptionInfoInternal.Builder(FAKE_SUBSCRIPTION_INFO1)
                     .setIccId(FAKE_MAC_ADDRESS1)
+                    .setType(SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM)
+                    .setSimSlotIndex(SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)
+                    .build();
+
+    private static final SubscriptionInfoInternal FAKE_REMOTE_SIM2 =
+            new SubscriptionInfoInternal.Builder(FAKE_SUBSCRIPTION_INFO2)
+                    .setIccId(FAKE_MAC_ADDRESS2)
                     .setType(SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM)
                     .setSimSlotIndex(SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)
                     .build();
@@ -184,6 +204,8 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
 
     @Rule
     public TestRule compatChangeRule = new PlatformCompatChangeRule();
+
+    @Rule public TemporaryFolder mTemporaryFolder = new TemporaryFolder();
 
     @Before
     public void setUp() throws Exception {
@@ -230,6 +252,10 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
 
         ((MockContentResolver) mContext.getContentResolver()).addProvider(
                 Telephony.Carriers.CONTENT_URI.getAuthority(), mSubscriptionProvider);
+
+        doReturn(mContext).when(mContext).createDeviceProtectedStorageContext();
+        File tempDir = mTemporaryFolder.newFolder("telephony_tests");
+        doReturn(tempDir).when(mContext).getFilesDir();
 
         mSubscriptionManagerServiceUT = new SubscriptionManagerService(mContext, Looper.myLooper(),
                 mFeatureFlags);
@@ -309,9 +335,18 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
             SubscriptionMap<Integer, Integer> map = (SubscriptionMap<Integer, Integer>)
                     field.get(mSubscriptionManagerServiceUT);
 
+            field = SubscriptionManagerService.class.getDeclaredField("mRemoteSubIds");
+            field.setAccessible(true);
+            SubscriptionSet<Integer> set = (SubscriptionSet<Integer>)
+                    field.get(mSubscriptionManagerServiceUT);
+
             if (subInfo.getSimSlotIndex() >= 0) {
                 // Change the slot -> subId mapping
                 map.put(subInfo.getSimSlotIndex(), subId);
+            } else if (mFeatureFlags.remoteSimSubIdSet() && subInfo.getSimSlotIndex()
+                    == SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB) {
+                // Change the remote SIM subId set
+                set.add(subId);
             }
 
             verify(mMockedSubscriptionManagerServiceCallback).onSubscriptionChanged(eq(subId));
@@ -325,6 +360,9 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
                 field.setAccessible(true);
                 Object array = field.get(mSubscriptionManagerServiceUT);
                 Array.set(array, subInfo.getSimSlotIndex(), TelephonyManager.SIM_STATE_LOADED);
+            } else if (mFeatureFlags.remoteSimSubIdSet() && subInfo.getSimSlotIndex()
+                    == SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB) {
+                mActiveSubs.add(subId);
             } else {
                 mActiveSubs.remove(subId);
             }
@@ -482,10 +520,9 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         // Grant carrier privilege
         setCarrierPrivilegesForSubId(true, 1);
 
-        // Replace field to set SDK version of vendor partition to Android V
-        int vendorApiLevel = Build.VERSION_CODES.VANILLA_ICE_CREAM;
+        // Replace field to set vendor API level to the one where the exceptions are enabled.
         replaceInstance(SubscriptionManagerService.class, "mVendorApiLevel",
-                mSubscriptionManagerServiceUT, vendorApiLevel);
+                mSubscriptionManagerServiceUT, TELEPHONY_FEATURE_ENFORCEMENT_VENDOR_API_LEVEL);
 
         // Enabled ENABLE_FEATURE_MAPPING, telephony features are defined
         doReturn(true).when(mPackageManager).hasSystemFeature(
@@ -505,6 +542,22 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
                 () -> mSubscriptionManagerServiceUT.setPhoneNumber(1,
                         SubscriptionManager.PHONE_NUMBER_SOURCE_CARRIER, FAKE_PHONE_NUMBER2,
                         CALLING_PACKAGE, CALLING_FEATURE));
+
+        // Resume Telephony feature for the next test
+        doReturn(true).when(mPackageManager).hasSystemFeature(
+                eq(PackageManager.FEATURE_TELEPHONY_SUBSCRIPTION));
+
+        // Test for PHONE_NUMBER_SOURCE_TS43
+        String phoneNumberFromTs43 = "1234567890";
+
+        mSubscriptionManagerServiceUT.setPhoneNumber(1,
+                SubscriptionManager.PHONE_NUMBER_SOURCE_TS43, phoneNumberFromTs43,
+                CALLING_PACKAGE, CALLING_FEATURE);
+        processAllMessages();
+
+        SubscriptionInfoInternal subInfo = mSubscriptionManagerServiceUT
+                .getSubscriptionInfoInternal(1);
+        assertThat(subInfo.getNumberFromTs43()).isEqualTo(phoneNumberFromTs43);
     }
 
     @Test
@@ -1829,9 +1882,11 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
     @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
     public void testGetPhoneNumberSourcePriority() throws Exception {
         mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PHONE_NUMBERS);
+        doReturn(Process.SYSTEM_UID).when(mBinder).getCallingUid();
 
         String phoneNumberFromCarrier = "8675309";
         String phoneNumberFromUicc = "1112223333";
+        String phoneNumberFromTs43 = "5551234";
         String phoneNumberFromIms = "5553466";
         String phoneNumberFromPhoneObject = "8001234567";
 
@@ -1842,6 +1897,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
                         .setNumberFromCarrier(phoneNumberFromCarrier)
                         .setNumber(phoneNumberFromUicc)
                         .setNumberFromIms(phoneNumberFromIms)
+                        .setNumberFromTs43(phoneNumberFromTs43)
                         .build();
         int subId = insertSubscription(multiNumberSubInfo);
 
@@ -1852,6 +1908,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
                 new SubscriptionInfoInternal.Builder(multiNumberSubInfo)
                         .setNumberFromCarrier("")
                         .setNumber("")
+                        .setNumberFromTs43(phoneNumberFromTs43)
                         .setNumberFromIms(phoneNumberFromIms)
                         .build();
         subId = insertSubscription(multiNumberSubInfo);
@@ -1862,7 +1919,72 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         doReturn("").when(mPhone).getLine1Number();
 
         assertThat(mSubscriptionManagerServiceUT.getPhoneNumberFromFirstAvailableSource(
+                subId, CALLING_PACKAGE, CALLING_FEATURE)).isEqualTo(phoneNumberFromTs43);
+
+        doReturn(10001).when(mBinder).getCallingUid();
+        assertThat(mSubscriptionManagerServiceUT.getPhoneNumberFromFirstAvailableSource(
+                subId, CALLING_PACKAGE, CALLING_FEATURE)).isEqualTo("");
+
+        setCarrierPrivilegesForSubId(true, subId);
+        assertThat(mSubscriptionManagerServiceUT.getPhoneNumberFromFirstAvailableSource(
+                subId, CALLING_PACKAGE, CALLING_FEATURE)).isEqualTo(phoneNumberFromTs43);
+
+        multiNumberSubInfo =
+                new SubscriptionInfoInternal.Builder(multiNumberSubInfo)
+                        .setNumberFromCarrier("")
+                        .setNumber("")
+                        .setNumberFromTs43("")
+                        .setNumberFromIms(phoneNumberFromIms)
+                        .build();
+        subId = insertSubscription(multiNumberSubInfo);
+
+        doReturn(mTelephonyManager).when(mTelephonyManager).createForSubscriptionId(anyInt());
+        doReturn(true).when(mTelephonyManager).isImsRegistered();
+        mSubscriptionManagerServiceUT.setImsNumberUpdateStatus(subId, true);
+        assertThat(mSubscriptionManagerServiceUT.getPhoneNumberFromFirstAvailableSource(
                 subId, CALLING_PACKAGE, CALLING_FEATURE)).isEqualTo(phoneNumberFromIms);
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetPhoneNumber_ImsNotRegistered() throws Exception {
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PHONE_NUMBERS);
+        doReturn(Process.SYSTEM_UID).when(mBinder).getCallingUid();
+
+        String phoneNumberFromCarrier = "";
+        String phoneNumberFromUicc = "";
+        String phoneNumberFromPhoneObject = "";
+        String phoneNumberFromTs43 = "";
+        String phoneNumberFromIms = "5553466";
+
+        // Set up a scenario where the number is unavailable from the phone, UICC or TS43
+        // but is available from IMS.
+        doReturn(phoneNumberFromPhoneObject).when(mPhone).getLine1Number();
+        SubscriptionInfoInternal multiNumberSubInfo =
+                new SubscriptionInfoInternal.Builder(FAKE_SUBSCRIPTION_INFO1)
+                        .setNumberFromCarrier(phoneNumberFromCarrier)
+                        .setNumber(phoneNumberFromUicc)
+                        .setNumberFromTs43(phoneNumberFromTs43)
+                        .setNumberFromIms(phoneNumberFromIms)
+                        .build();
+        int subId = insertSubscription(multiNumberSubInfo);
+
+        // Mock the IMS registration state of TelephonyManager to be unregistered (false).
+        doReturn(mTelephonyManager).when(mTelephonyManager).createForSubscriptionId(anyInt());
+        doReturn(false).when(mTelephonyManager).isImsRegistered();
+
+        // Verify the legacy API: It should return an empty string when IMS is not registered.
+        assertThat(mSubscriptionManagerServiceUT.getPhoneNumberFromFirstAvailableSource(
+                subId, CALLING_PACKAGE, CALLING_FEATURE)).isEmpty();
+
+        // Verify the new API: It should return the cached IMS number even when IMS is not
+        // registered.
+        assertThat(mSubscriptionManagerServiceUT.getLastKnownPhoneNumberFromFirstAvailableSource(
+                subId, CALLING_PACKAGE, CALLING_FEATURE)).isEqualTo(phoneNumberFromIms);
+
+        // Additional verification: The IMS number should remain stored in the SubscriptionInfo.
+        assertThat(mSubscriptionManagerServiceUT.getSubscriptionInfoInternal(subId)
+                .getNumberFromIms()).isEqualTo(phoneNumberFromIms);
     }
 
     @Test
@@ -2611,9 +2733,13 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
     public void testGetPhoneNumberFromDefaultSubscription() {
         mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
         mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+        doReturn(Process.SYSTEM_UID).when(mBinder).getCallingUid();
         int subId = insertSubscription(FAKE_SUBSCRIPTION_INFO1);
 
         mSubscriptionManagerServiceUT.setDefaultVoiceSubId(subId);
+        doReturn(mTelephonyManager).when(mTelephonyManager).createForSubscriptionId(anyInt());
+        doReturn(true).when(mTelephonyManager).isImsRegistered();
+        mSubscriptionManagerServiceUT.setImsNumberUpdateStatus(subId, true);
 
         assertThat(
                 mSubscriptionManagerServiceUT.getPhoneNumberFromFirstAvailableSource(
@@ -2636,6 +2762,49 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
                         SubscriptionManager.PHONE_NUMBER_SOURCE_IMS,
                         CALLING_PACKAGE,
                         CALLING_FEATURE)).isEqualTo(FAKE_PHONE_NUMBER1);
+        assertThat(
+                mSubscriptionManagerServiceUT.getPhoneNumber(
+                        SubscriptionManager.DEFAULT_SUBSCRIPTION_ID,
+                        SubscriptionManager.PHONE_NUMBER_SOURCE_TS43,
+                        CALLING_PACKAGE,
+                        CALLING_FEATURE)).isEqualTo(FAKE_PHONE_NUMBER1);
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetPhoneNumber_ts43() throws Exception {
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+
+        int subId = insertSubscription(FAKE_SUBSCRIPTION_INFO1);
+        String ts43Number = "1234567890";
+
+        mSubscriptionManagerServiceUT.setPhoneNumber(subId,
+                SubscriptionManager.PHONE_NUMBER_SOURCE_TS43, ts43Number,
+                CALLING_PACKAGE, CALLING_FEATURE);
+
+        doReturn(10001).when(mBinder).getCallingUid();
+        setCarrierPrivilegesForSubId(false, subId);
+        assertThrows(SecurityException.class, () ->
+                mSubscriptionManagerServiceUT.getPhoneNumber(
+                        subId,
+                        SubscriptionManager.PHONE_NUMBER_SOURCE_TS43,
+                        CALLING_PACKAGE, CALLING_FEATURE));
+
+        setCarrierPrivilegesForSubId(true, subId);
+        String result = mSubscriptionManagerServiceUT.getPhoneNumber(
+                subId,
+                SubscriptionManager.PHONE_NUMBER_SOURCE_TS43,
+                CALLING_PACKAGE, CALLING_FEATURE);
+        assertThat(result).isEqualTo(ts43Number);
+
+        setCarrierPrivilegesForSubId(false, subId);
+        doReturn(Process.SYSTEM_UID).when(mBinder).getCallingUid();
+        result = mSubscriptionManagerServiceUT.getPhoneNumber(
+                subId,
+                SubscriptionManager.PHONE_NUMBER_SOURCE_TS43,
+                CALLING_PACKAGE, CALLING_FEATURE);
+        assertThat(result).isEqualTo(ts43Number);
     }
 
     @Test
@@ -2832,7 +3001,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
 
     @Test
     @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
-    public void testDump() {
+    public void testDump() throws Exception {
         insertSubscription(FAKE_SUBSCRIPTION_INFO1);
         insertSubscription(FAKE_SUBSCRIPTION_INFO2);
 
@@ -2841,10 +3010,24 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
                 -> mSubscriptionManagerServiceUT.dump(new FileDescriptor(),
                 new PrintWriter(stringWriter), null));
 
+        setupPackageManagerMocks(CALLING_PACKAGE, Process.myUid());
+        setManageSubscriptionPlansPermission(true);
         mContextFixture.addCallingOrSelfPermission(Manifest.permission.DUMP);
         mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+        SubscriptionPlan plan = createTestSubscriptionPlan("dump plan");
+        mSubscriptionManagerServiceUT.setEnrollableSubscriptionPlans(
+                1, new SubscriptionPlan[]{plan}, 0, CALLING_PACKAGE);
+        processAllMessages();
         mSubscriptionManagerServiceUT.dump(new FileDescriptor(), new PrintWriter(stringWriter),
                 null);
+
+        String dumpOutput = stringWriter.toString();
+        assertThat(dumpOutput.length()).isGreaterThan(0);
+
+        // Test SubscriptionPlan dump
+        assertThat(dumpOutput).contains("Enrollable Subscription Plans:");
+        assertThat(dumpOutput).contains(plan.getTitle());
+        assertThat(dumpOutput).contains(CALLING_PACKAGE);
         assertThat(stringWriter.toString().length()).isGreaterThan(0);
     }
 
@@ -2932,7 +3115,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         assertThat(subInfo.getIccId()).isEqualTo(FAKE_MAC_ADDRESS1);
         assertThat(subInfo.getDisplayName()).isEqualTo(FAKE_CARRIER_NAME1);
         assertThat(subInfo.getSimSlotIndex()).isEqualTo(
-                SubscriptionManager.INVALID_SIM_SLOT_INDEX);
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
         assertThat(subInfo.getSubscriptionType()).isEqualTo(
                 SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
 
@@ -3066,6 +3249,38 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         assertThat(map.get(1)).isNull();
         map.clear();
         assertThat(map).hasSize(0);
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testSubscriptionSet() {
+        doReturn(true).when(mFeatureFlags).remoteSimSubIdSet();
+
+        SubscriptionSet<Integer> set = new SubscriptionSet<>();
+        assertThat(set.getLargest()).isNull();
+
+        set.add(0);
+        assertThat(set.contains(0)).isTrue();
+        assertThat(set.getLargest()).isEqualTo(0);
+
+        set.add(5);
+        assertThat(set.contains(5)).isTrue();
+        assertThat(set.getLargest()).isEqualTo(5);
+
+        set.add(2);
+        assertThat(set.contains(2)).isTrue();
+        assertThat(set.getLargest()).isEqualTo(5);
+
+        set.remove(5);
+        assertThat(set.contains(5)).isFalse();
+        assertThat(set.getLargest()).isEqualTo(2);
+
+        set.clear();
+        assertThat(set).hasSize(0);
+        assertThat(set.getLargest()).isNull();
+
+        set.addAll(Arrays.asList(2, 0, 1));
+        assertThat(set.toArray()).isEqualTo(new Object[]{0, 1, 2});
     }
 
     @Test
@@ -3270,6 +3485,67 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         SubscriptionInfoInternal subInfo = mSubscriptionManagerServiceUT
                 .getSubscriptionInfoInternal(2);
         assertThat(subInfo.isGroupDisabled()).isFalse();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testUpdateGroupDisabledUngroupedOpportunistic() {
+        doReturn(true).when(mFeatureFlags).enableIsPrivateNetworkApi();
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PHONE_STATE);
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+        mContextFixture.addCallingOrSelfPermission(
+                Manifest.permission.USE_ICC_AUTH_WITH_DEVICE_IDENTIFIER);
+
+        // Sub 1: Opportunistic, Ungrouped. Active (Slot 0).
+        SubscriptionInfoInternal sub1 = new SubscriptionInfoInternal
+                .Builder(FAKE_SUBSCRIPTION_INFO1)
+                .setOpportunistic(1)
+                .setGroupUuid("")
+                .setSimSlotIndex(0)
+                .build();
+        int subId1 = insertSubscription(sub1);
+
+        mSubscriptionManagerServiceUT.updateGroupDisabled();
+        assertThat(mSubscriptionManagerServiceUT.getSubscriptionInfoInternal(subId1)
+                .isGroupDisabled()).isFalse();
+
+        // Sub 2: Opportunistic, Grouped (UUID1). Active (Slot 1).
+        SubscriptionInfoInternal sub2 = new SubscriptionInfoInternal
+                .Builder(FAKE_SUBSCRIPTION_INFO2)
+                .setOpportunistic(1)
+                .setGroupUuid(FAKE_UUID1)
+                .setSimSlotIndex(1)
+                .build();
+        int subId2 = insertSubscription(sub2);
+
+        // Verify that sub 2 IS group disabled (Grouped, but no active primary in UUID1).
+        // Active subs: 1 (opp, null group), 2 (opp, UUID1).
+        mSubscriptionManagerServiceUT.updateGroupDisabled();
+        assertThat(mSubscriptionManagerServiceUT.getSubscriptionInfoInternal(subId2)
+                .isGroupDisabled()).isTrue();
+
+        // Sub 3: Primary, Grouped (UUID1). Active (Slot 0) - replaces Sub 1 in Slot 0 conceptually
+        mSubscriptionManagerServiceUT.updateSimState(
+                0, TelephonyManager.SIM_STATE_ABSENT, null, null);
+        processAllMessages();
+        SubscriptionInfoInternal sub3 = new SubscriptionInfoInternal
+                .Builder(FAKE_SUBSCRIPTION_INFO1)
+                .setId(3)
+                .setIccId(FAKE_ICCID3)
+                .setOpportunistic(0)
+                .setGroupUuid(FAKE_UUID1)
+                .setSimSlotIndex(0)
+                .build();
+        insertSubscription(sub3);
+
+        // Verify that sub 2 is enabled (Primary is active).
+        mSubscriptionManagerServiceUT.updateGroupDisabled();
+        assertThat(mSubscriptionManagerServiceUT.getSubscriptionInfoInternal(subId2)
+                .isGroupDisabled()).isFalse();
+
+        // Verify that sub 1 (inactive, ungrouped) is still enabled (default).
+        assertThat(mSubscriptionManagerServiceUT.getSubscriptionInfoInternal(subId1)
+                .isGroupDisabled()).isFalse();
     }
 
     @Test
@@ -3539,8 +3815,8 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         assertEquals(entitlementInfoMap,
                 mSubscriptionManagerServiceUT.getSatelliteEntitlementPlmnVoiceServicePolicy(subId));
 
-        // When calling SubscriptionDatabaseManager#getSubscriptionInfoInternalreturns returns a
-        // null, then verify the SubscriptionManagerService returns an empty List.
+        // When calling SubscriptionDatabaseManager#getSubscriptionInfoInternal returns a null, then
+        // verify the SubscriptionManagerService returns an empty List.
         SubscriptionDatabaseManager mockSubscriptionDatabaseManager = Mockito.mock(
                 SubscriptionDatabaseManager.class);
         Field field = SubscriptionManagerService.class.getDeclaredField(
@@ -3568,9 +3844,9 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         assertEquals(new HashMap<>(),
                 mSubscriptionManagerServiceUT.getSatelliteEntitlementPlmnVoiceServicePolicy(subId));
 
-        // When calling SubscriptionDatabaseManager#getSubscriptionInfoInternalreturns returns a
-        // non null. And when calling SubscriptionInfoInternal#getSatelliteEntitlementPlmns
-        // returns a null, then verify the SubscriptionManagerService returns an empty List.
+        // When calling SubscriptionDatabaseManager#getSubscriptionInfoInternal returns a non null.
+        // And when calling SubscriptionInfoInternal#getSatelliteEntitlementPlmns returns a null,
+        // then verify the SubscriptionManagerService returns an empty List.
         SubscriptionInfoInternal mockSubscriptionInfoInternal = Mockito.mock(
                 SubscriptionInfoInternal.class);
         doReturn(mockSubscriptionInfoInternal).when(
@@ -3622,169 +3898,91 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
             throws Exception {
         doReturn(enableFeature).when(mPackageManager).hasSystemFeature(
                 eq(PackageManager.FEATURE_TELEPHONY_SUBSCRIPTION));
-        int vendorApiLevel = Build.VERSION_CODES.BAKLAVA;
+        // Replace field to set vendor API level to the one where the exceptions are enabled.
         replaceInstance(SubscriptionManagerService.class, "mVendorApiLevel",
-                mSubscriptionManagerServiceUT, vendorApiLevel);
+                mSubscriptionManagerServiceUT, TELEPHONY_FEATURE_ENFORCEMENT_VENDOR_API_LEVEL);
         doReturn(new String[]{CALLING_PACKAGE}).when(mPackageManager).getPackagesForUid(anyInt());
         mContextFixture.putBooleanResource(
                 com.android.internal.R.bool.config_force_phone_globals_creation, enableOverlay);
     }
 
+    /**
+     * Verifies the lifecycle of adding, removing, and re-adding a remote SIM.
+     *
+     * <p>This method expects the caller to have already configured the desired simulation state
+     * using {@link #setTelephonySubscriptionSimulation}.
+     */
+    private void verifyRemoteSimAddRemoveCycle() {
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS1, FAKE_CARRIER_NAME1,
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        processAllMessages();
+
+        verify(mMockedSubscriptionManagerServiceCallback).onSubscriptionChanged(/* subId= */ eq(1));
+
+        SubscriptionInfoInternal subInfo = mSubscriptionManagerServiceUT
+                .getSubscriptionInfoInternal(/* subId= */ 1);
+        assertThat(subInfo).isNotNull();
+        assertThat(subInfo.getIccId()).isEqualTo(FAKE_MAC_ADDRESS1);
+        assertThat(subInfo.getDisplayName()).isEqualTo(FAKE_CARRIER_NAME1);
+        assertThat(subInfo.getSimSlotIndex()).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+        assertThat(subInfo.getSubscriptionType()).isEqualTo(
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+
+        assertThat(mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS1,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM)).isEqualTo(true);
+        assertThat(mSubscriptionManagerServiceUT.getAllSubInfoList(
+                CALLING_PACKAGE, CALLING_FEATURE)).isEmpty();
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubIdList(/* visibleOnly= */
+                false)).isEmpty();
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
+                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
+
+        setIdentifierAccess(true);
+        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS2, FAKE_CARRIER_NAME2,
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(2);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 2)).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubIdList(/* visibleOnly= */
+                false)).isNotEmpty();
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
+                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isNotEmpty();
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
+                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */
+                true).get(0).getIccId())
+                .isEqualTo(FAKE_MAC_ADDRESS2);
+    }
+
     @Test
     @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
-    public void testRemoteSimNoSubscriptionWithOverlay_addsAndVerifiesRemoteSim() throws Exception {
+    public void testRemoteSimNoSubscriptionWithOverlay_addRemoveCycleRemoteSim() throws Exception {
         setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
 
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
-
-        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS1, FAKE_CARRIER_NAME1,
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
-        processAllMessages();
-
-        verify(mMockedSubscriptionManagerServiceCallback).onSubscriptionChanged(/* subId= */ eq(1));
-
-        SubscriptionInfoInternal subInfo = mSubscriptionManagerServiceUT
-                .getSubscriptionInfoInternal(/* subId= */ 1);
-        assertThat(subInfo).isNotNull();
-        assertThat(subInfo.getIccId()).isEqualTo(FAKE_MAC_ADDRESS1);
-        assertThat(subInfo.getDisplayName()).isEqualTo(FAKE_CARRIER_NAME1);
-        assertThat(subInfo.getSimSlotIndex()).isEqualTo(
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
-        assertThat(subInfo.getSubscriptionType()).isEqualTo(
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
-
-        assertThat(mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS1,
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM)).isEqualTo(true);
-        assertThat(mSubscriptionManagerServiceUT.getAllSubInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE)).isEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubIdList(/* visibleOnly= */
-                false)).isEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
-
-        setIdentifierAccess(true);
-        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS2, FAKE_CARRIER_NAME2,
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
-        assertThat(mSubscriptionManagerServiceUT.getSubId(
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(1);
-        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubIdList(/* visibleOnly= */
-                false)).isNotEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isNotEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */
-                true).getFirst().getIccId())
-                .isEqualTo(FAKE_MAC_ADDRESS2);
+        verifyRemoteSimAddRemoveCycle();
     }
 
     @Test
     @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
-    public void testRemoteSimWithSubscriptionNoOverlay_addsAndVerifiesRemoteSim() throws Exception {
+    public void testRemoteSimWithSubscriptionNoOverlay_addRemoveCycleRemoteSim() throws Exception {
         setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ false);
 
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
-
-        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS1, FAKE_CARRIER_NAME1,
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
-        processAllMessages();
-
-        verify(mMockedSubscriptionManagerServiceCallback).onSubscriptionChanged(/* subId= */ eq(1));
-
-        SubscriptionInfoInternal subInfo = mSubscriptionManagerServiceUT
-                .getSubscriptionInfoInternal(/* subId= */ 1);
-        assertThat(subInfo).isNotNull();
-        assertThat(subInfo.getIccId()).isEqualTo(FAKE_MAC_ADDRESS1);
-        assertThat(subInfo.getDisplayName()).isEqualTo(FAKE_CARRIER_NAME1);
-        assertThat(subInfo.getSimSlotIndex()).isEqualTo(
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
-        assertThat(subInfo.getSubscriptionType()).isEqualTo(
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
-
-        assertThat(mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS1,
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM)).isEqualTo(true);
-        assertThat(mSubscriptionManagerServiceUT.getAllSubInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE)).isEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubIdList(/* visibleOnly= */
-                false)).isEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
-
-        setIdentifierAccess(true);
-        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS2, FAKE_CARRIER_NAME2,
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
-        assertThat(mSubscriptionManagerServiceUT.getSubId(
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(1);
-        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubIdList(/* visibleOnly= */
-                false)).isNotEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isNotEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */
-                true).getFirst().getIccId())
-                .isEqualTo(FAKE_MAC_ADDRESS2);
+        verifyRemoteSimAddRemoveCycle();
     }
 
     @Test
     @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
-    public void testRemoteSimWithSubscriptionAndOverlay_addsAndVerifiesRemoteSim()
+    public void testRemoteSimWithSubscriptionAndOverlay_addRemoveCycleRemoteSim()
             throws Exception {
         setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ true);
 
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
-
-        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS1, FAKE_CARRIER_NAME1,
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
-        processAllMessages();
-
-        verify(mMockedSubscriptionManagerServiceCallback).onSubscriptionChanged(/* subId= */ eq(1));
-
-        SubscriptionInfoInternal subInfo = mSubscriptionManagerServiceUT
-                .getSubscriptionInfoInternal(/* subId= */ 1);
-        assertThat(subInfo).isNotNull();
-        assertThat(subInfo.getIccId()).isEqualTo(FAKE_MAC_ADDRESS1);
-        assertThat(subInfo.getDisplayName()).isEqualTo(FAKE_CARRIER_NAME1);
-        assertThat(subInfo.getSimSlotIndex()).isEqualTo(
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
-        assertThat(subInfo.getSubscriptionType()).isEqualTo(
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
-
-        assertThat(mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS1,
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM)).isEqualTo(true);
-        assertThat(mSubscriptionManagerServiceUT.getAllSubInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE)).isEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubIdList(/* visibleOnly= */
-                false)).isEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
-
-        setIdentifierAccess(true);
-        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS2, FAKE_CARRIER_NAME2,
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
-        assertThat(mSubscriptionManagerServiceUT.getSubId(
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(1);
-        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(
-                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubIdList(/* visibleOnly= */
-                false)).isNotEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isNotEmpty();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */
-                true).getFirst().getIccId())
-                .isEqualTo(FAKE_MAC_ADDRESS2);
+        verifyRemoteSimAddRemoveCycle();
     }
 
     @Test
@@ -3804,6 +4002,381 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         verify(mMockedSubscriptionManagerServiceCallback, never()).onSubscriptionChanged(eq(1));
         assertThat(
                 mSubscriptionManagerServiceUT.getSubscriptionInfoInternal(/* subId= */ 1)).isNull();
+    }
+
+    /**
+     * Verifies that you can insert two remote SIMs together.
+     *
+     * <p>This method expects the caller to have already configured the desired simulation state
+     * using {@link #setTelephonySubscriptionSimulation}.
+     */
+    private void verifyRemoteSimAddTwo() {
+        doReturn(true).when(mFeatureFlags).remoteSimSubIdSet();
+
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS1, FAKE_CARRIER_NAME1,
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        processAllMessages();
+
+        verify(mMockedSubscriptionManagerServiceCallback).onSubscriptionChanged(/* subId= */ eq(1));
+
+        SubscriptionInfoInternal subInfo = mSubscriptionManagerServiceUT
+                .getSubscriptionInfoInternal(/* subId= */ 1);
+        assertThat(subInfo).isNotNull();
+        assertThat(subInfo.getIccId()).isEqualTo(FAKE_MAC_ADDRESS1);
+        assertThat(subInfo.getDisplayName()).isEqualTo(FAKE_CARRIER_NAME1);
+        assertThat(subInfo.getSimSlotIndex()).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+        assertThat(subInfo.getSubscriptionType()).isEqualTo(
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(1);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+
+        setIdentifierAccess(true);
+
+        // Test with second remote SIM
+        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS2, FAKE_CARRIER_NAME2,
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(2);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 2)).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubIdList(/* visibleOnly= */
+                false)).isEqualTo(new int[]{1, 2});
+
+        List<SubscriptionInfo> subInfoList = mSubscriptionManagerServiceUT
+                .getActiveSubscriptionInfoList(CALLING_PACKAGE, CALLING_FEATURE,
+                        /* isForAllProfiles= */ true);
+        assertThat(subInfoList).hasSize(2);
+        assertThat(subInfoList.get(0).getSimSlotIndex()).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+        assertThat(subInfoList.get(0).getIccId()).isEqualTo(FAKE_MAC_ADDRESS1);
+        assertThat(subInfoList.get(1).getSimSlotIndex()).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+        assertThat(subInfoList.get(1).getIccId()).isEqualTo(FAKE_MAC_ADDRESS2);
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testTwoRemoteSimsNoSubscriptionWithOverlay_addsAndVerifiesRemoteSim()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
+
+        verifyRemoteSimAddTwo();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testTwoRemoteSimsWithSubscriptionNoOverlay_addsAndVerifiesRemoteSim()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ false);
+
+        verifyRemoteSimAddTwo();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testTwoRemoteSimsWithSubscriptionAndOverlay_addsAndVerifiesRemoteSim()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ true);
+
+        verifyRemoteSimAddTwo();
+    }
+
+    /**
+     * Verifies that you can insert a local SIM followed by a remote SIM together.
+     *
+     * <p>This method expects the caller to have already configured the desired simulation state
+     * using {@link #setTelephonySubscriptionSimulation}.
+     */
+    private void verifyRemoteSimAddLocalAndRemote() {
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        // Insert local SIM first
+        mSubscriptionManagerServiceUT.addSubInfo(FAKE_ICCID1, FAKE_CARRIER_NAME1,
+                0, SubscriptionManager.SUBSCRIPTION_TYPE_LOCAL_SIM);
+        processAllMessages();
+
+        verify(mMockedSubscriptionManagerServiceCallback).onSubscriptionChanged(/* subId= */ eq(1));
+
+        SubscriptionInfoInternal subInfo = mSubscriptionManagerServiceUT
+                .getSubscriptionInfoInternal(/* subId= */ 1);
+        assertThat(subInfo).isNotNull();
+        assertThat(subInfo.getIccId()).isEqualTo(FAKE_ICCID1);
+        assertThat(subInfo.getDisplayName()).isEqualTo(FAKE_CARRIER_NAME1);
+        assertThat(subInfo.getSimSlotIndex()).isEqualTo(0);
+        assertThat(subInfo.getSubscriptionType()).isEqualTo(
+                SubscriptionManager.SUBSCRIPTION_TYPE_LOCAL_SIM);
+        assertThat(mSubscriptionManagerServiceUT.getSubId(0)).isEqualTo(1);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(0);
+
+        setIdentifierAccess(true);
+
+        // Insert remote SIM second
+        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS2, FAKE_CARRIER_NAME2,
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(2);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 2)).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubIdList(/* visibleOnly= */
+                false)).isEqualTo(new int[]{1, 2});
+
+        List<SubscriptionInfo> subInfoList = mSubscriptionManagerServiceUT
+                .getActiveSubscriptionInfoList(CALLING_PACKAGE, CALLING_FEATURE,
+                        /* isForAllProfiles= */ true);
+        assertThat(subInfoList).hasSize(2);
+        // Not in insertion order since list is sorted by slot index
+        assertThat(subInfoList.get(1).getSimSlotIndex()).isEqualTo(0);
+        assertThat(subInfoList.get(1).getIccId()).isEqualTo(FAKE_ICCID1);
+        assertThat(subInfoList.get(0).getSimSlotIndex()).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+        assertThat(subInfoList.get(0).getIccId()).isEqualTo(FAKE_MAC_ADDRESS2);
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testLocalAndRemoteSimsNoSubscriptionWithOverlay_addsAndVerifiesBothSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
+
+        verifyRemoteSimAddLocalAndRemote();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testLocalAndRemoteSimsWithSubscriptionNoOverlay_addsAndVerifiesBothSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ false);
+
+        verifyRemoteSimAddLocalAndRemote();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testLocalAndRemoteSimsWithSubscriptionAndOverlay_addsAndVerifiesBothSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ true);
+
+        verifyRemoteSimAddLocalAndRemote();
+    }
+
+    /**
+     * Verifies that you can insert a remote SIM followed by a local SIM together.
+     *
+     * <p>This method expects the caller to have already configured the desired simulation state
+     * using {@link #setTelephonySubscriptionSimulation}.
+     */
+    private void verifyRemoteSimAddRemoteAndLocal() {
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        // Insert remote SIM first
+        mSubscriptionManagerServiceUT.addSubInfo(FAKE_MAC_ADDRESS1, FAKE_CARRIER_NAME1,
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        processAllMessages();
+
+        verify(mMockedSubscriptionManagerServiceCallback).onSubscriptionChanged(/* subId= */ eq(1));
+
+        SubscriptionInfoInternal subInfo = mSubscriptionManagerServiceUT
+                .getSubscriptionInfoInternal(/* subId= */ 1);
+        assertThat(subInfo).isNotNull();
+        assertThat(subInfo.getIccId()).isEqualTo(FAKE_MAC_ADDRESS1);
+        assertThat(subInfo.getDisplayName()).isEqualTo(FAKE_CARRIER_NAME1);
+        assertThat(subInfo.getSimSlotIndex()).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+        assertThat(subInfo.getSubscriptionType()).isEqualTo(
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(1);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+
+        setIdentifierAccess(true);
+
+        // Insert local SIM second
+        mSubscriptionManagerServiceUT.addSubInfo(FAKE_ICCID2, FAKE_CARRIER_NAME2,
+                1, SubscriptionManager.SUBSCRIPTION_TYPE_LOCAL_SIM);
+        assertThat(mSubscriptionManagerServiceUT.getSubId(1)).isEqualTo(2);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 2)).isEqualTo(1);
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubIdList(/* visibleOnly= */
+                false)).isEqualTo(new int[]{1, 2});
+
+        List<SubscriptionInfo> subInfoList = mSubscriptionManagerServiceUT
+                .getActiveSubscriptionInfoList(CALLING_PACKAGE, CALLING_FEATURE,
+                        /* isForAllProfiles= */ true);
+        assertThat(subInfoList).hasSize(2);
+        assertThat(subInfoList.get(0).getSimSlotIndex()).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+        assertThat(subInfoList.get(0).getIccId()).isEqualTo(FAKE_MAC_ADDRESS1);
+        assertThat(subInfoList.get(1).getSimSlotIndex()).isEqualTo(1);
+        assertThat(subInfoList.get(1).getIccId()).isEqualTo(FAKE_ICCID2);
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testRemoteAndLocalSimsNoSubscriptionWithOverlay_addsAndVerifiesBothSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
+
+        verifyRemoteSimAddRemoteAndLocal();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testRemoteAndLocalSimsWithSubscriptionNoOverlay_addsAndVerifiesBothSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ false);
+
+        verifyRemoteSimAddRemoteAndLocal();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testRemoteAndLocalSimsWithSubscriptionAndOverlay_addsAndVerifiesBothSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ true);
+
+        verifyRemoteSimAddRemoteAndLocal();
+    }
+
+    /**
+     * Verifies that getSubId correctly returns the most recently inserted remote SIM after removing
+     * the second remote SIM.
+     */
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetSubIdNoSubscriptionWithOverlay_afterRemovingSecondRemoteSim()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
+
+        doReturn(true).when(mFeatureFlags).remoteSimSubIdSet();
+
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        insertSubscription(FAKE_REMOTE_SIM1);
+
+        // Grant carrier privilege
+        setCarrierPrivilegesForSubId(/* hasCarrierPrivileges= */ true, /* subId= */ 1);
+        SubscriptionInfo subInfo = mSubscriptionManagerServiceUT
+                .getSubscriptionInfo(/* subId= */ 1);
+        assertThat(subInfo).isNotNull();
+        assertThat(subInfo).isEqualTo(FAKE_REMOTE_SIM1.toSubscriptionInfo());
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(1);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+
+        // Test with second remote SIM
+        insertSubscription(FAKE_REMOTE_SIM2);
+        // Grant carrier privilege
+        setCarrierPrivilegesForSubId(/* hasCarrierPrivileges= */ true, /* subId= */ 2);
+        subInfo = mSubscriptionManagerServiceUT
+                .getSubscriptionInfo(/* subId= */ 2);
+        assertThat(subInfo).isNotNull();
+        assertThat(subInfo).isEqualTo(FAKE_REMOTE_SIM2.toSubscriptionInfo());
+        // Correctly gives most recently inserted remote SIM
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(2);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 2)).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+
+        // Remove second remote SIM
+        mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS2,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        // Correctly gives most recently inserted remote SIM (the remaining one)
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(1);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 2)).isEqualTo(
+                SubscriptionManager.INVALID_SIM_SLOT_INDEX);
+
+        // Remove first remote SIM
+        mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS1,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(
+                SubscriptionManager.INVALID_SUBSCRIPTION_ID);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(
+                SubscriptionManager.INVALID_SIM_SLOT_INDEX);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 2)).isEqualTo(
+                SubscriptionManager.INVALID_SIM_SLOT_INDEX);
+    }
+
+    /**
+     * Verifies that getSubId correctly returns the most recently inserted remote SIM after removing
+     * the first remote SIM.
+     */
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetSubIdNoSubscriptionWithOverlay_afterRemovingFirstRemoteSim()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
+
+        doReturn(true).when(mFeatureFlags).remoteSimSubIdSet();
+
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        insertSubscription(FAKE_REMOTE_SIM1);
+
+        // Grant carrier privilege
+        setCarrierPrivilegesForSubId(/* hasCarrierPrivileges= */ true, /* subId= */ 1);
+        SubscriptionInfo subInfo = mSubscriptionManagerServiceUT
+                .getSubscriptionInfo(/* subId= */ 1);
+        assertThat(subInfo).isNotNull();
+        assertThat(subInfo).isEqualTo(FAKE_REMOTE_SIM1.toSubscriptionInfo());
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(1);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+
+        // Test with second remote SIM
+        insertSubscription(FAKE_REMOTE_SIM2);
+        // Grant carrier privilege
+        setCarrierPrivilegesForSubId(/* hasCarrierPrivileges= */ true, /* subId= */ 2);
+        subInfo = mSubscriptionManagerServiceUT
+                .getSubscriptionInfo(/* subId= */ 2);
+        assertThat(subInfo).isNotNull();
+        assertThat(subInfo).isEqualTo(FAKE_REMOTE_SIM2.toSubscriptionInfo());
+        // Correctly gives most recently inserted remote SIM
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(2);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 2)).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+
+        // Remove first remote SIM
+        mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS1,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        // Correctly gives most recently inserted remote SIM (the remaining one)
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(2);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(
+                SubscriptionManager.INVALID_SIM_SLOT_INDEX);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 2)).isEqualTo(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB);
+
+        // Remove second remote SIM
+        mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS2,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM);
+        assertThat(mSubscriptionManagerServiceUT.getSubId(
+                SubscriptionManager.SLOT_INDEX_FOR_REMOTE_SIM_SUB)).isEqualTo(
+                SubscriptionManager.INVALID_SUBSCRIPTION_ID);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 1)).isEqualTo(
+                SubscriptionManager.INVALID_SIM_SLOT_INDEX);
+        assertThat(mSubscriptionManagerServiceUT.getSlotIndex(/* subId= */ 2)).isEqualTo(
+                SubscriptionManager.INVALID_SIM_SLOT_INDEX);
     }
 
     @Test
@@ -3849,15 +4422,17 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         assertThat(subInfos.get(0)).isEqualTo(FAKE_SUBSCRIPTION_INFO1.toSubscriptionInfo());
     }
 
-    @Test
-    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
-    public void testGetActiveSubscriptionInfoListNoSubscriptionWithOverlay_remoteSimListed()
-            throws Exception {
-        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
-
+    /**
+     * Verifies that getActiveSubscriptionInfoList correctly lists a remote SIM, and its
+     * interactions with permissions work as intended.
+     *
+     * <p>This method expects the caller to have already configured the desired simulation state
+     * using {@link #setTelephonySubscriptionSimulation}.
+     */
+    private void verifyRemoteSimListedGetActiveSubscriptionInfoList() {
         // Grant MODIFY_PHONE_STATE permission for insertion.
         mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
-        insertSubscription(FAKE_REMOTE_SIM);
+        insertSubscription(FAKE_REMOTE_SIM1);
         // Remove MODIFY_PHONE_STATE
         mContextFixture.removeCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
 
@@ -3865,7 +4440,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
                 CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
 
-        // Grant READ_PHONE_STATE permission for insertion.
+        // Grant READ_PHONE_STATE permission for retrieval.
         mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PHONE_STATE);
         // Allow the application to perform.
         doReturn(AppOpsManager.MODE_ALLOWED).when(mAppOpsManager)
@@ -3889,7 +4464,16 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
                 .getActiveSubscriptionInfoList(CALLING_PACKAGE,
                         CALLING_FEATURE, /* isForAllProfiles= */ true);
         assertThat(subInfos).hasSize(1);
-        assertThat(subInfos.get(0)).isEqualTo(FAKE_REMOTE_SIM.toSubscriptionInfo());
+        assertThat(subInfos.get(0)).isEqualTo(FAKE_REMOTE_SIM1.toSubscriptionInfo());
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetActiveSubscriptionInfoListNoSubscriptionWithOverlay_remoteSimListed()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
+
+        verifyRemoteSimListedGetActiveSubscriptionInfoList();
     }
 
     @Test
@@ -3898,41 +4482,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
             throws Exception {
         setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ false);
 
-        // Grant MODIFY_PHONE_STATE permission for insertion.
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
-        insertSubscription(FAKE_REMOTE_SIM);
-        // Remove MODIFY_PHONE_STATE
-        mContextFixture.removeCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
-
-        // Should get an empty list without READ_PHONE_STATE.
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
-
-        // Grant READ_PHONE_STATE permission for insertion.
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PHONE_STATE);
-        // Allow the application to perform.
-        doReturn(AppOpsManager.MODE_ALLOWED).when(mAppOpsManager)
-                .noteOpNoThrow(eq(AppOpsManager.OPSTR_READ_PHONE_STATE), anyInt(),
-                        nullable(String.class), nullable(String.class), nullable(String.class));
-
-        List<SubscriptionInfo> subInfos = mSubscriptionManagerServiceUT
-                .getActiveSubscriptionInfoList(CALLING_PACKAGE,
-                        CALLING_FEATURE, /* isForAllProfiles= */ true);
-        // Identifying information removed
-        assertThat(subInfos).hasSize(1);
-        assertThat(subInfos.get(0).getIccId()).isEmpty();
-        assertThat(subInfos.get(0).getCardString()).isEmpty();
-        assertThat(subInfos.get(0).getNumber()).isEmpty();
-        assertThat(subInfos.get(0).getGroupUuid()).isNull();
-
-        // Grant carrier privilege
-        setCarrierPrivilegesForSubId(/* hasCarrierPrivileges= */ true, /* subId= */ 1);
-
-        subInfos = mSubscriptionManagerServiceUT
-                .getActiveSubscriptionInfoList(CALLING_PACKAGE,
-                        CALLING_FEATURE, /* isForAllProfiles= */ true);
-        assertThat(subInfos).hasSize(1);
-        assertThat(subInfos.get(0)).isEqualTo(FAKE_REMOTE_SIM.toSubscriptionInfo());
+        verifyRemoteSimListedGetActiveSubscriptionInfoList();
     }
 
     @Test
@@ -3941,41 +4491,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
             throws Exception {
         setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ true);
 
-        // Grant MODIFY_PHONE_STATE permission for insertion.
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
-        insertSubscription(FAKE_REMOTE_SIM);
-        // Remove MODIFY_PHONE_STATE
-        mContextFixture.removeCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
-
-        // Should get an empty list without READ_PHONE_STATE.
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
-
-        // Grant READ_PHONE_STATE permission for insertion.
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PHONE_STATE);
-        // Allow the application to perform.
-        doReturn(AppOpsManager.MODE_ALLOWED).when(mAppOpsManager)
-                .noteOpNoThrow(eq(AppOpsManager.OPSTR_READ_PHONE_STATE), anyInt(),
-                        nullable(String.class), nullable(String.class), nullable(String.class));
-
-        List<SubscriptionInfo> subInfos = mSubscriptionManagerServiceUT
-                .getActiveSubscriptionInfoList(CALLING_PACKAGE,
-                        CALLING_FEATURE, /* isForAllProfiles= */ true);
-        // Identifying information removed
-        assertThat(subInfos).hasSize(1);
-        assertThat(subInfos.get(0).getIccId()).isEmpty();
-        assertThat(subInfos.get(0).getCardString()).isEmpty();
-        assertThat(subInfos.get(0).getNumber()).isEmpty();
-        assertThat(subInfos.get(0).getGroupUuid()).isNull();
-
-        // Grant carrier privilege
-        setCarrierPrivilegesForSubId(/* hasCarrierPrivileges= */ true, /* subId= */ 1);
-
-        subInfos = mSubscriptionManagerServiceUT
-                .getActiveSubscriptionInfoList(CALLING_PACKAGE,
-                        CALLING_FEATURE, /* isForAllProfiles= */ true);
-        assertThat(subInfos).hasSize(1);
-        assertThat(subInfos.get(0)).isEqualTo(FAKE_REMOTE_SIM.toSubscriptionInfo());
+        verifyRemoteSimListedGetActiveSubscriptionInfoList();
     }
 
     @Test
@@ -3986,7 +4502,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
 
         // Grant MODIFY_PHONE_STATE permission for insertion.
         mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
-        insertSubscription(FAKE_REMOTE_SIM);
+        insertSubscription(FAKE_REMOTE_SIM1);
         // Remove MODIFY_PHONE_STATE
         mContextFixture.removeCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
 
@@ -4013,6 +4529,97 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
                 () -> mSubscriptionManagerServiceUT
                         .getActiveSubscriptionInfoList(CALLING_PACKAGE,
                                 CALLING_FEATURE, /* isForAllProfiles= */ true));
+    }
+
+    /**
+     * Verifies that getActiveSubscriptionInfoList correctly lists two remote SIMs, and its
+     * interactions with permissions work as intended.
+     *
+     * <p>This method expects the caller to have already configured the desired simulation state
+     * using {@link #setTelephonySubscriptionSimulation}.
+     */
+    private void verifyRemoteSimListedGetActiveSubscriptionInfoList_twoRemoteSims() {
+        doReturn(true).when(mFeatureFlags).remoteSimSubIdSet();
+
+        // Grant MODIFY_PHONE_STATE permission for insertion.
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+        insertSubscription(FAKE_REMOTE_SIM1);
+        // Remove MODIFY_PHONE_STATE
+        mContextFixture.removeCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+
+        // Should get an empty list without READ_PHONE_STATE.
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
+                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
+
+        // Grant READ_PHONE_STATE permission for insertion.
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PHONE_STATE);
+        // Allow the application to perform.
+        doReturn(AppOpsManager.MODE_ALLOWED).when(mAppOpsManager)
+                .noteOpNoThrow(eq(AppOpsManager.OPSTR_READ_PHONE_STATE), anyInt(),
+                        nullable(String.class), nullable(String.class), nullable(String.class));
+
+        List<SubscriptionInfo> subInfos = mSubscriptionManagerServiceUT
+                .getActiveSubscriptionInfoList(CALLING_PACKAGE,
+                        CALLING_FEATURE, /* isForAllProfiles= */ true);
+        // Identifying information removed
+        assertThat(subInfos).hasSize(1);
+        assertThat(subInfos.get(0).getIccId()).isEmpty();
+        assertThat(subInfos.get(0).getCardString()).isEmpty();
+        assertThat(subInfos.get(0).getNumber()).isEmpty();
+        assertThat(subInfos.get(0).getGroupUuid()).isNull();
+
+        // Grant carrier privilege
+        setCarrierPrivilegesForSubId(/* hasCarrierPrivileges= */ true, /* subId= */ 1);
+
+        subInfos = mSubscriptionManagerServiceUT
+                .getActiveSubscriptionInfoList(CALLING_PACKAGE,
+                        CALLING_FEATURE, /* isForAllProfiles= */ true);
+        assertThat(subInfos).hasSize(1);
+        assertThat(subInfos.get(0)).isEqualTo(FAKE_REMOTE_SIM1.toSubscriptionInfo());
+
+        // Test with second remote SIM
+        // Grant MODIFY_PHONE_STATE permission for insertion.
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+        insertSubscription(FAKE_REMOTE_SIM2);
+        // Remove MODIFY_PHONE_STATE
+        mContextFixture.removeCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+
+        // Grant carrier privilege
+        setCarrierPrivilegesForSubId(/* hasCarrierPrivileges= */ true, /* subId= */ 2);
+
+        subInfos = mSubscriptionManagerServiceUT
+                .getActiveSubscriptionInfoList(CALLING_PACKAGE,
+                        CALLING_FEATURE, /* isForAllProfiles= */ true);
+        assertThat(subInfos).hasSize(2);
+        assertThat(subInfos.get(0)).isEqualTo(FAKE_REMOTE_SIM1.toSubscriptionInfo());
+        assertThat(subInfos.get(1)).isEqualTo(FAKE_REMOTE_SIM2.toSubscriptionInfo());
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetActiveSubscriptionInfoListNoSubscriptionWithOverlay_twoRemoteSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
+
+        verifyRemoteSimListedGetActiveSubscriptionInfoList_twoRemoteSims();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetActiveSubscriptionInfoListWithSubscriptionNoOverlay_twoRemoteSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ false);
+
+        verifyRemoteSimListedGetActiveSubscriptionInfoList_twoRemoteSims();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetActiveSubscriptionInfoListWithSubscriptionAndOverlay_twoRemoteSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ true);
+
+        verifyRemoteSimListedGetActiveSubscriptionInfoList_twoRemoteSims();
     }
 
     @Test
@@ -4033,13 +4640,14 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         assertThat(subInfo).isEqualTo(FAKE_SUBSCRIPTION_INFO1.toSubscriptionInfo());
     }
 
-    @Test
-    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
-    public void testGetActiveSubInfoForIccIdNoSubscriptionWithOverlay_returnsRemoteSimForIccId()
-            throws Exception {
-        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
-
-        insertSubscription(FAKE_REMOTE_SIM);
+    /**
+     * Verifies that getActiveSubscriptionInfoForIccId can retrieve a remote SIM.
+     *
+     * <p>This method expects the caller to have already configured the desired simulation state
+     * using {@link #setTelephonySubscriptionSimulation}.
+     */
+    private void verifyRemoteSimReturnedGetActiveSubscriptionInfoForIccId() {
+        insertSubscription(FAKE_REMOTE_SIM1);
 
         // Should fail without READ_PRIVILEGED_PHONE_STATE
         assertThrows(SecurityException.class, () -> mSubscriptionManagerServiceUT
@@ -4049,7 +4657,16 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
         SubscriptionInfo subInfo = mSubscriptionManagerServiceUT.getActiveSubscriptionInfoForIccId(
                 FAKE_MAC_ADDRESS1, CALLING_PACKAGE, CALLING_FEATURE);
-        assertThat(subInfo).isEqualTo(FAKE_REMOTE_SIM.toSubscriptionInfo());
+        assertThat(subInfo).isEqualTo(FAKE_REMOTE_SIM1.toSubscriptionInfo());
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetActiveSubInfoForIccIdNoSubscriptionWithOverlay_returnsRemoteSimForIccId()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
+
+        verifyRemoteSimReturnedGetActiveSubscriptionInfoForIccId();
     }
 
     @Test
@@ -4058,17 +4675,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
             throws Exception {
         setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ false);
 
-        insertSubscription(FAKE_REMOTE_SIM);
-
-        // Should fail without READ_PRIVILEGED_PHONE_STATE
-        assertThrows(SecurityException.class, () -> mSubscriptionManagerServiceUT
-                .getActiveSubscriptionInfoForIccId(FAKE_MAC_ADDRESS1, CALLING_PACKAGE,
-                        CALLING_FEATURE));
-
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
-        SubscriptionInfo subInfo = mSubscriptionManagerServiceUT.getActiveSubscriptionInfoForIccId(
-                FAKE_MAC_ADDRESS1, CALLING_PACKAGE, CALLING_FEATURE);
-        assertThat(subInfo).isEqualTo(FAKE_REMOTE_SIM.toSubscriptionInfo());
+        verifyRemoteSimReturnedGetActiveSubscriptionInfoForIccId();
     }
 
     @Test
@@ -4077,17 +4684,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
             throws Exception {
         setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ true);
 
-        insertSubscription(FAKE_REMOTE_SIM);
-
-        // Should fail without READ_PRIVILEGED_PHONE_STATE
-        assertThrows(SecurityException.class, () -> mSubscriptionManagerServiceUT
-                .getActiveSubscriptionInfoForIccId(FAKE_MAC_ADDRESS1, CALLING_PACKAGE,
-                        CALLING_FEATURE));
-
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
-        SubscriptionInfo subInfo = mSubscriptionManagerServiceUT.getActiveSubscriptionInfoForIccId(
-                FAKE_MAC_ADDRESS1, CALLING_PACKAGE, CALLING_FEATURE);
-        assertThat(subInfo).isEqualTo(FAKE_REMOTE_SIM.toSubscriptionInfo());
+        verifyRemoteSimReturnedGetActiveSubscriptionInfoForIccId();
     }
 
     @Test
@@ -4096,7 +4693,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
             throws Exception {
         setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ false);
 
-        insertSubscription(FAKE_REMOTE_SIM);
+        insertSubscription(FAKE_REMOTE_SIM1);
 
         // Should fail without READ_PRIVILEGED_PHONE_STATE
         assertThrows(SecurityException.class, () -> mSubscriptionManagerServiceUT
@@ -4107,6 +4704,66 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         assertThrows(UnsupportedOperationException.class,
                 () -> mSubscriptionManagerServiceUT.getActiveSubscriptionInfoForIccId(
                         FAKE_MAC_ADDRESS1, CALLING_PACKAGE, CALLING_FEATURE));
+    }
+
+    /**
+     * Verifies that getActiveSubscriptionInfoForIccId can retrieve the correct remote SIM, even
+     * when two are inserted.
+     *
+     * <p>This method expects the caller to have already configured the desired simulation state
+     * using {@link #setTelephonySubscriptionSimulation}.
+     */
+    private void verifyRemoteSimReturnedGetActiveSubscriptionInfoForIccId_twoRemoteSims() {
+        doReturn(true).when(mFeatureFlags).remoteSimSubIdSet();
+
+        insertSubscription(FAKE_REMOTE_SIM1);
+
+        // Should fail without READ_PRIVILEGED_PHONE_STATE
+        assertThrows(SecurityException.class, () -> mSubscriptionManagerServiceUT
+                .getActiveSubscriptionInfoForIccId(FAKE_MAC_ADDRESS1, CALLING_PACKAGE,
+                        CALLING_FEATURE));
+
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+        SubscriptionInfo subInfo = mSubscriptionManagerServiceUT.getActiveSubscriptionInfoForIccId(
+                FAKE_MAC_ADDRESS1, CALLING_PACKAGE, CALLING_FEATURE);
+        assertThat(subInfo).isEqualTo(FAKE_REMOTE_SIM1.toSubscriptionInfo());
+
+        // Test with second remote SIM
+        insertSubscription(FAKE_REMOTE_SIM2);
+
+        subInfo = mSubscriptionManagerServiceUT.getActiveSubscriptionInfoForIccId(
+                FAKE_MAC_ADDRESS1, CALLING_PACKAGE, CALLING_FEATURE);
+        assertThat(subInfo).isEqualTo(FAKE_REMOTE_SIM1.toSubscriptionInfo());
+        subInfo = mSubscriptionManagerServiceUT.getActiveSubscriptionInfoForIccId(
+                FAKE_MAC_ADDRESS2, CALLING_PACKAGE, CALLING_FEATURE);
+        assertThat(subInfo).isEqualTo(FAKE_REMOTE_SIM2.toSubscriptionInfo());
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetActiveSubInfoForIccIdNoSubscriptionWithOverlay_twoRemoteSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
+
+        verifyRemoteSimReturnedGetActiveSubscriptionInfoForIccId_twoRemoteSims();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetActiveSubInfoForIccIdWithSubscriptionNoOverlay_twoRemoteSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ false);
+
+        verifyRemoteSimReturnedGetActiveSubscriptionInfoForIccId_twoRemoteSims();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testGetActiveSubInfoForIccIdWithSubscriptionAndOverlay_twoRemoteSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ true);
+
+        verifyRemoteSimReturnedGetActiveSubscriptionInfoForIccId_twoRemoteSims();
     }
 
     @Test
@@ -4131,12 +4788,14 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
                 CALLING_PACKAGE, CALLING_FEATURE, true)).isEmpty();
     }
 
-    @Test
-    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
-    public void testRemoveSubInfoNoSubscriptionWithOverlay_remoteSimRemoved() throws Exception {
-        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
-
-        insertSubscription(FAKE_REMOTE_SIM);
+    /**
+     * Verifies that removeSubInfo can remove a remote SIM.
+     *
+     * <p>This method expects the caller to have already configured the desired simulation state
+     * using {@link #setTelephonySubscriptionSimulation}.
+     */
+    private void verifyRemoteSimRemovedRemoveSubInfo() {
+        insertSubscription(FAKE_REMOTE_SIM1);
 
         assertThrows(SecurityException.class, () -> mSubscriptionManagerServiceUT
                 .removeSubInfo(FAKE_MAC_ADDRESS1,
@@ -4151,6 +4810,14 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
                 CALLING_PACKAGE, CALLING_FEATURE).isEmpty()).isTrue();
         assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
                 CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testRemoveSubInfoNoSubscriptionWithOverlay_remoteSimRemoved() throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
+
+        verifyRemoteSimRemovedRemoveSubInfo();
     }
 
     @Test
@@ -4158,21 +4825,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
     public void testRemoveSubInfoWithSubscriptionNoOverlay_remoteSimRemoved() throws Exception {
         setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ false);
 
-        insertSubscription(FAKE_REMOTE_SIM);
-
-        assertThrows(SecurityException.class, () -> mSubscriptionManagerServiceUT
-                .removeSubInfo(FAKE_MAC_ADDRESS1,
-                        SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM));
-
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
-        assertThat(mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS1,
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM)).isEqualTo(true);
-
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
-        assertThat(mSubscriptionManagerServiceUT.getAllSubInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE).isEmpty()).isTrue();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
+        verifyRemoteSimRemovedRemoveSubInfo();
     }
 
     @Test
@@ -4180,21 +4833,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
     public void testRemoveSubInfoWithSubscriptionAndOverlay_remoteSimRemoved() throws Exception {
         setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ true);
 
-        insertSubscription(FAKE_REMOTE_SIM);
-
-        assertThrows(SecurityException.class, () -> mSubscriptionManagerServiceUT
-                .removeSubInfo(FAKE_MAC_ADDRESS1,
-                        SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM));
-
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
-        assertThat(mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS1,
-                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM)).isEqualTo(true);
-
-        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
-        assertThat(mSubscriptionManagerServiceUT.getAllSubInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE).isEmpty()).isTrue();
-        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
-                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
+        verifyRemoteSimRemovedRemoveSubInfo();
     }
 
     @Test
@@ -4202,7 +4841,7 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
     public void testRemoveSubInfoNoSubscriptionNoOverlay_throwsException() throws Exception {
         setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ false);
 
-        insertSubscription(FAKE_REMOTE_SIM);
+        insertSubscription(FAKE_REMOTE_SIM1);
 
         assertThrows(SecurityException.class, () -> mSubscriptionManagerServiceUT
                 .removeSubInfo(FAKE_MAC_ADDRESS1,
@@ -4222,6 +4861,122 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
                         CALLING_PACKAGE, CALLING_FEATURE));
     }
 
+    /**
+     * Verifies that removeSubInfo can remove the correct remote SIM, even when two are inserted.
+     *
+     * <p>This method expects the caller to have already configured the desired simulation state
+     * using {@link #setTelephonySubscriptionSimulation}.
+     */
+    private void verifyRemoteSimRemovedRemoveSubInfo_twoRemoteSims() {
+        doReturn(true).when(mFeatureFlags).remoteSimSubIdSet();
+
+        insertSubscription(FAKE_REMOTE_SIM1);
+        insertSubscription(FAKE_REMOTE_SIM2);
+
+        assertThrows(SecurityException.class, () -> mSubscriptionManagerServiceUT
+                .removeSubInfo(FAKE_MAC_ADDRESS1,
+                        SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM));
+
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.MODIFY_PHONE_STATE);
+        assertThat(mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS1,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM)).isEqualTo(true);
+
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+        assertThat(mSubscriptionManagerServiceUT.getAllSubInfoList(
+                CALLING_PACKAGE, CALLING_FEATURE).isEmpty()).isFalse();
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
+                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isNotEmpty();
+        // Grant carrier privilege
+        setCarrierPrivilegesForSubId(/* hasCarrierPrivileges= */ true, /* subId= */ 2);
+        assertThat(mSubscriptionManagerServiceUT.getAllSubInfoList(
+                CALLING_PACKAGE, CALLING_FEATURE).get(0))
+                .isEqualTo(FAKE_REMOTE_SIM2.toSubscriptionInfo());
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
+                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true).get(0))
+                .isEqualTo(FAKE_REMOTE_SIM2.toSubscriptionInfo());
+
+        // Remove second remote SIM
+        assertThat(mSubscriptionManagerServiceUT.removeSubInfo(FAKE_MAC_ADDRESS2,
+                SubscriptionManager.SUBSCRIPTION_TYPE_REMOTE_SIM)).isEqualTo(true);
+
+        assertThat(mSubscriptionManagerServiceUT.getAllSubInfoList(
+                CALLING_PACKAGE, CALLING_FEATURE).isEmpty()).isTrue();
+        assertThat(mSubscriptionManagerServiceUT.getActiveSubscriptionInfoList(
+                CALLING_PACKAGE, CALLING_FEATURE, /* isForAllProfiles= */ true)).isEmpty();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testRemoveSubInfoNoSubscriptionWithOverlay_twoRemoteSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ false, /* enableOverlay= */ true);
+
+        verifyRemoteSimRemovedRemoveSubInfo_twoRemoteSims();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testRemoveSubInfoWithSubscriptionNoOverlay_twoRemoteSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ false);
+
+        verifyRemoteSimRemovedRemoveSubInfo_twoRemoteSims();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testRemoveSubInfoWithSubscriptionAndOverlay_twoRemoteSims()
+            throws Exception {
+        setTelephonySubscriptionSimulation(/* enableFeature= */ true, /* enableOverlay= */ true);
+
+        verifyRemoteSimRemovedRemoveSubInfo_twoRemoteSims();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testUpdateSubByCarrierConfig_withPrivateNetworkCarrierConfig_setsIsPrivateNetwork()
+            throws Exception {
+        doReturn(true).when(mFeatureFlags).enableIsPrivateNetworkApi();
+        int subId = insertSubscription(FAKE_SUBSCRIPTION_INFO1);
+        int phoneId = FAKE_SUBSCRIPTION_INFO1.getSimSlotIndex();
+        getSubscriptionDatabaseManager().setIsPrivateNetwork(subId, 0);
+        processAllMessages();
+
+        PersistableBundle config = new PersistableBundle();
+        config.putBoolean(CarrierConfigManager.KEY_IS_PRIVATE_NETWORK_BOOL, true);
+        mSubscriptionManagerServiceUT.updateSubscriptionByCarrierConfig(phoneId, CALLING_PACKAGE,
+                config, () -> {});
+        processAllMessages();
+
+        SubscriptionInfoInternal subInfo = mSubscriptionManagerServiceUT
+                .getSubscriptionInfoInternal(subId);
+        assertThat(subInfo.getIsPrivateNetwork()).isEqualTo(1);
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testUpdateSubByCarrierConfig_withPrivateNetworkMcc_setsIsPrivateNetwork()
+            throws Exception {
+        doReturn(true).when(mFeatureFlags).enableIsPrivateNetworkApi();
+        SubscriptionInfoInternal privateNetworkMccSubInfo =
+                new SubscriptionInfoInternal.Builder(FAKE_SUBSCRIPTION_INFO2)
+                        .setMcc("999")
+                        .build();
+        int subId = insertSubscription(privateNetworkMccSubInfo);
+        int phoneId = privateNetworkMccSubInfo.getSimSlotIndex();
+        getSubscriptionDatabaseManager().setIsPrivateNetwork(subId, 0);
+        processAllMessages();
+
+        PersistableBundle config = new PersistableBundle();
+        mSubscriptionManagerServiceUT.updateSubscriptionByCarrierConfig(phoneId, CALLING_PACKAGE,
+                config, () -> {});
+        processAllMessages();
+
+        SubscriptionInfoInternal subInfo = mSubscriptionManagerServiceUT
+                .getSubscriptionInfoInternal(subId);
+        assertThat(subInfo.getIsPrivateNetwork()).isEqualTo(1);
+    }
+
     @Test
     @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
     public void testIccIdStripping() {
@@ -4230,4 +4985,580 @@ public class SubscriptionManagerServiceTest extends TelephonyTest {
         assertThat(SubscriptionManagerService.getStrippedIccid(FAKE_ICCID3)).isEqualTo("12345");
         assertThat(SubscriptionManagerService.getStrippedIccid(FAKE_ICCID4)).isEqualTo(FAKE_ICCID4);
     }
+
+    /**
+     * Helper to setup PackageManager mocks for checking uid and package name.
+     */
+    private void setupPackageManagerMocks(String packageName, int uid) throws Exception {
+        doReturn(uid).when(mPackageManager).getPackageUid(anyString(), anyInt());
+        doReturn(new String[]{packageName}).when(mPackageManager).getPackagesForUid(anyInt());
+    }
+
+    /**
+     * Helper to grant or remove MANAGE_SUBSCRIPTION_PLANS permission
+     */
+    private void setManageSubscriptionPlansPermission(boolean granted) {
+        if (granted) {
+            mContextFixture.addCallingOrSelfPermission(
+                    Manifest.permission.MANAGE_SUBSCRIPTION_PLANS);
+        } else {
+            mContextFixture.removeCallingOrSelfPermission(
+                    Manifest.permission.MANAGE_SUBSCRIPTION_PLANS);
+        }
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testCanManageSubscriptionAsUser() {
+        SubscriptionInfo subInfo = FAKE_SUBSCRIPTION_INFO1.toSubscriptionInfo();
+        UserHandle userHandle = FAKE_USER_HANDLE;
+        int subId = insertSubscription(FAKE_SUBSCRIPTION_INFO1);
+
+        // Mock TelephonyManager for the subId
+        TelephonyManager mockTm = Mockito.mock(TelephonyManager.class);
+        doReturn(mockTm).when(mTelephonyManager).createForSubscriptionId(eq(subId));
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS)
+                .when(mockTm).checkCarrierPrivilegesForPackage(eq(CALLING_PACKAGE));
+        doReturn(FAKE_CARRIER_ID1).when(mockTm).getSimCarrierId();
+
+        // Caller does NOT have READ_PRIVILEGED_PHONE_STATE, packageName is "self"
+        String selfPackageName = mContext.getPackageName();
+        doNothing().when(mAppOpsManager).checkPackage(anyInt(), eq(selfPackageName));
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS)
+                .when(mockTm).checkCarrierPrivilegesForPackage(eq(selfPackageName));
+        assertThat(mSubscriptionManagerServiceUT.canManageSubscriptionAsUser(
+                subInfo, selfPackageName, userHandle)).isTrue();
+        verify(mAppOpsManager).checkPackage(Binder.getCallingUid(), selfPackageName);
+
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_NO_ACCESS)
+                .when(mockTm).checkCarrierPrivilegesForPackage(eq(selfPackageName));
+        assertThat(mSubscriptionManagerServiceUT.canManageSubscriptionAsUser(
+                subInfo, selfPackageName, userHandle)).isFalse();
+
+        // Caller does NOT have READ_PRIVILEGED_PHONE_STATE, packageName is NOT "self"
+        // And AppOpsManager check fails
+        Mockito.clearInvocations(mAppOpsManager);
+        doThrow(new SecurityException())
+                .when(mAppOpsManager).checkPackage(anyInt(), eq(CALLING_PACKAGE));
+        assertThrows(SecurityException.class, () ->
+                mSubscriptionManagerServiceUT.canManageSubscriptionAsUser(
+                        subInfo, CALLING_PACKAGE, userHandle));
+        verify(mAppOpsManager).checkPackage(Binder.getCallingUid(), CALLING_PACKAGE);
+
+        // Caller has READ_PRIVILEGED_PHONE_STATE
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+        Mockito.clearInvocations(mAppOpsManager);
+
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS)
+                .when(mockTm).checkCarrierPrivilegesForPackage(eq(selfPackageName));
+        assertThat(mSubscriptionManagerServiceUT.canManageSubscriptionAsUser(
+                subInfo, selfPackageName, userHandle)).isTrue();
+
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_NO_ACCESS)
+                .when(mockTm).checkCarrierPrivilegesForPackage(eq(selfPackageName));
+
+        assertThat(mSubscriptionManagerServiceUT.canManageSubscriptionAsUser(
+                subInfo, selfPackageName, userHandle)).isFalse();
+        verify(mAppOpsManager, never()).checkPackage(Binder.getCallingUid(), selfPackageName);
+
+        mContextFixture.removeCallingOrSelfPermission(
+                Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testCanManageSubscription_CarrierIdMatch() {
+        // This test requires the CarrierId matching to be supported
+        Mockito.reset(mFeatureFlags);
+        doReturn(true).when(mFeatureFlags)
+                .downloadableSubscriptionIncludeCarrierIdentifierInternal();
+
+        mContextFixture.addCallingOrSelfPermission(Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        int subId = insertSubscription(FAKE_SUBSCRIPTION_INFO1);
+        SubscriptionInfo subInfo = FAKE_SUBSCRIPTION_INFO1.toSubscriptionInfo();
+
+        // The subscriptions should be mostly different, but subInfo2 should
+        // share a CarrierId with subInfo
+        SubscriptionInfoInternal targetSubscriptionInfoInternal = new SubscriptionInfoInternal
+                .Builder(FAKE_SUBSCRIPTION_INFO2)
+                .setCarrierId(subInfo.getCarrierId()).build();
+        int targetSubId = insertSubscription(targetSubscriptionInfoInternal);
+        SubscriptionInfo targetSubInfo = targetSubscriptionInfoInternal.toSubscriptionInfo();
+
+        TelephonyManager mockTm = Mockito.mock(TelephonyManager.class);
+        doReturn(mockTm).when(mTelephonyManager).createForSubscriptionId(eq(subId));
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS)
+                .when(mockTm).checkCarrierPrivilegesForPackage(eq(CALLING_PACKAGE));
+        doReturn(FAKE_CARRIER_ID1).when(mockTm).getSimCarrierId();
+
+        TelephonyManager mockTargetTm = Mockito.mock(TelephonyManager.class);
+        doReturn(mockTargetTm).when(mTelephonyManager).createForSubscriptionId(eq(targetSubId));
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_NO_ACCESS)
+                .when(mockTargetTm).checkCarrierPrivilegesForPackage(eq(CALLING_PACKAGE));
+        doReturn(FAKE_CARRIER_ID1).when(mockTargetTm).getSimCarrierId();
+
+        assertThat(
+                mSubscriptionManagerServiceUT
+                        .canManageSubscriptionAsUser(
+                                targetSubInfo, CALLING_PACKAGE, FAKE_USER_HANDLE))
+                                        .isTrue();
+
+        // Now remove Carrier Privileges from the source subscription and confirm that the
+        // target subscription can no longer be managed.
+        doReturn(TelephonyManager.CARRIER_PRIVILEGE_STATUS_NO_ACCESS)
+                .when(mockTm).checkCarrierPrivilegesForPackage(eq(CALLING_PACKAGE));
+        assertThat(
+                mSubscriptionManagerServiceUT
+                        .canManageSubscriptionAsUser(
+                                targetSubInfo, CALLING_PACKAGE, FAKE_USER_HANDLE))
+                                        .isFalse();
+    }
+
+    /**
+     * Helper to mock Carrier Privileges for the specific test package
+     */
+    private void setCarrierPrivilegesCheckForPackage(boolean hasPrivileges, int subId) {
+        setCarrierPrivilegesForSubId(hasPrivileges, subId);
+        TelephonyManager mockTelephonyManager = Mockito.mock(TelephonyManager.class);
+        doReturn(mockTelephonyManager).when(mTelephonyManager).createForSubscriptionId(eq(subId));
+        int privilegeStatus = hasPrivileges
+                ? TelephonyManager.CARRIER_PRIVILEGE_STATUS_HAS_ACCESS
+                : TelephonyManager.CARRIER_PRIVILEGE_STATUS_NO_ACCESS;
+        doReturn(privilegeStatus).when(mockTelephonyManager)
+                .checkCarrierPrivilegesForPackage(eq(CALLING_PACKAGE));
+    }
+
+    /**
+     * Create and return a test Subscription Plan.
+     */
+    private SubscriptionPlan createTestSubscriptionPlan(String title) {
+        return SubscriptionPlan.Builder
+                .createRecurring(
+                        ZonedDateTime.parse("2025-01-01T00:00:00.000Z"), Period.ofMonths(1))
+                .setTitle(title)
+                .setDataLimit(SubscriptionPlan.BYTES_UNLIMITED,
+                        SubscriptionPlan.LIMIT_BEHAVIOR_THROTTLED)
+                .setId(1001)
+                .setTypes(new int[] {
+                        SubscriptionPlan.PLAN_TYPE_CELLULAR,
+                        SubscriptionPlan.PLAN_TYPE_PREPAID
+                })
+                .setDataUsageResetTime(ZonedDateTime.parse("2025-01-15T00:00:00.000Z"))
+                .setStreamingAppMaxDownlinkKbps(5000)
+                .setStreamingAppMaxUplinkKbps(1000)
+                .build();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testSetGetEnrollableSubscriptionPlans() throws Exception {
+        // SetUp: the mock PackageManager to associate CALLING_PACKAGE with CALLING_UID
+        setupPackageManagerMocks(CALLING_PACKAGE, Process.myUid());
+        // SetUp: add MANAGE_SUBSCRIPTION_PLANS permission
+        setManageSubscriptionPlansPermission(true);
+        // SetUp: make a sample plan
+        SubscriptionPlan plan = createTestSubscriptionPlan("Test Enrollable Plan");
+        // SetUp: subId to test
+        int subId = 1;
+
+        // Act: set plan
+        mSubscriptionManagerServiceUT.setEnrollableSubscriptionPlans(
+                subId, new SubscriptionPlan[]{plan}, 0, CALLING_PACKAGE);
+        processAllMessages();
+
+        // Verify that plan was set properly
+        SubscriptionPlan[] storedPlans = mSubscriptionManagerServiceUT
+                .getEnrollableSubscriptionPlans(subId, CALLING_PACKAGE);
+        assertThat(storedPlans).isNotNull();
+        assertThat(storedPlans).hasLength(1);
+        assertThat(storedPlans[0]).isEqualTo(plan);
+        assertThat(storedPlans[0].getId()).isEqualTo(1001);
+        assertThat(storedPlans[0].getTypes()).containsExactly(
+                SubscriptionPlan.PLAN_TYPE_CELLULAR,
+                SubscriptionPlan.PLAN_TYPE_PREPAID);
+        assertThat(storedPlans[0].getDataUsageResetTime())
+                .isEqualTo(ZonedDateTime.parse("2025-01-15T00:00:00.000Z"));
+        assertThat(storedPlans[0].getStreamingAppMaxDownlinkKbps()).isEqualTo(5000);
+        assertThat(storedPlans[0].getStreamingAppMaxUplinkKbps()).isEqualTo(1000);
+
+        try {
+            // Verify that owner was set properly
+            String owner = mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlansOwner(subId);
+            if (owner != null) {
+                assertThat(owner).isEqualTo(CALLING_PACKAGE);
+            }
+        } catch (SecurityException e) {
+            // Expected if not system uid
+        }
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testEnrollableSubscriptionPlansSecurity() throws Exception {
+        // Set up the mock PackageManager to associate CALLING_PACKAGE with CALLING_UID
+        setupPackageManagerMocks(CALLING_PACKAGE, Process.myUid());
+        // SetUp: make a sample plan
+        SubscriptionPlan plan = createTestSubscriptionPlan("Security Test Plan");
+        // SetUp: subId to test
+        int subId = 1;
+
+        // Test #1. no permission, no carrier privilege.
+        // SetUp: no permission, no carrier privilege.
+        setManageSubscriptionPlansPermission(false);
+        setCarrierPrivilegesCheckForPackage(false, subId);
+
+        // Act and Verify SecurityException is thrown.
+        assertThrows(SecurityException.class, () ->
+                mSubscriptionManagerServiceUT.setEnrollableSubscriptionPlans(subId,
+                        new SubscriptionPlan[]{plan}, 0, CALLING_PACKAGE));
+
+        // Act and Verify SecurityException is thrown.
+        assertThrows(SecurityException.class, () ->
+                mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(subId,
+                        CALLING_PACKAGE));
+
+        // Test #2. call with Carrier Privilege
+        // SetUp: set Carrier Privilege
+        setCarrierPrivilegesCheckForPackage(true, subId);
+
+        // Act: call set plan API.
+        mSubscriptionManagerServiceUT.setEnrollableSubscriptionPlans(subId,
+                new SubscriptionPlan[]{plan}, 0, CALLING_PACKAGE);
+        processAllMessages();
+
+        // Verify that Carrier Privilege allows get/set enrollable subscription plan.
+        SubscriptionPlan[] plans = mSubscriptionManagerServiceUT
+                .getEnrollableSubscriptionPlans(subId, CALLING_PACKAGE);
+        assertThat(plans).hasLength(1);
+
+        // Test #3. call with owner.
+        // SetUp: remove all permission.
+        setCarrierPrivilegesCheckForPackage(false, subId);
+
+        // Act: call get plan API.
+        plans = mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(subId,
+                CALLING_PACKAGE);
+
+        // Verify that call get plan API with owner.
+        assertThat(plans).hasLength(1);
+
+        // Act: call set plan API as well.
+        mSubscriptionManagerServiceUT.setEnrollableSubscriptionPlans(subId,
+                new SubscriptionPlan[]{}, 0, CALLING_PACKAGE);
+        processAllMessages();
+
+        // Verify that call set plan API with owner.
+        plans = mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(subId,
+                CALLING_PACKAGE);
+        assertThat(plans).isEmpty();
+
+        try {
+            mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlansOwner(subId);
+            fail("SecurityException expected when caller is not SYSTEM_UID");
+        } catch (SecurityException e) {
+            // Success
+        }
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testEnrollableSubscriptionPlansExpiration() throws Exception {
+        // SetUp: the mock PackageManager to associate CALLING_PACKAGE with CALLING_UID
+        setupPackageManagerMocks(CALLING_PACKAGE, Process.myUid());
+        // SetUp: add MANAGE_SUBSCRIPTION_PLANS permission
+        setManageSubscriptionPlansPermission(true);
+        // SetUp: make a sample plan
+        SubscriptionPlan plan = createTestSubscriptionPlan("Expiring Plan");
+        // SetUp: subId to test
+        int subId = 1;
+        // SetUp: set expiration time.
+        long expirationDuration = 1000; // 1 sec.
+
+        // Act: Sets a plan with an expiration time
+        mSubscriptionManagerServiceUT.setEnrollableSubscriptionPlans(subId,
+                new SubscriptionPlan[]{plan}, expirationDuration, CALLING_PACKAGE);
+        processAllMessages();
+
+        // Verify that plan must exist immediately after setup
+        assertThat(mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(subId,
+                CALLING_PACKAGE)).hasLength(1);
+
+        // Act: Time-lapse simulation (1 second + slack time)
+        // Using TelephonyTest's moveTimeForward (controlling TestableLooper)
+        moveTimeForward(expirationDuration + 1000);
+        processAllMessages();
+
+        // Verify that plan has expired and is gone (expected to return null)
+        assertThat(mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(subId,
+                CALLING_PACKAGE)).isNull();
+    }
+
+    /**
+     * Tests that enrollable subscription plans are persisted to disk and restored after a reboot.
+     */
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testEnrollableSubscriptionPlans_Persistence() throws Exception {
+        // 1. Setup: Define plans and calling package
+        setupPackageManagerMocks(CALLING_PACKAGE, Process.myUid());
+        // Grant Permission
+        setManageSubscriptionPlansPermission(true);
+        mContextFixture.addCallingOrSelfPermission(
+                android.Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        int subId = 1;
+        SubscriptionPlan plan1 = createTestSubscriptionPlan("Persisted Plan 1");
+        SubscriptionPlan plan2 = createTestSubscriptionPlan("Persisted Plan 2");
+        SubscriptionPlan[] plans = new SubscriptionPlan[] {plan1, plan2};
+
+        // 2. Action: Set plans (This should trigger XML write)
+        mSubscriptionManagerServiceUT.setEnrollableSubscriptionPlans(
+                subId, plans, 10000, CALLING_PACKAGE);
+        processAllMessages();
+
+        // 3. Verify: Plans are available in memory
+        assertThat(
+                        mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(
+                                subId, CALLING_PACKAGE))
+                .asList()
+                .containsExactly(plan1, plan2);
+
+        // 4. Simulate Reboot: Re-create the service instance
+        // This will trigger the constructor, which calls readEnrollableSubscriptionPlans()
+        mSubscriptionManagerServiceUT =
+                new SubscriptionManagerService(mContext, Looper.myLooper(), mFeatureFlags);
+        processAllMessages();
+
+        // 5. Verify: Plans are restored from disk
+        // Note: We mock PackageManager again because mContext might be reset or reused depending on
+        // test runner,
+        // but here we just ensure the service can retrieve the data.
+        setupPackageManagerMocks(CALLING_PACKAGE, Process.myUid());
+
+        SubscriptionPlan[] restoredPlans =
+                mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(
+                        subId, CALLING_PACKAGE);
+
+        assertThat(restoredPlans).isNotNull();
+        assertThat(restoredPlans).asList().containsExactly(plan1, plan2);
+
+        // Verify owner is preserved
+        Field ownerMapField = SubscriptionManagerService.class
+                .getDeclaredField("mEnrollableSubscriptionPlansOwner");
+        ownerMapField.setAccessible(true);
+        Map<Integer, String> ownerMap =
+                (Map<Integer, String>) ownerMapField.get(mSubscriptionManagerServiceUT);
+        assertThat(ownerMap.get(subId)).isEqualTo(CALLING_PACKAGE);
+
+        SubscriptionPlan restoredPlan = restoredPlans[0];
+        assertThat(restoredPlan.getId()).isEqualTo(1001);
+        assertThat(restoredPlan.getTypes()).containsExactly(
+                SubscriptionPlan.PLAN_TYPE_CELLULAR,
+                SubscriptionPlan.PLAN_TYPE_PREPAID);
+        assertThat(restoredPlan.getDataUsageResetTime())
+                .isEqualTo(ZonedDateTime.parse("2025-01-15T00:00:00.000Z"));
+        assertThat(restoredPlan.getStreamingAppMaxDownlinkKbps()).isEqualTo(5000);
+        assertThat(restoredPlan.getStreamingAppMaxUplinkKbps()).isEqualTo(1000);
+    }
+
+    /**
+     * Tests that the expiration time of enrollable plans is persisted and respected after a reboot.
+     */
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testEnrollableSubscriptionPlans_Persistence_WithExpiration() throws Exception {
+        setupPackageManagerMocks(CALLING_PACKAGE, Process.myUid());
+        // Grant Permission
+        setManageSubscriptionPlansPermission(true);
+        mContextFixture.addCallingOrSelfPermission(
+                android.Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        int subId = 1;
+        SubscriptionPlan plan = createTestSubscriptionPlan("Expiring Persisted Plan");
+        long expirationDuration = 10000; // 10 seconds
+
+        // 1. Set plan with expiration
+        mSubscriptionManagerServiceUT.setEnrollableSubscriptionPlans(
+                subId, new SubscriptionPlan[] {plan}, expirationDuration, CALLING_PACKAGE);
+        processAllMessages();
+
+        // 2. Simulate Reboot immediately (before expiration)
+        mSubscriptionManagerServiceUT =
+                new SubscriptionManagerService(mContext, Looper.myLooper(), mFeatureFlags);
+        processAllMessages();
+
+        // 3. Verify: Plan is still valid and loaded
+        assertThat(
+                        mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(
+                                subId, CALLING_PACKAGE))
+                .asList()
+                .containsExactly(plan);
+
+        // 4. Advance time to make it expire (Simulate time passing after reboot)
+        // The service should have rescheduled the expiration timer upon reload.
+        moveTimeForward(expirationDuration + 1000);
+        processAllMessages();
+
+        // 5. Verify: Plan is expired and removed
+        assertThat(
+                        mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(
+                                subId, CALLING_PACKAGE))
+                .isNull();
+    }
+
+    /**
+     * Tests that already expired plans are not loaded from disk upon reboot. (Simulates a device
+     * that was off for a long time)
+     */
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testEnrollableSubscriptionPlans_Persistence_AlreadyExpired() throws Exception {
+        setupPackageManagerMocks(CALLING_PACKAGE, Process.myUid());
+        // Grant Permission
+        setManageSubscriptionPlansPermission(true);
+        mContextFixture.addCallingOrSelfPermission(
+                android.Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        int subId = 1;
+        SubscriptionPlan plan = createTestSubscriptionPlan("Already Expired Plan");
+        long expirationDuration = 1000; // 1 second
+
+        // 1. Set plan
+        mSubscriptionManagerServiceUT.setEnrollableSubscriptionPlans(
+                subId, new SubscriptionPlan[] {plan}, expirationDuration, CALLING_PACKAGE);
+        processAllMessages();
+
+        // Since moveTimeForward() only passes the Looper time and System.currentTimeMillis()
+        // does not, use latch.await to pass the actual wall clock time.
+        CountDownLatch latch = new CountDownLatch(1);
+        latch.await(1100, TimeUnit.MILLISECONDS); // 1.1 second
+
+        // 3. Simulate Reboot (Create new service)
+        // The new service will read the XML. The saved expiration time (T_start + 5s)
+        // should be smaller than the current time (T_start + 15s).
+        mSubscriptionManagerServiceUT =
+                new SubscriptionManagerService(mContext, Looper.myLooper(), mFeatureFlags);
+        processAllMessages();
+
+        // 4. Verify: The expired plan should NOT be loaded.
+        // (readEnrollablePlansForSubscriptionLocked should skip it)
+        assertThat(
+                        mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(
+                                subId, CALLING_PACKAGE))
+                .isNull();
+    }
+
+    /**
+     * Tests that plans with 0 expiration (volatile) are NOT persisted to disk.
+     */
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testEnrollableSubscriptionPlans_Volatility() throws Exception {
+        setupPackageManagerMocks(CALLING_PACKAGE, Process.myUid());
+        setManageSubscriptionPlansPermission(true);
+        mContextFixture.addCallingOrSelfPermission(
+                android.Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        int subId = 1;
+        SubscriptionPlan plan = createTestSubscriptionPlan("Volatile Plan");
+
+        mSubscriptionManagerServiceUT.setEnrollableSubscriptionPlans(
+                subId, new SubscriptionPlan[]{plan}, 0 /* volatile */, CALLING_PACKAGE);
+        processAllMessages();
+
+        assertThat(mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(
+                subId, CALLING_PACKAGE)).isNotEmpty();
+
+        mSubscriptionManagerServiceUT =
+                new SubscriptionManagerService(mContext, Looper.myLooper(), mFeatureFlags);
+        processAllMessages();
+
+        setupPackageManagerMocks(CALLING_PACKAGE, Process.myUid());
+        assertThat(mSubscriptionManagerServiceUT.getEnrollableSubscriptionPlans(
+                subId, CALLING_PACKAGE)).isNull();
+    }
+
+    /**
+     * Tests that expiration timers are rescheduled when the system time changes.
+     * Simulates a scenario where the system time jumps forward past the expiration time.
+     */
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testEnrollablePlans_RescheduleOnTimeChange() throws Exception {
+        setupPackageManagerMocks(CALLING_PACKAGE, Process.myUid());
+        // Grant Permission
+        setManageSubscriptionPlansPermission(true);
+        mContextFixture.addCallingOrSelfPermission(
+                android.Manifest.permission.READ_PRIVILEGED_PHONE_STATE);
+
+        int subId = 1;
+        SubscriptionPlan plan = createTestSubscriptionPlan("Time Change Test");
+        long duration = 3600 * 1000; // an hour
+
+        // Act set plan with an hour expiration.
+        mSubscriptionManagerServiceUT.setEnrollableSubscriptionPlans(
+                subId, new SubscriptionPlan[]{plan}, duration, CALLING_PACKAGE);
+        processAllMessages();
+
+        // Verify that plan was set properly
+        assertThat(mSubscriptionManagerServiceUT
+                .getEnrollableSubscriptionPlans(subId, CALLING_PACKAGE)).isNotEmpty();
+
+        // Time Change Simulation (Expiration Time Manipulation)
+        // Change the saved expiration time to '10 seconds ago'.
+        Field expirationMapField = SubscriptionManagerService.class
+                .getDeclaredField("mEnrollablePlanExpirationTime");
+        expirationMapField.setAccessible(true);
+        Map<Integer, Long> expirationMap =
+                (Map<Integer, Long>) expirationMapField.get(mSubscriptionManagerServiceUT);
+        expirationMap.put(subId, System.currentTimeMillis() - 10000);
+
+        mContext.sendBroadcast(new Intent(Intent.ACTION_TIME_CHANGED));
+        processAllMessages();
+
+        processAllMessages();
+        assertThat(mSubscriptionManagerServiceUT
+                .getEnrollableSubscriptionPlans(subId, CALLING_PACKAGE)).isNull();
+    }
+
+    @Test
+    @EnableCompatChanges({TelephonyManager.ENABLE_FEATURE_MAPPING})
+    public void testNotifyOnImsNumberChange() {
+        int subId = 1;
+        insertSubscription(new SubscriptionInfoInternal.Builder()
+                .setId(subId).setIccId(FAKE_ICCID1).setSimSlotIndex(0).build());
+        processAllMessages();
+
+        // 1. Initial success - should notify
+        clearInvocations(mMockedSubscriptionManagerServiceCallback);
+        mSubscriptionManagerServiceUT.setImsNumberUpdateStatus(subId, true);
+        processAllMessages();
+        verify(mMockedSubscriptionManagerServiceCallback).onSubscriptionChanged(eq(subId));
+
+        // 2. Setting same status - should NOT notify
+        clearInvocations(mMockedSubscriptionManagerServiceCallback);
+        mSubscriptionManagerServiceUT.setImsNumberUpdateStatus(subId, true);
+        processAllMessages();
+        verify(mMockedSubscriptionManagerServiceCallback, never()).onSubscriptionChanged(anyInt());
+
+        // 3. Status changed to failed - should notify
+        clearInvocations(mMockedSubscriptionManagerServiceCallback);
+        mSubscriptionManagerServiceUT.setImsNumberUpdateStatus(subId, false);
+        processAllMessages();
+        verify(mMockedSubscriptionManagerServiceCallback).onSubscriptionChanged(eq(subId));
+
+        // 4. Status cleared - should notify
+        clearInvocations(mMockedSubscriptionManagerServiceCallback);
+        mSubscriptionManagerServiceUT.clearImsNumberUpdateStatus(subId);
+        processAllMessages();
+        verify(mMockedSubscriptionManagerServiceCallback).onSubscriptionChanged(eq(subId));
+
+        // 5. Status cleared again (was already gone) - should NOT notify
+        clearInvocations(mMockedSubscriptionManagerServiceCallback);
+        mSubscriptionManagerServiceUT.clearImsNumberUpdateStatus(subId);
+        processAllMessages();
+        verify(mMockedSubscriptionManagerServiceCallback, never()).onSubscriptionChanged(anyInt());
+    }
 }
+

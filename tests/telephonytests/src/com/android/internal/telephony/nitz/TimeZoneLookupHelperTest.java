@@ -27,8 +27,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import android.icu.util.GregorianCalendar;
 import android.icu.util.TimeZone;
@@ -94,29 +92,35 @@ public class TimeZoneLookupHelperTest {
             // Summer, known DST state (DST == true).
             NitzData lonSummerNitzDataWithOffset = NitzData.parse(lonSummerTimeString + ",4");
             lookupResult = mTimeZoneLookupHelper.lookupByNitz(lonSummerNitzDataWithOffset);
-            assertOffsetResultZoneOffsets(nhSummerTimeMillis, lonSummerOffsetMillis,
-                    lonSummerDstOffsetMillis, lookupResult);
+            assertOffsetResultZoneOffsets(
+                    nhSummerTimeMillis,
+                    lonSummerOffsetMillis,
+                    lonSummerDstOffsetMillis,
+                    lookupResult);
             assertOffsetResultMetadata(false, lookupResult);
 
             // Winter, known DST state (DST == false).
             NitzData lonWinterNitzDataWithOffset = NitzData.parse(lonWinterTimeString + ",0");
             lookupResult = mTimeZoneLookupHelper.lookupByNitz(lonWinterNitzDataWithOffset);
-            assertOffsetResultZoneOffsets(nhWinterTimeMillis, lonWinterOffsetMillis,
-                    lonWinterDstOffsetMillis, lookupResult);
+            assertOffsetResultZoneOffsets(
+                    nhWinterTimeMillis,
+                    lonWinterOffsetMillis,
+                    lonWinterDstOffsetMillis,
+                    lookupResult);
             assertOffsetResultMetadata(false, lookupResult);
 
             // Summer, unknown DST state
             NitzData lonSummerNitzDataWithoutOffset = NitzData.parse(lonSummerTimeString);
             lookupResult = mTimeZoneLookupHelper.lookupByNitz(lonSummerNitzDataWithoutOffset);
-            assertOffsetResultZoneOffsets(nhSummerTimeMillis, lonSummerOffsetMillis, null,
-                    lookupResult);
+            assertOffsetResultZoneOffsets(
+                    nhSummerTimeMillis, lonSummerOffsetMillis, null, lookupResult);
             assertOffsetResultMetadata(false, lookupResult);
 
             // Winter, unknown DST state
             NitzData lonWinterNitzDataWithoutOffset = NitzData.parse(lonWinterTimeString);
             lookupResult = mTimeZoneLookupHelper.lookupByNitz(lonWinterNitzDataWithoutOffset);
-            assertOffsetResultZoneOffsets(nhWinterTimeMillis, lonWinterOffsetMillis, null,
-                    lookupResult);
+            assertOffsetResultZoneOffsets(
+                    nhWinterTimeMillis, lonWinterOffsetMillis, null, lookupResult);
             assertOffsetResultMetadata(false, lookupResult);
         }
 
@@ -135,29 +139,35 @@ public class TimeZoneLookupHelperTest {
             // Summer, known DST state (DST == true).
             NitzData mtvSummerNitzDataWithOffset = NitzData.parse(mtvSummerTimeString + ",4");
             lookupResult = mTimeZoneLookupHelper.lookupByNitz(mtvSummerNitzDataWithOffset);
-            assertOffsetResultZoneOffsets(nhSummerTimeMillis, mtvSummerOffsetMillis,
-                    mtvSummerDstOffsetMillis, lookupResult);
+            assertOffsetResultZoneOffsets(
+                    nhSummerTimeMillis,
+                    mtvSummerOffsetMillis,
+                    mtvSummerDstOffsetMillis,
+                    lookupResult);
             assertOffsetResultMetadata(false, lookupResult);
 
             // Winter, known DST state (DST == false).
             NitzData mtvWinterNitzDataWithOffset = NitzData.parse(mtvWinterTimeString + ",0");
             lookupResult = mTimeZoneLookupHelper.lookupByNitz(mtvWinterNitzDataWithOffset);
-            assertOffsetResultZoneOffsets(nhWinterTimeMillis, mtvWinterOffsetMillis,
-                    mtvWinterDstOffsetMillis, lookupResult);
+            assertOffsetResultZoneOffsets(
+                    nhWinterTimeMillis,
+                    mtvWinterOffsetMillis,
+                    mtvWinterDstOffsetMillis,
+                    lookupResult);
             assertOffsetResultMetadata(false, lookupResult);
 
             // Summer, unknown DST state
             NitzData mtvSummerNitzDataWithoutOffset = NitzData.parse(mtvSummerTimeString);
             lookupResult = mTimeZoneLookupHelper.lookupByNitz(mtvSummerNitzDataWithoutOffset);
-            assertOffsetResultZoneOffsets(nhSummerTimeMillis, mtvSummerOffsetMillis, null,
-                    lookupResult);
+            assertOffsetResultZoneOffsets(
+                    nhSummerTimeMillis, mtvSummerOffsetMillis, null, lookupResult);
             assertOffsetResultMetadata(false, lookupResult);
 
             // Winter, unknown DST state
             NitzData mtvWinterNitzDataWithoutOffset = NitzData.parse(mtvWinterTimeString);
             lookupResult = mTimeZoneLookupHelper.lookupByNitz(mtvWinterNitzDataWithoutOffset);
-            assertOffsetResultZoneOffsets(nhWinterTimeMillis, mtvWinterOffsetMillis, null,
-                    lookupResult);
+            assertOffsetResultZoneOffsets(
+                    nhWinterTimeMillis, mtvWinterOffsetMillis, null, lookupResult);
             assertOffsetResultMetadata(false, lookupResult);
         }
     }
@@ -243,10 +253,16 @@ public class TimeZoneLookupHelperTest {
 
             OffsetResult adSummerWithDstResult =
                     mTimeZoneLookupHelper.lookupByNitzCountry(nitzData, adIso);
-            OffsetResult expectedResult = new OffsetResult(
-                    zone("Europe/Andorra"), /* countryIsoCode= */ adIso, true /* isOnlyMatch */);
+            OffsetResult expectedResult =
+                    new OffsetResult(
+                            zone("Europe/Andorra"),
+                            /* countryIsoCode= */ adIso,
+                            true /* isOnlyMatch */);
             assertEquals(expectedResult, adSummerWithDstResult);
-            assertOffsetResultZoneOffsets(nhSummerTimeMillis, expectedUtcOffset, expectedDstOffset,
+            assertOffsetResultZoneOffsets(
+                    nhSummerTimeMillis,
+                    expectedUtcOffset,
+                    expectedDstOffset,
                     adSummerWithDstResult);
         }
 
@@ -271,10 +287,16 @@ public class TimeZoneLookupHelperTest {
 
             OffsetResult adWinterWithDstResult =
                     mTimeZoneLookupHelper.lookupByNitzCountry(nitzData, adIso);
-            OffsetResult expectedResult = new OffsetResult(
-                    zone("Europe/Andorra"), /* countryIsoCode= */ adIso, true /* isOnlyMatch */);
+            OffsetResult expectedResult =
+                    new OffsetResult(
+                            zone("Europe/Andorra"),
+                            /* countryIsoCode= */ adIso,
+                            true /* isOnlyMatch */);
             assertEquals(expectedResult, adWinterWithDstResult);
-            assertOffsetResultZoneOffsets(nhWinterTimeMillis, expectedUtcOffset, expectedDstOffset,
+            assertOffsetResultZoneOffsets(
+                    nhWinterTimeMillis,
+                    expectedUtcOffset,
+                    expectedDstOffset,
                     adWinterWithDstResult);
         }
 
@@ -298,10 +320,16 @@ public class TimeZoneLookupHelperTest {
 
             OffsetResult adSummerUnknownDstResult =
                     mTimeZoneLookupHelper.lookupByNitzCountry(nitzData, adIso);
-            OffsetResult expectedResult = new OffsetResult(
-                    zone("Europe/Andorra"), /* countryIsoCode= */ adIso, true /* isOnlyMatch */);
+            OffsetResult expectedResult =
+                    new OffsetResult(
+                            zone("Europe/Andorra"),
+                            /* countryIsoCode= */ adIso,
+                            true /* isOnlyMatch */);
             assertEquals(expectedResult, adSummerUnknownDstResult);
-            assertOffsetResultZoneOffsets(nhSummerTimeMillis, expectedUtcOffset, expectedDstOffset,
+            assertOffsetResultZoneOffsets(
+                    nhSummerTimeMillis,
+                    expectedUtcOffset,
+                    expectedDstOffset,
                     adSummerUnknownDstResult);
         }
 
@@ -315,10 +343,16 @@ public class TimeZoneLookupHelperTest {
 
             OffsetResult adWinterUnknownDstResult =
                     mTimeZoneLookupHelper.lookupByNitzCountry(nitzData, adIso);
-            OffsetResult expectedResult = new OffsetResult(
-                    zone("Europe/Andorra"), /* countryIsoCode= */ adIso, true /* isOnlyMatch */);
+            OffsetResult expectedResult =
+                    new OffsetResult(
+                            zone("Europe/Andorra"),
+                            /* countryIsoCode= */ adIso,
+                            true /* isOnlyMatch */);
             assertEquals(expectedResult, adWinterUnknownDstResult);
-            assertOffsetResultZoneOffsets(nhWinterTimeMillis, expectedUtcOffset, expectedDstOffset,
+            assertOffsetResultZoneOffsets(
+                    nhWinterTimeMillis,
+                    expectedUtcOffset,
+                    expectedDstOffset,
                     adWinterUnknownDstResult);
         }
     }
@@ -328,10 +362,10 @@ public class TimeZoneLookupHelperTest {
         // GB has one time zone.
         CountryResult expectedResult =
                 new CountryResult("Europe/London", "gb", QUALITY_SINGLE_ZONE, ARBITRARY_DEBUG_INFO);
-        assertEquals(expectedResult,
-                mTimeZoneLookupHelper.lookupByCountry("gb", NH_SUMMER_TIME_MILLIS));
-        assertEquals(expectedResult,
-                mTimeZoneLookupHelper.lookupByCountry("gb", NH_WINTER_TIME_MILLIS));
+        assertEquals(
+                expectedResult, mTimeZoneLookupHelper.lookupByCountry("gb", NH_SUMMER_TIME_MILLIS));
+        assertEquals(
+                expectedResult, mTimeZoneLookupHelper.lookupByCountry("gb", NH_WINTER_TIME_MILLIS));
     }
 
     @Test
@@ -346,12 +380,16 @@ public class TimeZoneLookupHelperTest {
 
         // Before 1980, quality == QUALITY_MULTIPLE_ZONES_SAME_OFFSET because Europe/Busingen was
         // relevant.
-        CountryResult expectedResult = new CountryResult(
-                "Europe/Berlin", "de", QUALITY_MULTIPLE_ZONES_SAME_OFFSET, ARBITRARY_DEBUG_INFO);
-        assertEquals(expectedResult,
-                mTimeZoneLookupHelper.lookupByCountry("de", nhSummerTimeMillis));
-        assertEquals(expectedResult,
-                mTimeZoneLookupHelper.lookupByCountry("de", nhWinterTimeMillis));
+        CountryResult expectedResult =
+                new CountryResult(
+                        "Europe/Berlin",
+                        "de",
+                        QUALITY_MULTIPLE_ZONES_SAME_OFFSET,
+                        ARBITRARY_DEBUG_INFO);
+        assertEquals(
+                expectedResult, mTimeZoneLookupHelper.lookupByCountry("de", nhSummerTimeMillis));
+        assertEquals(
+                expectedResult, mTimeZoneLookupHelper.lookupByCountry("de", nhWinterTimeMillis));
 
         // And in 2015, quality == QUALITY_SINGLE_ZONE because Europe/Busingen became irrelevant
         // after 1980.
@@ -360,10 +398,10 @@ public class TimeZoneLookupHelperTest {
 
         expectedResult =
                 new CountryResult("Europe/Berlin", "de", QUALITY_SINGLE_ZONE, ARBITRARY_DEBUG_INFO);
-        assertEquals(expectedResult,
-                mTimeZoneLookupHelper.lookupByCountry("de", nhSummerTimeMillis));
-        assertEquals(expectedResult,
-                mTimeZoneLookupHelper.lookupByCountry("de", nhWinterTimeMillis));
+        assertEquals(
+                expectedResult, mTimeZoneLookupHelper.lookupByCountry("de", nhSummerTimeMillis));
+        assertEquals(
+                expectedResult, mTimeZoneLookupHelper.lookupByCountry("de", nhWinterTimeMillis));
     }
 
     @Test
@@ -376,15 +414,20 @@ public class TimeZoneLookupHelperTest {
         // another example.
         String countryIsoCode = "nz";
 
-        CountryResult expectedResult = new CountryResult(
-                "Pacific/Auckland", countryIsoCode, QUALITY_DEFAULT_BOOSTED, ARBITRARY_DEBUG_INFO);
-        assertEquals(expectedResult,
-                mTimeZoneLookupHelper.lookupByCountry(countryIsoCode, timeMillis));
+        CountryResult expectedResult =
+                new CountryResult(
+                        "Pacific/Auckland",
+                        countryIsoCode,
+                        QUALITY_DEFAULT_BOOSTED,
+                        ARBITRARY_DEBUG_INFO);
+        assertEquals(
+                expectedResult, mTimeZoneLookupHelper.lookupByCountry(countryIsoCode, timeMillis));
 
         // Data correct for the North and South Island.
         int majorityWinterOffset = (int) TimeUnit.HOURS.toMillis(12);
-        NitzData majorityNitzData = NitzData.createForTests(
-                majorityWinterOffset, 0, timeMillis, null /* emulatorTimeZone */);
+        NitzData majorityNitzData =
+                NitzData.createForTests(
+                        majorityWinterOffset, 0, timeMillis, null /* emulatorTimeZone */);
 
         // Boost doesn't directly affect lookupByNitzCountry()
         OffsetResult majorityOffsetResult =
@@ -394,8 +437,9 @@ public class TimeZoneLookupHelperTest {
 
         // Data correct for the Chatham Islands.
         int chathamWinterOffset = majorityWinterOffset + ((int) TimeUnit.MINUTES.toMillis(45));
-        NitzData chathamNitzData = NitzData.createForTests(
-                chathamWinterOffset, 0, timeMillis, null /* emulatorTimeZone */);
+        NitzData chathamNitzData =
+                NitzData.createForTests(
+                        chathamWinterOffset, 0, timeMillis, null /* emulatorTimeZone */);
         OffsetResult chathamOffsetResult =
                 mTimeZoneLookupHelper.lookupByNitzCountry(chathamNitzData, countryIsoCode);
         assertEquals(zone("Pacific/Chatham"), chathamOffsetResult.getTimeZone());
@@ -403,8 +447,8 @@ public class TimeZoneLookupHelperTest {
 
         // NITZ data that makes no sense for NZ results in no match.
         int nonsenseOffset = (int) TimeUnit.HOURS.toMillis(5);
-        NitzData nonsenseNitzData = NitzData.createForTests(
-                nonsenseOffset, 0, timeMillis, null /* emulatorTimeZone */);
+        NitzData nonsenseNitzData =
+                NitzData.createForTests(nonsenseOffset, 0, timeMillis, null /* emulatorTimeZone */);
         OffsetResult nonsenseOffsetResult =
                 mTimeZoneLookupHelper.lookupByNitzCountry(nonsenseNitzData, countryIsoCode);
         assertNull(nonsenseOffsetResult);
@@ -418,16 +462,20 @@ public class TimeZoneLookupHelperTest {
         // suitable default.
         String countryIsoCode = "fm";
 
-        CountryResult expectedResult = new CountryResult(
-                "Pacific/Pohnpei", countryIsoCode, QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS,
-                ARBITRARY_DEBUG_INFO);
-        assertEquals(expectedResult,
-                mTimeZoneLookupHelper.lookupByCountry(countryIsoCode, timeMillis));
+        CountryResult expectedResult =
+                new CountryResult(
+                        "Pacific/Pohnpei",
+                        countryIsoCode,
+                        QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS,
+                        ARBITRARY_DEBUG_INFO);
+        assertEquals(
+                expectedResult, mTimeZoneLookupHelper.lookupByCountry(countryIsoCode, timeMillis));
 
         // Prove an OffsetResult can be found with the correct offset.
         int chuukWinterOffset = (int) TimeUnit.HOURS.toMillis(10);
-        NitzData chuukNitzData = NitzData.createForTests(
-                chuukWinterOffset, 0, timeMillis, null /* emulatorTimeZone */);
+        NitzData chuukNitzData =
+                NitzData.createForTests(
+                        chuukWinterOffset, 0, timeMillis, null /* emulatorTimeZone */);
         OffsetResult chuukOffsetResult =
                 mTimeZoneLookupHelper.lookupByNitzCountry(chuukNitzData, countryIsoCode);
         assertEquals(zone("Pacific/Chuuk"), chuukOffsetResult.getTimeZone());
@@ -435,8 +483,8 @@ public class TimeZoneLookupHelperTest {
 
         // NITZ data that makes no sense for FM: no boost means we should get nothing.
         int nonsenseOffset = (int) TimeUnit.HOURS.toMillis(5);
-        NitzData nonsenseNitzData = NitzData.createForTests(
-                nonsenseOffset, 0, timeMillis, null /* emulatorTimeZone */);
+        NitzData nonsenseNitzData =
+                NitzData.createForTests(nonsenseOffset, 0, timeMillis, null /* emulatorTimeZone */);
         OffsetResult nonsenseOffsetResult =
                 mTimeZoneLookupHelper.lookupByNitzCountry(nonsenseNitzData, countryIsoCode);
         assertNull(nonsenseOffsetResult);
@@ -445,13 +493,16 @@ public class TimeZoneLookupHelperTest {
     @Test
     public void testLookupByCountry_multipleZones() {
         // US has many time zones that have different offsets.
-        CountryResult expectedResult = new CountryResult(
-                "America/New_York", "us", QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS,
-                ARBITRARY_DEBUG_INFO);
-        assertEquals(expectedResult,
-                mTimeZoneLookupHelper.lookupByCountry("us", NH_SUMMER_TIME_MILLIS));
-        assertEquals(expectedResult,
-                mTimeZoneLookupHelper.lookupByCountry("us", NH_WINTER_TIME_MILLIS));
+        CountryResult expectedResult =
+                new CountryResult(
+                        "America/New_York",
+                        "us",
+                        QUALITY_MULTIPLE_ZONES_DIFFERENT_OFFSETS,
+                        ARBITRARY_DEBUG_INFO);
+        assertEquals(
+                expectedResult, mTimeZoneLookupHelper.lookupByCountry("us", NH_SUMMER_TIME_MILLIS));
+        assertEquals(
+                expectedResult, mTimeZoneLookupHelper.lookupByCountry("us", NH_WINTER_TIME_MILLIS));
     }
 
     @Test
@@ -486,7 +537,10 @@ public class TimeZoneLookupHelperTest {
 
         // The result should be for the default country "gp".
         CountryResult expectedGpResult =
-                new CountryResult("America/Guadeloupe", "gp", QUALITY_MULTIPLE_ZONES_SAME_OFFSET,
+                new CountryResult(
+                        "America/Guadeloupe",
+                        "gp",
+                        QUALITY_MULTIPLE_ZONES_SAME_OFFSET,
                         ARBITRARY_DEBUG_INFO);
         assertEquals(
                 expectedGpResult,
@@ -569,8 +623,11 @@ public class TimeZoneLookupHelperTest {
     /**
      * Assert the time zone in the OffsetResult has the expected properties at the specified time.
      */
-    private static void assertOffsetResultZoneOffsets(long time, int expectedOffsetAtTime,
-            Integer expectedDstAtTime, OffsetResult lookupResult) {
+    private static void assertOffsetResultZoneOffsets(
+            long time,
+            int expectedOffsetAtTime,
+            Integer expectedDstAtTime,
+            OffsetResult lookupResult) {
 
         TimeZone timeZone = lookupResult.getTimeZone();
         GregorianCalendar calendar = new GregorianCalendar(timeZone);

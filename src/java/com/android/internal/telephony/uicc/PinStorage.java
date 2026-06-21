@@ -53,7 +53,9 @@ import android.os.Message;
 import android.os.PersistableBundle;
 import android.os.WorkSource;
 import android.provider.Settings;
+import android.security.Flags;
 import android.security.keystore.KeyGenParameterSpec;
+import android.telephony.AnomalyReporter;
 import android.telephony.CarrierConfigManager;
 import android.telephony.TelephonyManager;
 import android.telephony.TelephonyManager.SimState;
@@ -63,13 +65,17 @@ import android.util.Log;
 import android.util.SparseArray;
 
 import com.android.internal.R;
+import com.android.internal.annotations.GuardedBy;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.telephony.PhoneFactory;
 import com.android.internal.telephony.TelephonyStatsLog;
 import com.android.internal.telephony.flags.FeatureFlags;
+import com.android.internal.telephony.nano.StoredPinProto;
 import com.android.internal.telephony.nano.StoredPinProto.EncryptedPin;
+import com.android.internal.telephony.nano.StoredPinProto.EncryptedPlatformManagedPins;
+import com.android.internal.telephony.nano.StoredPinProto.PlatformManagedPin;
 import com.android.internal.telephony.nano.StoredPinProto.StoredPin;
 import com.android.internal.telephony.nano.StoredPinProto.StoredPin.PinStatus;
 import com.android.internal.telephony.uicc.IccCardStatus.PinState;
@@ -77,12 +83,23 @@ import com.android.internal.telephony.util.WorkerThread;
 import com.android.internal.util.ArrayUtils;
 import com.android.telephony.Rlog;
 
+import com.google.errorprone.annotations.FormatMethod;
+import com.google.errorprone.annotations.FormatString;
+
 import java.io.FileDescriptor;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.security.KeyStore;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -125,10 +142,14 @@ public class PinStorage extends Handler {
 
     /** Alias of the long-term key that does not require user authentication. */
     private static final String KEYSTORE_ALIAS_LONG_TERM_ALWAYS = "PinStorage_longTerm_always_key";
-    /** Alias of the user authentication blound long-term key. */
+    /** Alias of the user authentication bound long-term key. */
     private static final String KEYSTORE_ALIAS_LONG_TERM_USER_AUTH = "PinStorage_longTerm_ua_key";
     /** Alias of the short-term key (30 minutes) used before and after an unattended reboot. */
     private static final String KEYSTORE_ALIAS_SHORT_TERM = "PinStorage_shortTerm_key";
+    /**
+     * Alias of the cross-reboot key used before and after an unattended reboot for managed PINs.
+     */
+    private static final String KEYSTORE_ALIAS_CROSS_REBOOT = "PinStorage_crossReboot_key";
 
     // Constants related to the storage of the encrypted SIM PIN to non-volatile memory.
     // Data is stored in two separate files:
@@ -138,20 +159,38 @@ public class PinStorage extends Handler {
     private static final String SHARED_PREFS_AVAILABLE_PIN_BASE_KEY = "encrypted_pin_available_";
     private static final String SHARED_PREFS_REBOOT_PIN_BASE_KEY = "encrypted_pin_reboot_";
     private static final String SHARED_PREFS_STORED_PINS = "stored_pins";
+    private final UUID mAnomalyUUID = UUID.fromString("aaa85c00-7a31-4a46-b42a-753256664784");
+    // Shared preference key for storing all the platform-managed PINs for all SIM cards known
+    // for this instance. This includes SIM cards that are no longer present in the device.
+    // The PINs are stored encrypted with the long-term Keystore key.
+    private static final String SHARED_PREFS_ENCRYPTED_PLATFORM_MANAGED_PINS =
+            "encrypted_platform_managed_pins";
+    // Shared preference key for storing just the identities of the SIM cards with platform-managed
+    // PINs. Effectively this is a list of ICCIDs.
+    private static final String SHARED_PREFS_PLATFORM_MANAGED_PIN_IDENTITIES =
+            "platform_managed_pin_identities";
 
     // Events
     private static final int ICC_CHANGED_EVENT = 1;
     private static final int TIMER_EXPIRATION_EVENT = 3;
     private static final int USER_UNLOCKED_EVENT = 4;
     private static final int SUPPLY_PIN_COMPLETE = 5;
+    private static final int DEVICE_LOCKED_EVENT = 6;
+    private static final int DEVICE_UNLOCKED_EVENT = 7;
 
     private final Context mContext;
     private final int mBootCount;
-    private final KeyStore mKeyStore;
+    private KeyStore mKeyStore;
 
     @Nullable
     private SecretKey mLongTermSecretKey;
     private SecretKey mShortTermSecretKey;
+    /**
+     * Used to encrypt/decrypt Stored PINs that are supposed to persist across a device reboot,
+     * as the long-term secret key may be auth-bound and the short-term key does not persist.
+     */
+    @GuardedBy("this")
+    @Nullable private SecretKey mRebootPersistentSecretKey;
 
     private boolean mIsDeviceSecure;
     private boolean mIsDeviceLocked;
@@ -162,7 +201,17 @@ public class PinStorage extends Handler {
     public int mShortTermSecretKeyDurationMinutes;
 
     /** RAM storage is used on secure devices before the device is unlocked. */
-    private final SparseArray<byte[]> mRamStorage;
+    private SparseArray<byte[]> mRamStorage;
+    private FeatureFlags mFeatureFlags;
+
+    /**
+     * Cache of SIM card identities whose PINs are platform-managed. Needed since the actual
+     * PINs are not available when the device is locked, but the platform needs to know if the
+     * PIN will be available once the device is unlocked (so the SIM PIN entry keyguard is not
+     * shown).
+     */
+    @GuardedBy("this")
+    private Set<String> mPlatformManagedIccids = new HashSet<>();
 
     /** Receiver for the required intents. */
     private final BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
@@ -183,11 +232,25 @@ public class PinStorage extends Handler {
         }
     };
 
+    private final KeyguardManager.DeviceLockedStateListener mLockStateListener =
+            new KeyguardManager.DeviceLockedStateListener() {
+                @Override
+                public void onDeviceLockedStateChanged(boolean isDeviceLocked) {
+                    logd("Device lock state changed, locked now? " + isDeviceLocked);
+                    if (isDeviceLocked) {
+                        sendMessage(obtainMessage(DEVICE_LOCKED_EVENT));
+                    } else {
+                        sendMessage(obtainMessage(DEVICE_UNLOCKED_EVENT));
+                    }
+                }
+            };
+    private boolean mRegisteredKeyguardListener = false;
+
     public PinStorage(Context context, @NonNull Looper looper, @NonNull FeatureFlags featureFlags) {
         super(looper);
         mContext = context;
+        mFeatureFlags = featureFlags;
         mBootCount = getBootCount();
-        mKeyStore = initializeKeyStore();
         mShortTermSecretKeyDurationMinutes = SHORT_TERM_KEY_DURATION_MINUTES;
 
         mIsDeviceSecure = isDeviceSecure();
@@ -215,18 +278,72 @@ public class PinStorage extends Handler {
         String alias = (!mIsDeviceSecure || mIsDeviceLocked)
                 ? KEYSTORE_ALIAS_LONG_TERM_ALWAYS : KEYSTORE_ALIAS_LONG_TERM_USER_AUTH;
         // This is the main thread, so accessing keystore in a separate thread to prevent ANR.
-        WorkerThread.getExecutor().execute(() -> mLongTermSecretKey = initializeSecretKey(
-                alias, /*createIfAbsent=*/ true));
 
-        // If the device is not secured or is unlocked, we can start logic. Otherwise we need to
-        // wait for the device to be unlocked and store any temporary PIN in RAM.
-        if (!mIsDeviceSecure || !mIsDeviceLocked) {
-            mRamStorage = null;
-            onDeviceReady();
-        } else {
-            logd("Device is locked - Postponing initialization");
-            mRamStorage = new SparseArray<>();
+        post(() -> {
+            mKeyStore = initializeKeyStore();
+            mLongTermSecretKey = initializeSecretKey(
+                    alias, /*createIfAbsent=*/ true);
+            if (Flags.autoSimPinManagement()) {
+                mRebootPersistentSecretKey = initializeSecretKey(
+                        KEYSTORE_ALIAS_CROSS_REBOOT, /*createIfAbsent=*/ true);
+            }
+            // If the device is not secured or is unlocked, we can start logic. Otherwise we
+            // need to wait for the device to be unlocked and store any temporary PIN in RAM.
+            if (!mIsDeviceSecure || !mIsDeviceLocked) {
+                mRamStorage = null;
+                onDeviceReady();
+            } else {
+                logd("Device is locked - Postponing initialization");
+                mRamStorage = new SparseArray<>();
+                loadPlatformManagedIccids();
+                changeKeyguardListenerIfNecessary();
+            }
+        });
+    }
+
+    private void changeKeyguardListenerIfNecessary() {
+        if (!Flags.autoSimPinManagement()) {
+            return;
         }
+
+        synchronized (this) {
+            KeyguardManager keyguardManager = mContext.getSystemService(KeyguardManager.class);
+
+            if (mPlatformManagedIccids.isEmpty()) {
+                if (mRegisteredKeyguardListener) {
+                    keyguardManager.removeDeviceLockedStateListener(mLockStateListener);
+                    mRegisteredKeyguardListener = false;
+                }
+            } else if (!mRegisteredKeyguardListener) {
+                keyguardManager.addDeviceLockedStateListener(WorkerThread.getExecutor(),
+                        mLockStateListener);
+                mRegisteredKeyguardListener = true;
+            }
+        }
+    }
+
+    private void loadPlatformManagedIccids() {
+        if (!Flags.autoSimPinManagement()) {
+            // It is possible that the flag was on and a SIM was opted-into the feature and then
+            // the flag was turned off. In that case, behave as if the SIM was not opted into
+            // the feature.
+            return;
+        }
+
+        synchronized (this) {
+            mPlatformManagedIccids.addAll(deserializeIccids(
+                    mContext.getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+                            .getString(SHARED_PREFS_PLATFORM_MANAGED_PIN_IDENTITIES, "")));
+        }
+    }
+
+    /** return the {@link KeyStore}. */
+    private KeyStore getKeyStore() {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            String message = "PinStorage keyStore invoked on main thread";
+            AnomalyReporter.reportAnomaly(mAnomalyUUID, message);
+        }
+        return mKeyStore;
     }
 
     /** Store the {@code pin} for the {@code slotId}. */
@@ -266,12 +383,59 @@ public class PinStorage extends Handler {
     }
 
     /**
+     * Handles a retrieved {@link StoredPin}, checking for ICCID mismatches and updating the
+     * PIN status to available if its current status is verification ready.
+     *
+     * If the {@code storedPin} is not null and its ICCID does not match the provided {@code iccid},
+     * the PIN stored for the slot associated with the ICCID is cleared.
+     *
+     * If the {@code storedPin} is in {@link PinStatus#VERIFICATION_READY}, its status is updated
+     * to {@link PinStatus#AVAILABLE}, and the PIN value is returned.
+     *
+     * @param storedPin The {@link StoredPin} loaded from storage, or null.
+     * @param iccid The ICCID of the SIM card in the given slot.
+     * @param slotId The slot index.
+     * @return The PIN string if the {@code storedPin} was in {@link PinStatus#VERIFICATION_READY}
+     *         and the ICCIDs matched, otherwise null.
+     */
+    @Nullable
+    private String handleStoredPin(@Nullable StoredPin storedPin, String iccid, int slotId) {
+        if (storedPin == null) {
+            return null;
+        }
+        if (!storedPin.iccid.equals(iccid)) {
+            // The ICCID does not match: it's possible that the SIM card was changed.
+            // Delete the cached PIN.
+            savePinInformation(slotId, null);
+            TelephonyStatsLog.write(PIN_STORAGE_EVENT,
+                    PIN_STORAGE_EVENT__EVENT__PIN_VERIFICATION_SKIPPED_SIM_CARD_MISMATCH,
+                    /* number_of_pins= */ 1, /* package_name= */ "");
+        } else if (storedPin.status == PinStatus.VERIFICATION_READY) {
+            logd("getPin[%d] - Found PIN ready for verification", slotId);
+            // Move the state to AVAILABLE, so that it cannot be retrieved again.
+            storedPin.status = PinStatus.AVAILABLE;
+            savePinInformation(slotId, storedPin);
+            return storedPin.pin;
+        }
+
+        return null;
+    }
+
+    /**
      * Return the cached pin for the SIM card identified by {@code slotId} and {@code iccid}, or
      * an empty string if it is not available.
      *
-     * The method returns the PIN only if the state is VERIFICATION_READY. If the PIN is found,
-     * its state changes to AVAILABLE, so that it cannot be retrieved a second time during the
-     * same boot cycle. If the PIN verification fails, it will be removed after the failed attempt.
+     * The method first tries to load the PIN information associated with the {@code slotId}. If
+     * PIN information is available for this slot, and the state is VERIFICATION_READY. If the PIN
+     * is found, its state changes to AVAILABLE, so that it cannot be retrieved a second time during
+     * the same boot cycle. The PIN is then returned.
+     *
+     * If a PIN is not available from the first step, the method will check if the SIM identified
+     * by {@code iccid} has its PIN managed by the platform. If so, and if the device is not
+     * locked, it will return that PIN.
+     *
+     * If the PIN verification fails, it will be removed after the failed attempt, whether it's
+     * automatically-managed or not.
      */
     public synchronized String getPin(int slotId, String iccid) {
         if (!validateSlotId(slotId) || !validateIccid(iccid)) {
@@ -279,23 +443,184 @@ public class PinStorage extends Handler {
         }
 
         StoredPin storedPin = loadPinInformation(slotId);
-        if (storedPin != null) {
-            if (!storedPin.iccid.equals(iccid)) {
-                // The ICCID does not match: it's possible that the SIM card was changed.
-                // Delete the cached PIN.
-                savePinInformation(slotId, null);
-                TelephonyStatsLog.write(PIN_STORAGE_EVENT,
-                        PIN_STORAGE_EVENT__EVENT__PIN_VERIFICATION_SKIPPED_SIM_CARD_MISMATCH,
-                        /* number_of_pins= */ 1, /* package_name= */ "");
-            } else if (storedPin.status == PinStatus.VERIFICATION_READY) {
-                logd("getPin[%d] - Found PIN ready for verification", slotId);
-                // Move the state to AVAILABLE, so that it cannot be retrieved again.
-                storedPin.status = PinStatus.AVAILABLE;
-                savePinInformation(slotId, storedPin);
-                return storedPin.pin;
+        String pin = handleStoredPin(storedPin, iccid, slotId);
+
+        if (pin != null) {
+            return pin;
+        }
+
+        if (Flags.autoSimPinManagement()) {
+            PlatformManagedPin platformManagedPin = readPlatformManagedPin(iccid);
+            if (platformManagedPin != null) {
+                return platformManagedPin.pin;
             }
         }
+
         return "";
+    }
+
+    /**
+     * Returns true if the provided ICCID identifies a SIM card whose PIN is managed by the
+     * Android platform.
+     *
+     * @param iccid The Card Identity string (ICCID including characters).
+     * @return true if the card identified by {@code iccid} has its PIN managed by the platform,
+     * false otherwise.
+     */
+    public synchronized boolean isPinPlatformManaged(String iccid) {
+        if (!validateIccid(iccid) || !Flags.autoSimPinManagement()) {
+            return false;
+        }
+
+        return mPlatformManagedIccids.contains(iccid);
+    }
+
+    /**
+     * Store the {@code pin} for the {@code slotId}, preserving the {@code oldPin}.
+     * Calling this method implies the PIN is platform-managed, since the old PIN may only
+     * be stored for the case where the user opts-out of platform management of the PIN
+     * and the old PIN needs to be restored to the SIM card.
+     */
+    public synchronized boolean storePlatformManagedPin(int slotId, String pin, String oldPin) {
+        if (!Flags.autoSimPinManagement()) {
+            return false;
+        }
+
+        String iccid = getIccid(slotId);
+
+        if (!validateSlotId(slotId) || !validateIccid(iccid) || !validatePin(pin)
+                || !validatePin(oldPin)) {
+            return false;
+        }
+
+        PlatformManagedPin platformManagedPin = new PlatformManagedPin();
+        platformManagedPin.iccid = iccid;
+        platformManagedPin.pin = pin;
+        platformManagedPin.oldPin = oldPin;
+
+        SharedPreferences.Editor editor =
+                mContext.getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit();
+
+        if (!savePlatformManagedPins(editor, iccid, platformManagedPin)) {
+            return false;
+        }
+
+        changeKeyguardListenerIfNecessary();
+        storePlatformPinAsRebootReady(editor, slotId, platformManagedPin);
+        return editor.commit();
+    }
+
+    /**
+     * Clean the platform-managed PIN for the {@code slotId}. Once cleared, the PIN cannot be
+     * recovered anymore.
+     * @param slotId The slot containing the SIM whose PIN is platform-managed.
+     */
+    public synchronized boolean clearPlatformManagedPin(int slotId) {
+        String iccid = getIccid(slotId);
+
+        if (!validateSlotId(slotId) || !validateIccid(iccid) || !Flags.autoSimPinManagement()) {
+            return false;
+        }
+
+        SharedPreferences.Editor editor =
+                mContext.getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit();
+        // Delete the PIN in case it was in the reboot_pin preference.
+        editor.remove(SHARED_PREFS_REBOOT_PIN_BASE_KEY + slotId);
+        boolean saveResult = savePlatformManagedPins(editor, iccid, /* pinToStore= */ null);
+        return saveResult && editor.commit();
+    }
+
+    /**
+     * Returns the old PIN field for the given ICCID.
+     * For platform-managed PINs, {@code storePin} is called with the new PIN (which is
+     * platform-managed) and the old PIN, which was the SIM card's PIN prior to the change.
+     *
+     * @param iccid Identity of the SIM.
+     * @return The old PIN passed into the {@code storePin} method.
+     */
+    public synchronized String getOldPin(String iccid) {
+        if (!validateIccid(iccid) || !Flags.autoSimPinManagement()) {
+            return "";
+        }
+
+        PlatformManagedPin platformManagedPin = readPlatformManagedPin(iccid);
+        if (platformManagedPin != null && platformManagedPin.iccid.equals(iccid)) {
+            return platformManagedPin.oldPin;
+        }
+
+        return "";
+    }
+
+    /**
+     * Returns the platform-managed PINs in an opaque byte array for backing up.
+     * As it contains the PINs in cleartext, must only be called if the user's backup
+     * is encrypted (or this is a device-to-device transfer scenario).
+     *
+     * @return The SIM PINs database to be backed up.
+     */
+    public synchronized byte[] getPlatformManagedPinsForBackup() {
+        StoredPinProto.PlatformManagedPins pins = readPlatformManagedPins();
+        return StoredPinProto.PlatformManagedPins.toByteArray(pins);
+    }
+
+    /**
+     * Restores platform-managed PINs from backup. Does not override existing PINs
+     * for known SIMs.
+     *
+     * @param data the data to restore from.
+     */
+    public void restorePlatformManagedPinsFromBackup(byte[] data) {
+        if (data == null || data.length == 0) {
+            loge("Restoring of platform-managed PINs backup failed: data is null or empty.");
+            return;
+        }
+        StoredPinProto.PlatformManagedPins pinsFromBackup;
+        try {
+            pinsFromBackup = StoredPinProto.PlatformManagedPins.parseFrom(data);
+        } catch (IOException e) {
+            loge("Failed parsing platform-managed PINs backup: %s", e);
+            return;
+        }
+
+        StoredPinProto.PlatformManagedPins existingPins = readPlatformManagedPins();
+        List<PlatformManagedPin> mergedPins = mergeExistingAndBackupPins(existingPins,
+                pinsFromBackup);
+
+        SharedPreferences.Editor editor =
+                mContext.getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit();
+        savePlatformManagedPins(editor, mergedPins);
+        editor.commit();
+        logi("Restored %d pins", mergedPins.size() - existingPins.pins.length);
+    }
+
+    /**
+     * Merges pins from backup with existing pins.
+     *
+     * @param existingPins Pins to merge with, which must not be overwritten.
+     * @param pinsFromBackup Pins to be merged.
+     * @return A list of platform-managed PINs containing the existing PINs and ones from backup.
+     */
+    @NonNull
+    @VisibleForTesting
+    public static List<PlatformManagedPin> mergeExistingAndBackupPins(
+            StoredPinProto.PlatformManagedPins existingPins,
+            StoredPinProto.PlatformManagedPins pinsFromBackup) {
+
+        List<PlatformManagedPin> currentPins = new ArrayList<>(existingPins.pins.length);
+        currentPins.addAll(Arrays.asList(existingPins.pins));
+
+        for (PlatformManagedPin backupPin : pinsFromBackup.pins) {
+            if (findPinByIccid(currentPins, backupPin.iccid) >= 0) {
+                logw("Pin for ICCID %s already exists, not restoring", backupPin.iccid);
+            } else {
+                currentPins.add(backupPin);
+            }
+        }
+
+        return currentPins;
     }
 
     /**
@@ -384,39 +709,85 @@ public class PinStorage extends Handler {
      * term key that requires user verification. The cached PIN temporarily stored in RAM are
      * merged with those on disk from the previous boot.
      */
-    private synchronized void onUserUnlocked() {
-        if (!mIsDeviceLocked) {
-            // This should never happen.
-            // Nothing to do because the device was already unlocked before
+    private void onUserUnlocked() {
+        synchronized (this) {
+            if (!mIsDeviceLocked) {
+                // This should never happen.
+                // Nothing to do because the device was already unlocked before
+                return;
+            }
+
+            logd("onUserUnlocked - Device is unlocked");
+
+            // It's possible that SIM PIN was already verified and stored temporarily in RAM. Load
+            // the data and erase the memory.
+            SparseArray<StoredPin> storedPinInRam = loadPinInformation();
+            cleanRamStorage();
+
+            // Mark the device as unlocked
+            mIsDeviceLocked = false;
+
+            // Replace the temporary long-term key without user authentication with a new long-term
+            // key that requires user authentication to save all PINs previously in RAM (all in
+            // AVAILABLE state) to disk.
+            mLongTermSecretKey = initializeSecretKey(
+                    KEYSTORE_ALIAS_LONG_TERM_USER_AUTH, /*createIfAbsent=*/ true);
+
+            // Save the PINs previously in RAM to disk, overwriting any PIN that might already
+            // exists.
+            for (int i = 0; i < storedPinInRam.size(); i++) {
+                savePinInformation(storedPinInRam.keyAt(i), storedPinInRam.valueAt(i));
+            }
+
+            // At this point the module is fully initialized. Execute the start logic.
+            onDeviceReady();
+
+            // Verify any pending PIN for SIM cards that need it.
+            if (!mFeatureFlags.fixPinStorageDeadlock()) {
+                verifyPendingPins();
+            }
+        }
+
+        // Verify any pending PIN for SIM cards that need it.
+        if (mFeatureFlags.fixPinStorageDeadlock()) {
+            verifyPendingPins();
+        }
+    }
+
+    // Post first device unlock: Put platform-managed in an available state so they can
+    // be read in the {@code getPin} method and usable following a reboot.
+    private synchronized void makePlatformManagedPinsAvailableAndUsablePostReboot() {
+        if (isDeviceLocked() || mIsDeviceLocked) {
+            logw("Cannot make platform-managed PINs available when device is locked.");
             return;
         }
 
-        logd("onUserUnlocked - Device is unlocked");
+        SharedPreferences.Editor editor =
+                mContext.getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit();
 
-        // It's possible that SIM PIN was already verified and stored temporarily in RAM. Load the
-        // data and erase the memory.
-        SparseArray<StoredPin> storedPinInRam = loadPinInformation();
-        cleanRamStorage();
-
-        // Mark the device as unlocked
-        mIsDeviceLocked = false;
-
-        // Replace the temporary long-term key without user authentication with a new long-term
-        // key that requires user authentication to save all PINs previously in RAM (all in
-        // AVAILABLE state) to disk.
-        mLongTermSecretKey =
-                initializeSecretKey(KEYSTORE_ALIAS_LONG_TERM_USER_AUTH, /*createIfAbsent=*/ true);
-
-        // Save the PINs previously in RAM to disk, overwriting any PIN that might already exists.
-        for (int i = 0; i < storedPinInRam.size(); i++) {
-            savePinInformation(storedPinInRam.keyAt(i), storedPinInRam.valueAt(i));
+        // Put platform-managed PINs in the reboot_pin_base_key prefs for read after a reboot.
+        // This is done by finding out if the PIN for the SIM in each slot is platform-managed.
+        int slotCount = getSlotCount();
+        StoredPinProto.PlatformManagedPins allPlatformManagedPins =
+                readPlatformManagedPins();
+        Map<String, PlatformManagedPin> iccidToPinMap = new HashMap<>();
+        for (PlatformManagedPin pin : allPlatformManagedPins.pins) {
+            iccidToPinMap.put(pin.iccid, pin);
         }
 
-        // At this point the module is fully initialized. Execute the start logic.
-        onDeviceReady();
-
-        // Verify any pending PIN for SIM cards that need it.
-        verifyPendingPins();
+        for (int slotId = 0; slotId < slotCount; slotId++) {
+            String slotIccId = getIccid(slotId);
+            PlatformManagedPin platformPin = iccidToPinMap.get(slotIccId);
+            if (platformPin == null) {
+                logd("PIN for SIM " + slotIccId + " is not platform-managed, skipping.");
+                continue;
+            }
+            logd("PIN for SIM " + slotIccId + " IS platform-managed, processing.");
+            storePlatformPinAsRebootReady(editor, slotId, platformPin);
+        }
+        boolean commitResult = editor.commit();
+        logd("Result of storing platform-managed PINs as reboot-ready? " + commitResult);
     }
 
     /**
@@ -477,6 +848,10 @@ public class PinStorage extends Handler {
                     PIN_STORAGE_EVENT__EVENT__PIN_COUNT_NOT_MATCHING_AFTER_REBOOT,
                     prevCachedPinCount - verificationReadyCount, /* package_name= */ "");
         }
+
+        loadPlatformManagedIccids();
+        changeKeyguardListenerIfNecessary();
+        logd("Have %d platform-managed PINs.", mPlatformManagedIccids.size());
     }
 
     /**
@@ -549,6 +924,12 @@ public class PinStorage extends Handler {
                 break;
             }
             case TelephonyManager.SIM_STATE_PUK_REQUIRED:
+                // In case a platform-managed PIN got to this state, clear it.
+                if (Flags.autoSimPinManagement()) {
+                    // TODO: Add metrics about how often we got the PIN wrong for a platform-managed
+                    // SIM and it got to the PUK_REQUIRED state (should never happen).
+                    clearPlatformManagedPin(slotId);
+                }
             case TelephonyManager.SIM_STATE_PERM_DISABLED:
             case TelephonyManager.SIM_STATE_CARD_IO_ERROR:
                 // These states indicate that the SIM card will need a manual PIN verification.
@@ -600,6 +981,31 @@ public class PinStorage extends Handler {
                 /* number_of_pins= */ 1, /* package_name= */ "");
     }
 
+    private synchronized void onDeviceLocked() {
+        // Do not do anything if the user has not unlocked for the first time (post reboot) yet.
+        if (mIsDeviceLocked) {
+            logd("Device was never unlocked, bailing.");
+            return;
+        }
+
+        SharedPreferences.Editor editor =
+                mContext.getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit();
+
+        // Remove PINs that are platform-managed from the reboot preference so that they are not
+        // available after a reboot. That prevents an attacker from getting the platform to
+        // send the PIN to the SIM card by forcing a reboot, when the device is locked.
+        int slotCount = getSlotCount();
+        for (int slotId = 0; slotId < slotCount; slotId++) {
+            String slotIccId = getIccid(slotId);
+            if (isPinPlatformManaged(slotIccId)) {
+                logd("Removed post-reboot PIN for SIM " + slotIccId);
+                editor.remove(SHARED_PREFS_REBOOT_PIN_BASE_KEY + slotId);
+            }
+        }
+        editor.commit();
+    }
+
     @Override
     public void handleMessage(Message msg) {
         switch (msg.what) {
@@ -616,6 +1022,12 @@ public class PinStorage extends Handler {
                 AsyncResult ar = (AsyncResult) msg.obj;
                 boolean success = ar != null && ar.exception == null;
                 onSupplyPinComplete(/* slotId= */ msg.arg2, success);
+                break;
+            case DEVICE_LOCKED_EVENT:
+                onDeviceLocked();
+                break;
+            case DEVICE_UNLOCKED_EVENT:
+                makePlatformManagedPinsAvailableAndUsablePostReboot();
                 break;
             default:
                 // Nothing to do
@@ -674,6 +1086,17 @@ public class PinStorage extends Handler {
             if (mRamStorage != null && mRamStorage.get(slotId) != null) {
                 result = decryptStoredPin(mRamStorage.get(slotId), mLongTermSecretKey);
             }
+            // Check if a PIN was stored for use after a reboot and supply it once.
+            if (result == null) {
+                logd("Device is locked, reading from reboot pin base key");
+                StoredPin postRebootPin = loadPinInformationFromDisk(
+                        slotId, SHARED_PREFS_REBOOT_PIN_BASE_KEY, mRebootPersistentSecretKey);
+                logd("Found post-reboot pin? " + (postRebootPin != null));
+                if (postRebootPin != null) {
+                    deleteRebootPersistentPin(slotId);
+                    result = postRebootPin;
+                }
+            }
         } else {
             // Load both the stored PIN in available state (with long-term key) and in other states
             // (with short-term key). At most one of them should be present at any given time and
@@ -701,6 +1124,14 @@ public class PinStorage extends Handler {
             logv("Load PIN for slot %d: null", slotId);
         }
         return result;
+    }
+
+    private void deleteRebootPersistentPin(int slotId) {
+        SharedPreferences.Editor editor =
+                mContext.getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit();
+        editor.remove(SHARED_PREFS_REBOOT_PIN_BASE_KEY + slotId);
+        editor.commit();
     }
 
     /**
@@ -743,7 +1174,7 @@ public class PinStorage extends Handler {
         } else {
             try {
                 byte[] decryptedPin = decrypt(secretKey, blob);
-                if (decryptedPin.length > 0) {
+                if (decryptedPin != null && decryptedPin.length > 0) {
                     return StoredPin.parseFrom(decryptedPin);
                 }
             } catch (Exception e) {
@@ -803,6 +1234,156 @@ public class PinStorage extends Handler {
         return mLastCommitResult;
     }
 
+    private boolean savePlatformManagedPins(@NonNull SharedPreferences.Editor editor,
+            @NonNull String iccid,
+            @Nullable PlatformManagedPin pinToStore) {
+        if (pinToStore != null && !iccid.equals(pinToStore.iccid)) {
+            throw new IllegalArgumentException("Supplied iccid (" + iccid + ") must match the value"
+                    + " in the Platform-managed PIN (" + pinToStore.iccid + ")");
+        }
+
+        StoredPinProto.PlatformManagedPins platformManagedPins =
+                readPlatformManagedPins();
+
+        List<PlatformManagedPin> currentPins = new ArrayList<>(platformManagedPins.pins.length);
+        currentPins.addAll(Arrays.asList(platformManagedPins.pins));
+
+        int modifiedPinIndex = findPinByIccid(currentPins, iccid);
+
+        if (pinToStore != null) {
+            // Store a new PIN or modify an existing one.
+            if (modifiedPinIndex == -1) {
+                // The pin to store is not in the list - add it.
+                currentPins.add(pinToStore);
+            } else {
+                // The pin to store is in the list - modify it.
+                currentPins.set(modifiedPinIndex, pinToStore);
+            }
+        } else {
+            // Remove an existing PIN.
+            if (modifiedPinIndex < 0) {
+                logw("Requested to remove PIN for ICCID %s but is not present.", iccid);
+                return false;
+            }
+            currentPins.remove(modifiedPinIndex);
+        }
+
+        Set<String> platformManagedIccids = new HashSet();
+        for (PlatformManagedPin pin : currentPins) {
+            platformManagedIccids.add(pin.iccid);
+        }
+
+        if (!savePlatformManagedPins(editor, currentPins)) {
+            return false;
+        }
+        savePlatformManagedIccids(editor, platformManagedIccids);
+        return true;
+    }
+
+    private void savePlatformManagedIccids(@NonNull SharedPreferences.Editor editor,
+            @NonNull Set<String> platformManagedIccids) {
+        // Cache the identities of SIM cards with platform-managed pin for use post-reboot
+        // before the user unlocks and we can read the actual pins.
+        mPlatformManagedIccids = platformManagedIccids;
+        editor.remove(SHARED_PREFS_PLATFORM_MANAGED_PIN_IDENTITIES);
+        editor.putString(SHARED_PREFS_PLATFORM_MANAGED_PIN_IDENTITIES,
+                serializeIccidsSet(mPlatformManagedIccids));
+        logd("Saved %d platform-managed PINs, identities: %s", mPlatformManagedIccids.size(),
+                mPlatformManagedIccids);
+    }
+
+    private boolean savePlatformManagedPins(@NonNull SharedPreferences.Editor editor,
+            @NonNull List<PlatformManagedPin> currentPins) {
+        StoredPinProto.PlatformManagedPins outputPins = new StoredPinProto.PlatformManagedPins();
+        outputPins.pins = currentPins.toArray(new PlatformManagedPin[] {});
+        byte[] unencryptedPins = StoredPinProto.PlatformManagedPins.toByteArray(outputPins);
+        byte[] encryptedPins = encryptPlatformManagedPins(mLongTermSecretKey, unencryptedPins);
+
+        if (unencryptedPins.length > 0 && encryptedPins == null) {
+            loge("Failed encrypting platform-managed pins, not changing stored ones.");
+            return false;
+        }
+
+        editor.remove(SHARED_PREFS_ENCRYPTED_PLATFORM_MANAGED_PINS);
+        editor.putString(SHARED_PREFS_ENCRYPTED_PLATFORM_MANAGED_PINS,
+                Base64.encodeToString(encryptedPins, Base64.DEFAULT));
+        return true;
+    }
+
+    private static int findPinByIccid(List<PlatformManagedPin> pins, String iccid) {
+        for (int i = 0; i < pins.size(); i++) {
+            PlatformManagedPin pin = pins.get(i);
+            if (pin != null && pin.iccid.equals(iccid)) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private void storePlatformPinAsRebootReady(SharedPreferences.Editor editor, int slotId,
+            PlatformManagedPin pin) {
+        editor.remove(SHARED_PREFS_REBOOT_PIN_BASE_KEY + slotId);
+        // User authenticated - allow reading the PIN by putting the PIN in the
+        // VERIFICATION_READY status and storing it in the reboot_pin_base_key.
+        StoredPin storedPin = new StoredPin();
+        storedPin.iccid = pin.iccid;
+        storedPin.slotId = slotId;
+        storedPin.pin = pin.pin;
+        storedPin.status = PinStatus.VERIFICATION_READY;
+        // Save the PIN for a reboot. Note that we do not care about the return value - even if
+        // saving the PIN failed, the platform-managed PIN will be available after the user
+        // unlocks the device.
+        savePinInformation(editor, slotId, storedPin, SHARED_PREFS_REBOOT_PIN_BASE_KEY,
+                mRebootPersistentSecretKey);
+    }
+
+    private @NonNull StoredPinProto.PlatformManagedPins readPlatformManagedPins() {
+        String base64platformManagedPins =
+                mContext.getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+                        .getString(SHARED_PREFS_ENCRYPTED_PLATFORM_MANAGED_PINS, "");
+
+        if (base64platformManagedPins.isEmpty()) {
+            logw("Read platform-managed PINs preference is empty.");
+            return new StoredPinProto.PlatformManagedPins();
+        }
+        // Read the existing list of managed PINs.
+        byte[] encryptedPins = Base64.decode(base64platformManagedPins, Base64.DEFAULT);
+        StoredPinProto.PlatformManagedPins platformManagedPins =
+                new StoredPinProto.PlatformManagedPins();
+        try {
+            byte[] decryptedPlatformManagedPins =
+                    decryptPlatformManagedPins(mLongTermSecretKey, encryptedPins);
+            if (decryptedPlatformManagedPins != null) {
+                platformManagedPins = StoredPinProto.PlatformManagedPins.parseFrom(
+                        decryptedPlatformManagedPins);
+            } else {
+                logw("Could not decrypt platform-managed PINs.");
+            }
+        } catch (IOException e) {
+            loge("Failed parsing platform-managed PINs: %s", e);
+        }
+        logd("Returning %d platform-managed pins", platformManagedPins.pins.length);
+        return platformManagedPins;
+    }
+
+    private @Nullable PlatformManagedPin readPlatformManagedPin(String iccid) {
+        if (mIsDeviceLocked) {
+            logw("Platform-managed PIN requested before device was unlocked for the first time, "
+                    + "refusing.");
+            return null;
+        }
+        StoredPinProto.PlatformManagedPins platformManagedPins =
+                readPlatformManagedPins();
+        for (PlatformManagedPin pin : platformManagedPins.pins) {
+            if (pin.iccid.equals(iccid)) {
+                return pin;
+            }
+        }
+
+        return null;
+    }
+
     /**
      * Store the PIN information to a specific file in non-volatile memory.
      *
@@ -828,7 +1409,7 @@ public class PinStorage extends Handler {
         logv("Save PIN: %s", storedPin.toString());
 
         byte[] encryptedPin = encrypt(secretKey, StoredPin.toByteArray(storedPin));
-        if (encryptedPin.length > 0) {
+        if (encryptedPin != null && encryptedPin.length > 0) {
             editor.putString(
                     baseKey + slotId, Base64.encodeToString(encryptedPin, Base64.DEFAULT));
             return true;
@@ -1051,7 +1632,7 @@ public class PinStorage extends Handler {
      */
     @Nullable
     private SecretKey initializeSecretKey(String alias, boolean createIfAbsent) {
-        if (mKeyStore == null) {
+        if (getKeyStore() == null) {
             return null;
         }
 
@@ -1084,7 +1665,7 @@ public class PinStorage extends Handler {
     private SecretKey getSecretKey(String alias) {
         try {
             final KeyStore.SecretKeyEntry secretKeyEntry =
-                    (KeyStore.SecretKeyEntry) mKeyStore.getEntry(alias, null);
+                    (KeyStore.SecretKeyEntry) getKeyStore().getEntry(alias, null);
             if (secretKeyEntry != null) {
                 return secretKeyEntry.getSecretKey();
             }
@@ -1146,10 +1727,10 @@ public class PinStorage extends Handler {
 
     /** Deletes the short term key from KeyStore, if it exists. */
     private void deleteSecretKey(String alias) {
-        if (mKeyStore != null) {
+        if (getKeyStore() != null) {
             logd("Delete key: %s", alias);
             try {
-                mKeyStore.deleteEntry(alias);
+                getKeyStore().deleteEntry(alias);
             } catch (Exception e) {
                 // Nothing to do. Even if the key removal fails, it becomes unusable.
                 loge("Delete key exception");
@@ -1157,52 +1738,149 @@ public class PinStorage extends Handler {
         }
     }
 
-    /** Returns the encrypted version of {@code input}, or an empty array in case of error. */
-    private byte[] encrypt(@Nullable SecretKey secretKey, byte[] input) {
+    private static final class EncryptedBlob {
+        @Nullable private final byte[] mBytes;
+        @Nullable private final byte[] mInitializationVector;
+
+        EncryptedBlob() {
+            mBytes = null;
+            mInitializationVector = null;
+        }
+
+        EncryptedBlob(byte[] bytes, byte[] initializationVector) {
+            mBytes = bytes;
+            mInitializationVector = initializationVector;
+        }
+
+        @Nullable byte[] getBytes() {
+            return mBytes;
+        }
+
+        @Nullable byte[] getInitializationVector() {
+            return mInitializationVector;
+        }
+
+        boolean isEmpty() {
+            return mBytes == null && mInitializationVector == null;
+        }
+    }
+
+    @NonNull
+    private static EncryptedBlob encryptToBlob(@Nullable SecretKey secretKey, byte[] input) {
         if (secretKey == null) {
             loge("Encrypt: Secret key is null");
-            return new byte[0];
+            return new EncryptedBlob();
         }
 
         try {
             final Cipher cipher = Cipher.getInstance(CIPHER_TRANSFORMATION);
             cipher.init(Cipher.ENCRYPT_MODE, secretKey);
 
-            EncryptedPin encryptedPin = new EncryptedPin();
-            encryptedPin.iv = cipher.getIV();
-            encryptedPin.encryptedStoredPin = cipher.doFinal(input);
-            return EncryptedPin.toByteArray(encryptedPin);
+            byte[] iv = cipher.getIV();
+            byte[] encryptedBytes = cipher.doFinal(input);
+            return new EncryptedBlob(encryptedBytes, iv);
         } catch (Exception e) {
             loge("Encrypt exception", e);
             TelephonyStatsLog.write(PIN_STORAGE_EVENT,
                     PIN_STORAGE_EVENT__EVENT__PIN_ENCRYPTION_ERROR, 1, /* package_name= */ "");
         }
-        return new byte[0];
+
+        return new EncryptedBlob();
     }
 
     /** Returns the decrypted version of {@code input}, or an empty array in case of error. */
-    private byte[] decrypt(SecretKey secretKey, byte[] input) {
+    @Nullable
+    private static byte[] decryptBlob(SecretKey secretKey, EncryptedBlob input) {
         if (secretKey == null) {
             loge("Decrypt: Secret key is null");
-            return new byte[0];
+            return null;
+        }
+
+        if (input.isEmpty()) {
+            return null;
         }
 
         try {
-            EncryptedPin encryptedPin = EncryptedPin.parseFrom(input);
-            if (!ArrayUtils.isEmpty(encryptedPin.encryptedStoredPin)
-                    && !ArrayUtils.isEmpty(encryptedPin.iv)) {
-                final Cipher cipher = Cipher.getInstance(CIPHER_TRANSFORMATION);
-                final GCMParameterSpec spec =
-                        new GCMParameterSpec(GCM_PARAMETER_TAG_BIT_LEN, encryptedPin.iv);
-                cipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
-                return cipher.doFinal(encryptedPin.encryptedStoredPin);
-            }
+            final Cipher cipher = Cipher.getInstance(CIPHER_TRANSFORMATION);
+            final GCMParameterSpec spec =
+                    new GCMParameterSpec(GCM_PARAMETER_TAG_BIT_LEN,
+                            input.getInitializationVector());
+            cipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
+            return cipher.doFinal(input.getBytes());
         } catch (Exception e) {
             loge("Decrypt exception", e);
             TelephonyStatsLog.write(PIN_STORAGE_EVENT,
                     PIN_STORAGE_EVENT__EVENT__PIN_DECRYPTION_ERROR, 1, /* package_name= */ "");
         }
-        return new byte[0];
+        return null;
+    }
+
+
+    /** Returns the encrypted version of {@code input}, or an empty array in case of error. */
+    @Nullable
+    private byte[] encrypt(@Nullable SecretKey secretKey, byte[] input) {
+        EncryptedBlob blob = encryptToBlob(secretKey, input);
+        if (blob.isEmpty()) {
+            return null;
+        }
+
+        EncryptedPin encryptedPin = new EncryptedPin();
+        encryptedPin.iv = blob.getInitializationVector();
+        encryptedPin.encryptedStoredPin = blob.getBytes();
+        return EncryptedPin.toByteArray(encryptedPin);
+    }
+
+    /** Returns the decrypted version of {@code input}, or an empty array in case of error. */
+    @Nullable
+    private byte[] decrypt(SecretKey secretKey, byte[] input) {
+        try {
+            EncryptedPin encryptedPin = EncryptedPin.parseFrom(input);
+            if (!ArrayUtils.isEmpty(encryptedPin.encryptedStoredPin)
+                    && !ArrayUtils.isEmpty(encryptedPin.iv)) {
+                return decryptBlob(secretKey,
+                        new EncryptedBlob(encryptedPin.encryptedStoredPin, encryptedPin.iv));
+            }
+        } catch (Exception e) {
+            loge("Parsing exception", e);
+        }
+        return null;
+    }
+
+    /** Returns the encrypted version of {@code input}, or an empty array in case of error. */
+    @Nullable
+    @VisibleForTesting
+    public static byte[] encryptPlatformManagedPins(@Nullable SecretKey secretKey,
+            @NonNull byte[] input) {
+        EncryptedBlob blob = encryptToBlob(secretKey, input);
+        if (blob.isEmpty()) {
+            logw("Encrypted platform-managed pins blob is empty.");
+            return null;
+        }
+
+        EncryptedPlatformManagedPins encryptedPlatformPins = new EncryptedPlatformManagedPins();
+        encryptedPlatformPins.iv = blob.getInitializationVector();
+        encryptedPlatformPins.encryptedPlatformPins = blob.getBytes();
+        return EncryptedPlatformManagedPins.toByteArray(encryptedPlatformPins);
+    }
+
+    /**
+     * @hide
+     */
+    @Nullable
+    @VisibleForTesting
+    public static byte[] decryptPlatformManagedPins(@Nullable SecretKey secretKey,
+            @NonNull byte[] input) {
+        try {
+            StoredPinProto.EncryptedPlatformManagedPins encryptedPins =
+                    StoredPinProto.EncryptedPlatformManagedPins.parseFrom(
+                            input);
+            return decryptBlob(secretKey,
+                    new EncryptedBlob(encryptedPins.encryptedPlatformPins,
+                            encryptedPins.iv));
+        } catch (IOException e) {
+            loge("Failed parsing encrypted platform-managed PINs: %s", e);
+        }
+        return null;
     }
 
     private static void logv(String format, Object... args) {
@@ -1221,6 +1899,16 @@ public class PinStorage extends Handler {
 
     private static void loge(String msg, Throwable tr) {
         Rlog.e(TAG, msg, tr);
+    }
+
+    @FormatMethod
+    private static void logw(@FormatString String format, Object... args) {
+        Rlog.w(TAG, String.format(format, args));
+    }
+
+    @FormatMethod
+    private static void logi(@FormatString String format, Object... args) {
+        Rlog.i(TAG, String.format(format, args));
     }
 
     void dump(FileDescriptor fd, PrintWriter printWriter, String[] args) {
@@ -1242,6 +1930,33 @@ public class PinStorage extends Handler {
                 pw.println(" pin=" + storedPins.valueAt(i).toString());
             }
         }
+        pw.println("mPlatformManagedIccids=" + Rlog.pii(VDBG, mPlatformManagedIccids));
         pw.decreaseIndent();
+    }
+
+    /**
+     * @hide
+     */
+    @NonNull
+    @VisibleForTesting
+    public static String serializeIccidsSet(Set<String> iccIds) {
+        if (iccIds.isEmpty()) {
+            return "";
+        }
+        return String.join(",", iccIds);
+    }
+
+    /**
+     * @hide
+     */
+    @NonNull
+    @VisibleForTesting
+    public static Set<String> deserializeIccids(String iccidsCommaSeparatedList) {
+        if (iccidsCommaSeparatedList.isEmpty()) {
+            return new HashSet<>();
+        }
+
+        String[] iccidsArray = iccidsCommaSeparatedList.split(",");
+        return new HashSet<>(Arrays.asList(iccidsArray));
     }
 }

@@ -109,15 +109,13 @@ public class SmsBroadcastUndelivered {
         @Override
         public void onReceive(final Context context, Intent intent) {
             Rlog.d(TAG, "Received broadcast " + intent.getAction());
-            if (Intent.ACTION_USER_UNLOCKED.equals(intent.getAction())) {
-                if (mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()) {
+                if (Intent.ACTION_USER_UNLOCKED.equals(intent.getAction())) {
                     int userId = intent.getIntExtra(Intent.EXTRA_USER_HANDLE, UserHandle.USER_NULL);
                     if (userId != getMainUser().getIdentifier()) {
                         return;
                     }
+                    new ScanRawTableThread(context).start();
                 }
-                new ScanRawTableThread(context).start();
-            }
         }
     };
 
@@ -161,28 +159,20 @@ public class SmsBroadcastUndelivered {
         mFeatureFlags = featureFlags;
 
         UserHandle mainUser = getMainUser();
-        boolean isUserUnlocked = mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser() ?
-                        mUserManager.isUserUnlocked(mainUser) : mUserManager.isUserUnlocked();
+        boolean isUserUnlocked = mUserManager.isUserUnlocked(mainUser);
         if (isUserUnlocked) {
             new ScanRawTableThread(context).start();
         } else {
             IntentFilter userFilter = new IntentFilter();
             userFilter.addAction(Intent.ACTION_USER_UNLOCKED);
-            if (mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()) {
-                context.registerReceiverAsUser(
-                        mBroadcastReceiver, mainUser, userFilter, null, null);
-            } else {
-                context.registerReceiver(mBroadcastReceiver, userFilter);
-            }
+            context.registerReceiverAsUser(
+                    mBroadcastReceiver, mainUser, userFilter, null, null);
         }
     }
 
     /** Returns the MainUser, which is the user designated for sending SMS broadcasts. */
     private UserHandle getMainUser() {
-        UserHandle mainUser = null;
-        if (mFeatureFlags.smsMmsDeliverBroadcastsRedirectToMainUser()) {
-            mainUser = mUserManager.getMainUser();
-        }
+        UserHandle mainUser = mUserManager.getMainUser();
         return mainUser != null ? mainUser : UserHandle.SYSTEM;
     }
 

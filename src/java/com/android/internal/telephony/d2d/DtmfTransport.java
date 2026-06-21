@@ -17,7 +17,7 @@
 package com.android.internal.telephony.d2d;
 
 import android.annotation.NonNull;
-import android.telecom.Log;
+import com.android.telephony.Rlog;
 import android.util.ArraySet;
 import android.util.Pair;
 
@@ -83,6 +83,8 @@ import java.util.concurrent.TimeUnit;
  * Service State - poor --> A AAD BD
  */
 public class DtmfTransport implements TransportProtocol {
+    private static final String TAG = "DtmfTransport";
+
     /**
      * The DTMF probe and version string.
      * Can be a string consisting of characters A-C.
@@ -235,11 +237,11 @@ public class DtmfTransport implements TransportProtocol {
     @Override
     public void startNegotiation() {
         if (mTransportState != STATE_IDLE) {
-            Log.w(this, "startNegotiation: can't start negotiation as not idle.");
+            Rlog.w(TAG, "startNegotiation: can't start negotiation as not idle.");
             return;
         }
         mTransportState = STATE_NEGOTIATING;
-        Log.i(this, "startNegotiation: starting negotiation.");
+        Rlog.i(TAG, "startNegotiation: starting negotiation.");
         mPendingMessages.offer(DMTF_PROBE_MESSAGE.toCharArray());
         maybeScheduleMessageSend();
         scheduleNegotiationTimeout();
@@ -255,7 +257,7 @@ public class DtmfTransport implements TransportProtocol {
         for (Communicator.Message msg : messages) {
             char[] digits = getMessageDigits(msg);
             if (digits == null) continue;
-            Log.i(this, "sendMessages: queueing message: %s", String.valueOf(digits));
+            Rlog.i(TAG, "sendMessages: queueing message: " + String.valueOf(digits));
 
             mPendingMessages.offer(digits);
         }
@@ -274,8 +276,8 @@ public class DtmfTransport implements TransportProtocol {
                 mCharToSend = 0;
 
                 if (mMessageToSend != null) {
-                    Log.i(this, "maybeScheduleMessageSend: toSend=%s",
-                            String.valueOf(mMessageToSend));
+                    Rlog.i(TAG,
+                            "maybeScheduleMessageSend: toSend=" + String.valueOf(mMessageToSend));
                     // Schedule the message to send; the inital delay will be
                     // mDurationOfDtmfMessageMillis to ensure we separate messages with an
                     // adequate padding of space, and mIntervalBetweenDigitsMillis will be used to
@@ -310,13 +312,13 @@ public class DtmfTransport implements TransportProtocol {
     private void handleDtmfSend() {
         if (mCharToSend < mMessageToSend.length) {
             if (mDtmfAdapter != null) {
-                Log.i(this, "handleDtmfSend: char=%c", mMessageToSend[mCharToSend]);
+                Rlog.i(TAG, "handleDtmfSend: char=" + mMessageToSend[mCharToSend]);
                 mDtmfAdapter.sendDtmf(mMessageToSend[mCharToSend]);
             }
             mCharToSend++;
 
             if (mCharToSend == mMessageToSend.length) {
-                Log.i(this, "handleDtmfSend: done");
+                Rlog.i(TAG, "handleDtmfSend: done");
                 synchronized (mDigitSendLock) {
                     mMessageToSend = null;
                     mDigitSendScheduledFuture.cancel(false);
@@ -346,7 +348,7 @@ public class DtmfTransport implements TransportProtocol {
      */
     public void onDtmfReceived(char digit) {
         if (!(digit >= 'A' && digit <= 'D')) {
-            Log.i(this, "onDtmfReceived: digit = %c ; invalid digit; not in A-D");
+            Rlog.i(TAG, "onDtmfReceived: digit = " + digit + "; invalid digit; not in A-D");
             return;
         }
 
@@ -356,7 +358,7 @@ public class DtmfTransport implements TransportProtocol {
             }
 
             if (digit == DTMF_MESSAGE_DELIMITER) {
-                Log.i(this, "onDtmfReceived: received message %s", mProbeDigits);
+                Rlog.i(TAG, "onDtmfReceived: received message " + mProbeDigits);
                 handleProbeMessage();
             }
         } else {
@@ -382,11 +384,12 @@ public class DtmfTransport implements TransportProtocol {
                 && probe.endsWith(String.valueOf(DTMF_MESSAGE_DELIMITER))
                 && probe.length() > 2) {
             mProtocolVersion = probe.substring(1,probe.length() - 1);
-            Log.i(this, "handleProbeMessage: got valid probe, remote version %s negotiated.",
-                    probe);
+            Rlog.i(TAG, "handleProbeMessage: got valid probe, remote version " + probe
+                    + " negotiated.");
             negotiationSucceeded();
         } else {
-            Log.i(this, "handleProbeMessage: got invalid probe %s - negotiation failed.", probe);
+            Rlog.i(TAG,
+                    "handleProbeMessage: got invalid probe " + probe + " - negotiation failed.");
             negotiationFailed();
         }
         cancelNegotiationTimeout();
@@ -410,7 +413,7 @@ public class DtmfTransport implements TransportProtocol {
      * Cancels a pending timeout for negotiation.
      */
     private void cancelNegotiationTimeout() {
-        Log.i(this, "cancelNegotiationTimeout");
+        Rlog.i(TAG, "cancelNegotiationTimeout");
         synchronized (mNegotiationLock) {
             if (mNegotiationFuture != null) {
                 mNegotiationFuture.cancel(false);
@@ -423,7 +426,7 @@ public class DtmfTransport implements TransportProtocol {
      * Handle scheduled negotiation timeout.
      */
     private void handleNegotiationTimeout() {
-        Log.i(this, "handleNegotiationTimeout: no probe received, negotiation timeout.");
+        Rlog.i(TAG, "handleNegotiationTimeout: no probe received, negotiation timeout.");
         synchronized (mNegotiationLock) {
             mNegotiationFuture = null;
         }
@@ -435,7 +438,7 @@ public class DtmfTransport implements TransportProtocol {
      */
     private void negotiationFailed() {
         mTransportState = STATE_NEGOTIATION_FAILED;
-        Log.i(this, "notifyNegotiationFailed");
+        Rlog.i(TAG, "notifyNegotiationFailed");
         if (mCallback != null) {
             mCallback.onNegotiationFailed(this);
         }
@@ -446,7 +449,7 @@ public class DtmfTransport implements TransportProtocol {
      */
     private void negotiationSucceeded() {
         mTransportState = STATE_NEGOTIATED;
-        Log.i(this, "negotiationSucceeded");
+        Rlog.i(TAG, "negotiationSucceeded");
         if (mCallback != null) {
             mCallback.onNegotiationSuccess(this);
         }
@@ -461,17 +464,18 @@ public class DtmfTransport implements TransportProtocol {
         if (mMessageReceiveState == RECEIVE_STATE_IDLE) {
             if (digit == DTMF_MESSAGE_START) {
                 // First digit; start the timer
-                Log.i(this, "handleReceivedDigit: digit = %c ; message timeout started.", digit);
+                Rlog.i(TAG,
+                        "handleReceivedDigit: digit = " + digit + " ; message timeout started.");
                 mMessageReceiveState = RECEIVE_STATE_MESSAGE_TYPE;
                 scheduleDtmfMessageTimeout();
             } else {
-                Log.w(this, "handleReceivedDigit: digit = %c ; unexpected start digit, ignoring.",
-                        digit);
+                Rlog.w(TAG, "handleReceivedDigit: digit = " + digit
+                        + " ; unexpected start digit, ignoring.");
             }
         } else if (digit == DTMF_MESSAGE_DELIMITER) {
             if (mMessageReceiveState == RECEIVE_STATE_MESSAGE_TYPE) {
-                Log.i(this, "handleReceivedDigit: digit = %c ; msg = %s ; awaiting value.", digit,
-                        mMessageTypeDigits.toString());
+                Rlog.i(TAG, "handleReceivedDigit: digit = " + digit + " ; msg = "
+                        + mMessageTypeDigits.toString() + " ; awaiting value.");
                 mMessageReceiveState = RECEIVE_STATE_MESSAGE_VALUE;
             } else if (mMessageReceiveState == RECEIVE_STATE_MESSAGE_VALUE) {
                 maybeCancelDtmfMessageTimeout();
@@ -481,8 +485,8 @@ public class DtmfTransport implements TransportProtocol {
                     messageType = mMessageTypeDigits.toString();
                     messageValue = mMessageValueDigits.toString();
                 }
-                Log.i(this, "handleReceivedDigit: digit = %c ; msg = %s ; value = %s ; full msg",
-                        digit, messageType, messageValue);
+                Rlog.i(TAG, "handleReceivedDigit: digit = " + digit + " ; msg = " + messageType
+                        + " ; value = " + messageValue + " ; full msg");
                 handleIncomingMessage(messageType, messageValue);
                 resetIncomingMessage();
             }
@@ -490,12 +494,12 @@ public class DtmfTransport implements TransportProtocol {
             synchronized(mDigitsLock) {
                 if (mMessageReceiveState == RECEIVE_STATE_MESSAGE_TYPE) {
                     mMessageTypeDigits.append(digit);
-                    Log.i(this, "handleReceivedDigit: typeDigit = %c ; msg = %s",
-                            digit, mMessageTypeDigits.toString());
+                    Rlog.i(TAG, "handleReceivedDigit: typeDigit = " + digit + " ; msg = "
+                            + mMessageTypeDigits.toString());
                 } else if (mMessageReceiveState == RECEIVE_STATE_MESSAGE_VALUE) {
                     mMessageValueDigits.append(digit);
-                    Log.i(this, "handleReceivedDigit: valueDigit = %c ; value = %s",
-                            digit, mMessageValueDigits.toString());
+                    Rlog.i(TAG, "handleReceivedDigit: valueDigit = " + digit + " ; value = "
+                            + mMessageValueDigits.toString());
                 }
             }
         }
@@ -522,7 +526,7 @@ public class DtmfTransport implements TransportProtocol {
     private void maybeCancelDtmfMessageTimeout() {
         synchronized (mDtmfMessageTimeoutLock) {
             if (mDtmfMessageTimeoutFuture != null) {
-                Log.i(this, "scheduleDtmfMessageTimeout: timeout pending; cancelling");
+                Rlog.i(TAG, "scheduleDtmfMessageTimeout: timeout pending; cancelling");
                 mDtmfMessageTimeoutFuture.cancel(false);
                 mDtmfMessageTimeoutFuture = null;
             }
@@ -536,8 +540,8 @@ public class DtmfTransport implements TransportProtocol {
     private void handleDtmfMessageTimeout() {
         maybeCancelDtmfMessageTimeout();
 
-        Log.i(this, "handleDtmfMessageTimeout: timeout receiving DTMF string; got %s/%s so far",
-                    mMessageTypeDigits.toString(), mMessageValueDigits.toString());
+        Rlog.i(TAG, "handleDtmfMessageTimeout: timeout receiving DTMF string; got " +
+                mMessageTypeDigits.toString() + "/" + mMessageValueDigits.toString() + " so far");
 
         resetIncomingMessage();
     }
@@ -584,11 +588,13 @@ public class DtmfTransport implements TransportProtocol {
 
         Communicator.Message msg = extractMessage(message, value);
         if (msg == null) {
-            Log.w(this, "handleIncomingMessage: msgDigits = %s, msgValueDigits = %s; invalid msg",
-                    message, value);
+            Rlog.w(TAG,
+                    "handleIncomingMessage: msgDigits = " + message + ", msgValueDigits = " + value
+                            + "; invalid msg");
             return;
         }
-        Log.i(this, "handleIncomingMessage: msgDigits = %s, msgValueDigits = %s", message, value);
+        Rlog.i(TAG,
+                "handleIncomingMessage: msgDigits = " + message + ", msgValueDigits = " + value);
 
         Set<Communicator.Message> msgs = new ArraySet<>(1);
         msgs.add(msg);

@@ -16,7 +16,6 @@
 
 package com.android.internal.telephony.uicc;
 
-import static android.telephony.SmsManager.STATUS_ON_ICC_READ;
 import static android.telephony.SmsManager.STATUS_ON_ICC_UNREAD;
 
 import static com.android.internal.telephony.util.TelephonyUtils.FORCE_VERBOSE_STATE_LOGGING;
@@ -59,7 +58,6 @@ import java.util.Objects;
 public class SIMRecords extends IccRecords {
     protected static final String LOG_TAG = "SIMRecords";
 
-    private static final boolean CRASH_RIL = false;
     private static final boolean VDBG = FORCE_VERBOSE_STATE_LOGGING ||
             Rlog.isLoggable(LOG_TAG, Log.VERBOSE);
 
@@ -178,8 +176,6 @@ public class SIMRecords extends IccRecords {
     protected static final int EVENT_GET_PNN_DONE = 15 + SIM_RECORD_EVENT_BASE;
     protected static final int EVENT_GET_OPL_DONE = 16 + SIM_RECORD_EVENT_BASE;
     protected static final int EVENT_GET_SST_DONE = 17 + SIM_RECORD_EVENT_BASE;
-    private static final int EVENT_GET_ALL_SMS_DONE = 18 + SIM_RECORD_EVENT_BASE;
-    private static final int EVENT_MARK_SMS_READ_DONE = 19 + SIM_RECORD_EVENT_BASE;
     private static final int EVENT_SET_MBDN_DONE = 20 + SIM_RECORD_EVENT_BASE;
     private static final int EVENT_SMS_ON_SIM = 21 + SIM_RECORD_EVENT_BASE;
     private static final int EVENT_GET_SMS_DONE = 22 + SIM_RECORD_EVENT_BASE;
@@ -980,22 +976,6 @@ public class SIMRecords extends IccRecords {
                     parseEfOpl((ArrayList<byte[]>) ar.result);
                     break;
 
-                case EVENT_GET_ALL_SMS_DONE:
-                    isRecordLoadResponse = true;
-
-                    ar = (AsyncResult) msg.obj;
-                    if (ar.exception != null) {
-                        break;
-                    }
-
-                    handleSmses((ArrayList<byte[]>) ar.result);
-                    break;
-
-                case EVENT_MARK_SMS_READ_DONE:
-                    log("marked read: sms " + msg.arg1);
-                    break;
-
-
                 case EVENT_SMS_ON_SIM:
                     isRecordLoadResponse = false;
 
@@ -1506,36 +1486,6 @@ public class SIMRecords extends IccRecords {
         }
     }
 
-    private void handleSmses(ArrayList<byte[]> messages) {
-        int count = messages.size();
-
-        for (int i = 0; i < count; i++) {
-            byte[] ba = messages.get(i);
-
-            if (DBG) log("handleSmses status " + i + ": " + ba[0]);
-
-            // ba[0] is status byte. (see 3GPP TS 51.011 10.5.3)
-            if ((ba[0] & 0x07) == STATUS_ON_ICC_UNREAD) {
-                int n = ba.length;
-
-                // Note: Data may include trailing FF's. That's OK; message
-                // should still parse correctly.
-                byte[] pdu = new byte[n - 1];
-                System.arraycopy(ba, 1, pdu, 0, n - 1);
-                SmsMessage message = SmsMessage.createFromPdu(pdu, SmsConstants.FORMAT_3GPP);
-
-                dispatchGsmMessage(message);
-
-                ba[0] = (byte) STATUS_ON_ICC_READ;
-
-                if (false) { // FIXME: writing seems to crash RdoServD
-                    mFh.updateEFLinearFixed(EF_SMS,
-                            i, ba, null, obtainMessage(EVENT_MARK_SMS_READ_DONE, i));
-                }
-            }
-        }
-    }
-
     @Override
     protected void onRecordLoaded() {
         // One record loaded successfully or failed, In either case
@@ -1791,30 +1741,12 @@ public class SIMRecords extends IccRecords {
         mFh.loadEFLinearFixed(EF_PSISMSC, 1, obtainMessage(EVENT_GET_PSISMSC_DONE));
         mRecordsToLoad++;
 
-        // XXX should seek instead of examining them all
-        if (false) { // XXX
-            mFh.loadEFLinearFixedAll(EF_SMS, obtainMessage(EVENT_GET_ALL_SMS_DONE));
-            mRecordsToLoad++;
-        }
-
         mFh.loadEFTransparent(EF_SMSS, obtainMessage(EVENT_GET_SMSS_RECORD_DONE));
         mRecordsToLoad++;
 
         mFh.loadEFLinearFixedAll(EF_IARI, obtainMessage(EVENT_GET_IARI_DONE));
         mRecordsToLoad++;
 
-        if (CRASH_RIL) {
-            String sms = "0107912160130310f20404d0110041007030208054832b0120"
-                         + "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-                         + "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-                         + "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-                         + "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-                         + "ffffffffffffffffffffffffffffff";
-            byte[] ba = IccUtils.hexStringToBytes(sms);
-
-            mFh.updateEFLinearFixed(EF_SMS, 1, ba, null,
-                            obtainMessage(EVENT_MARK_SMS_READ_DONE, 1));
-        }
         if (DBG) log("fetchSimRecords " + mRecordsToLoad + " requested: " + mRecordsRequested);
     }
 

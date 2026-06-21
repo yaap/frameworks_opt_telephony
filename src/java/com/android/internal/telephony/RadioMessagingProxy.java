@@ -107,6 +107,20 @@ public class RadioMessagingProxy extends RadioServiceProxy {
      */
     public void acknowledgeLastIncomingCdmaSms(int serial, boolean success, int cause)
             throws RemoteException {
+        if (isEmpty()) return;
+        if (isAidl()) {
+            android.hardware.radio.messaging.CdmaSmsAck msg =
+                    new android.hardware.radio.messaging.CdmaSmsAck();
+            msg.errorClass = success;
+            msg.smsCauseCode = cause;
+            mMessagingProxy.acknowledgeLastIncomingCdmaSms(serial, msg);
+        } else {
+            android.hardware.radio.V1_0.CdmaSmsAck msg =
+                    new android.hardware.radio.V1_0.CdmaSmsAck();
+            msg.errorClass = success ? 0 : 1;
+            msg.smsCauseCode = cause;
+            mRadioProxy.acknowledgeLastIncomingCdmaSms(serial, msg);
+        }
     }
 
     /**

@@ -45,6 +45,8 @@ android_test {
         "flag-junit",
         "telephony_flags_core_java_lib",
         "telephony-config-update-proto-lite",
+        "modules-utils-binary-xml",
+        "modules-utils-fastxmlserializer",
     ],
 
     jarjar_rules: ":jarjar-rules-telephony-tests",

@@ -95,7 +95,9 @@ public class ImsRttTextHandlerTest extends TelephonyTest {
         // Construct some pipes to use
         ParcelFileDescriptor[] toTextHandler = ParcelFileDescriptor.createReliablePipe();
         ParcelFileDescriptor[] fromTextHandler = ParcelFileDescriptor.createReliablePipe();
-        mRttTextStream = new Connection.RttTextStream(fromTextHandler[1],toTextHandler[0]);
+
+        // This test is disabled due to b/221640979
+        //mRttTextStream = new Connection.RttTextStream(fromTextHandler[1],toTextHandler[0]);
 
         mRttTextHandler.initialize(mRttTextStream);
 

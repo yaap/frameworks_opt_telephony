@@ -36,8 +36,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.isNull;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import android.os.AsyncResult;
@@ -55,6 +59,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -347,5 +352,51 @@ public class IccRecordsTest extends TelephonyTest {
                 plmn2, 0));
         assertEquals(shortName2, IccRecords.getNetworkNameForPlmnFromPnnOpl(pnnsArray, oplArray,
                 plmn3, 0));
+    }
+
+    @Test
+    public void testMccMncConfigurationUpdate() throws Exception {
+        // Setup
+        String imsi = "310260123456789";
+        int phoneId = 0;
+        int subId = 1;
+
+        IccRecords spyRecords = spy(mIccRecords);
+
+        // 1. Mock Phone ID
+        doReturn(phoneId).when(mUiccCardApplication3gpp).getPhoneId();
+
+        // 2. Mock getSubscriptionId() wrapper
+        // Return 'subId' (int) directly, not an array
+        doReturn(subId).when(spyRecords).getSubscriptionId(eq(phoneId));
+
+        // --- Case 1: Current Subscription IS the Default Subscription ---
+        // Mock getDefaultSubscriptionId() wrapper to return the same subId
+        doReturn(subId).when(spyRecords).getDefaultSubscriptionId();
+
+        Field mncLengthField = IccRecords.class.getDeclaredField("mMncLength");
+        mncLengthField.setAccessible(true);
+        mncLengthField.setInt(spyRecords, 3);
+
+        // Execute
+        spyRecords.setImsi(imsi);
+        waitForLastHandlerAction(mIccRecords);
+
+        // Verify: Check if updateMccMncConfiguration was called
+        verify(spyRecords).updateMccMncConfiguration(eq(mContext), anyString());
+
+
+        // --- Case 2: Current Subscription is NOT the Default Subscription ---
+        // Mock getDefaultSubscriptionId() wrapper to return a different value (e.g., 2)
+        doReturn(2).when(spyRecords).getDefaultSubscriptionId();
+
+        // Execute
+        spyRecords.setImsi(imsi);
+        waitForLastHandlerAction(mIccRecords);
+
+        // Verify: Check that updateMccMncConfiguration was NOT called again
+        // (Total invocations should still be 1 from the previous case)
+        verify(spyRecords, times(1))
+                .updateMccMncConfiguration(eq(mContext), anyString());
     }
 }

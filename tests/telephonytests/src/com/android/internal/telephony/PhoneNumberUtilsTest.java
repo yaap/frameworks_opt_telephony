@@ -641,27 +641,10 @@ public class PhoneNumberUtilsTest {
     @SmallTest
     @Test
     public void testFormatSingaporeInternational() {
-        // Disable feature flag.
-        mSetFlagsRule.disableFlags(Flags.FLAG_REMOVE_COUNTRY_CODE_FROM_LOCAL_SINGAPORE_CALLS);
-        mSetFlagsRule.enableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
-
         // International call from a US iso
         assertEquals("+65 6521 8000", PhoneNumberUtils.formatNumber("+6565218000", "US"));
-
         // Lowercase country iso
         assertEquals("+65 6521 8000", PhoneNumberUtils.formatNumber("+6565218000", "us"));
-
-        // Enable feature flag
-        mSetFlagsRule.disableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
-        mSetFlagsRule.enableFlags(Flags.FLAG_REMOVE_COUNTRY_CODE_FROM_LOCAL_SINGAPORE_CALLS);
-
-        // Internal call from a US iso
-        assertEquals("+65 6521 8000", PhoneNumberUtils.formatNumber("+6565218000", "US"));
-
-        // Lowercase country iso
-        assertEquals("+65 6521 8000", PhoneNumberUtils.formatNumber("+6565218000", "us"));
-        mSetFlagsRule.disableFlags(Flags.FLAG_REMOVE_COUNTRY_CODE_FROM_LOCAL_SINGAPORE_CALLS);
-        mSetFlagsRule.disableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
     }
 
     /**
@@ -671,64 +654,28 @@ public class PhoneNumberUtilsTest {
     @SmallTest
     @Test
     public void testFormatSingaporeNational() {
-        // Disable feature flag.
-        mSetFlagsRule.disableFlags(Flags.FLAG_REMOVE_COUNTRY_CODE_FROM_LOCAL_SINGAPORE_CALLS);
-        mSetFlagsRule.enableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
-
         // Local call from a Singaporean number to a Singaporean number
         assertEquals("6521 8000", PhoneNumberUtils.formatNumber("+6565218000", "SG"));
-
         // Lowercase country iso.
         assertEquals("6521 8000", PhoneNumberUtils.formatNumber("+6565218000", "sg"));
-
-        // Enable feature flag.
-        mSetFlagsRule.disableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
-        mSetFlagsRule.enableFlags(Flags.FLAG_REMOVE_COUNTRY_CODE_FROM_LOCAL_SINGAPORE_CALLS);
-
-        // Local call from a Singaporean number to a Singaporean number.
-        assertEquals("6521 8000", PhoneNumberUtils.formatNumber("+6565218000", "SG"));
-
-        // Lowercase country iso.
-        assertEquals("6521 8000", PhoneNumberUtils.formatNumber("+6565218000", "sg"));
-        mSetFlagsRule.disableFlags(Flags.FLAG_REMOVE_COUNTRY_CODE_FROM_LOCAL_SINGAPORE_CALLS);
-        mSetFlagsRule.disableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
     }
 
     @SmallTest
     @Test
     public void testFormatTaiwanNational() {
-        // Disable feature flag.
-        mSetFlagsRule.disableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
-        assertEquals("+886 2 8729 6000", PhoneNumberUtils.formatNumber("+886287296000", "TW"));
-        assertEquals("+886 2 8729 6000", PhoneNumberUtils.formatNumber("+886287296000", "tw"));
-        assertEquals("+886 988 102 544", PhoneNumberUtils.formatNumber("+886988102544", "TW"));
-        assertEquals("+886 988 102 544", PhoneNumberUtils.formatNumber("+886988102544", "tw"));
-
-        // Enable feature flag.
-        mSetFlagsRule.enableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
         assertEquals("02 8729 6000", PhoneNumberUtils.formatNumber("+886287296000", "TW"));
         assertEquals("02 8729 6000", PhoneNumberUtils.formatNumber("+886287296000", "tw"));
         assertEquals("0988 102 544", PhoneNumberUtils.formatNumber("+886988102544", "TW"));
         assertEquals("0988 102 544", PhoneNumberUtils.formatNumber("+886988102544", "tw"));
-        mSetFlagsRule.disableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
     }
 
     @SmallTest
     @Test
     public void testFormatTaiwanInternational() {
-        // Disable feature flag.
-        mSetFlagsRule.disableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
         assertEquals("+886 2 8729 6000", PhoneNumberUtils.formatNumber("+886287296000", "US"));
         assertEquals("+886 2 8729 6000", PhoneNumberUtils.formatNumber("+886287296000", "us"));
         assertEquals("+886 988 102 544", PhoneNumberUtils.formatNumber("+886988102544", "US"));
         assertEquals("+886 988 102 544", PhoneNumberUtils.formatNumber("+886988102544", "us"));
-
-        mSetFlagsRule.enableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
-        assertEquals("+886 2 8729 6000", PhoneNumberUtils.formatNumber("+886287296000", "US"));
-        assertEquals("+886 2 8729 6000", PhoneNumberUtils.formatNumber("+886287296000", "us"));
-        assertEquals("+886 988 102 544", PhoneNumberUtils.formatNumber("+886988102544", "US"));
-        assertEquals("+886 988 102 544", PhoneNumberUtils.formatNumber("+886988102544", "us"));
-        mSetFlagsRule.disableFlags(Flags.FLAG_NATIONAL_COUNTRY_CODE_FORMATTING_FOR_LOCAL_CALLS);
     }
 
     @SmallTest

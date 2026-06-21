@@ -332,13 +332,9 @@ public class LocaleTrackerTest extends TelephonyTest {
     public void updateOperatorNumeric_TestNetwork_shouldHandleNetworkCountryCodeSet()
             throws Exception {
         mLocaleTracker.updateOperatorNumeric(TEST_CELL_MCC + FAKE_MNC);
-        if (mFeatureFlags.allowMultiCountryMcc()) {
-            ArgumentCaptor<MobileCountries> captor = ArgumentCaptor.forClass(MobileCountries.class);
-            verify(mNitzStateMachine).handleMobileCountriesDetected(captor.capture());
-            assertEquals(TEST_CELL_MCC, captor.getValue().getMcc());
-        } else {
-            verify(mNitzStateMachine, times(1)).handleCountryDetected("");
-        }
+        ArgumentCaptor<MobileCountries> captor = ArgumentCaptor.forClass(MobileCountries.class);
+        verify(mNitzStateMachine).handleMobileCountriesDetected(captor.capture());
+        assertEquals(TEST_CELL_MCC, captor.getValue().getMcc());
     }
 
     @Test
@@ -377,13 +373,9 @@ public class LocaleTrackerTest extends TelephonyTest {
         processAllMessages();
         assertEquals(US_COUNTRY_CODE, mLocaleTracker.getCurrentCountry());
 
-        if (mFeatureFlags.allowMultiCountryMcc()) {
-            ArgumentCaptor<MobileCountries> captor = ArgumentCaptor.forClass(MobileCountries.class);
-            verify(mNitzStateMachine).handleMobileCountriesDetected(captor.capture());
-            assertEquals(US_COUNTRY_CODE, captor.getValue().getDefaultCountryIsoCode());
-        } else {
-            verify(mNitzStateMachine).handleCountryDetected(US_COUNTRY_CODE);
-        }
+        ArgumentCaptor<MobileCountries> captor = ArgumentCaptor.forClass(MobileCountries.class);
+        verify(mNitzStateMachine).handleMobileCountriesDetected(captor.capture());
+        assertEquals(US_COUNTRY_CODE, captor.getValue().getDefaultCountryIsoCode());
     }
 
     @Test
@@ -393,30 +385,24 @@ public class LocaleTrackerTest extends TelephonyTest {
         mLocaleTracker.updateOperatorNumeric(FRENCH_GUIANA_MCC + FAKE_MNC);
         processAllMessages();
 
-        if (mFeatureFlags.allowMultiCountryMcc()) {
-            // With flag on, we can get a more accurate country via NITZ.
-            ArgumentCaptor<CountryDetectionListener> captor =
-                    ArgumentCaptor.forClass(CountryDetectionListener.class);
-            verify(mNitzStateMachine).registerCountryDetection(captor.capture());
-            CountryDetectionListener listener = captor.getValue();
+        // With flag on, we can get a more accurate country via NITZ.
+        ArgumentCaptor<CountryDetectionListener> captor =
+                ArgumentCaptor.forClass(CountryDetectionListener.class);
+        verify(mNitzStateMachine).registerCountryDetection(captor.capture());
+        CountryDetectionListener listener = captor.getValue();
 
-            // Initially, country is empty as it's ambiguous.
-            assertEquals(COUNTRY_CODE_UNAVAILABLE, mLocaleTracker.getCurrentCountry());
+        // Initially, country is empty as it's ambiguous.
+        assertEquals(COUNTRY_CODE_UNAVAILABLE, mLocaleTracker.getCurrentCountry());
 
-            ArgumentCaptor<MobileCountries> mcCaptor =
-                    ArgumentCaptor.forClass(MobileCountries.class);
-            verify(mNitzStateMachine).handleMobileCountriesDetected(mcCaptor.capture());
-            // Default country for MCC 340 is Guadeloupe.
-            assertEquals(GUADELOUPE_COUNTRY_CODE, mcCaptor.getValue().getDefaultCountryIsoCode());
+        ArgumentCaptor<MobileCountries> mcCaptor =
+                ArgumentCaptor.forClass(MobileCountries.class);
+        verify(mNitzStateMachine).handleMobileCountriesDetected(mcCaptor.capture());
+        // Default country for MCC 340 is Guadeloupe.
+        assertEquals(GUADELOUPE_COUNTRY_CODE, mcCaptor.getValue().getDefaultCountryIsoCode());
 
-            // NITZ provides the more specific country.
-            listener.onCountryDetected(FRENCH_GUIANA_COUNTRY_CODE);
-            processAllMessages();
-            assertEquals(FRENCH_GUIANA_COUNTRY_CODE, mLocaleTracker.getCurrentCountry());
-        } else {
-            // With flag off, it falls back to a default for the MCC.
-            assertEquals(GUADELOUPE_COUNTRY_CODE, mLocaleTracker.getCurrentCountry());
-            verify(mNitzStateMachine).handleCountryDetected(GUADELOUPE_COUNTRY_CODE);
-        }
+        // NITZ provides the more specific country.
+        listener.onCountryDetected(FRENCH_GUIANA_COUNTRY_CODE);
+        processAllMessages();
+        assertEquals(FRENCH_GUIANA_COUNTRY_CODE, mLocaleTracker.getCurrentCountry());
     }
 }

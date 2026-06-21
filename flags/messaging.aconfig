@@ -10,18 +10,7 @@ flag {
   bug: "305062594"
 }
 
-# OWNER=stevestatia TARGET=24Q3
-flag {
-    name: "unregister_sms_broadcast_receiver_from_cat_service"
-    namespace: "telephony"
-    description: "This flag will unregister the sms broadcast receiver in the CatService when the process is disposed."
-    bug: "338936403"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-}
-
-# OWNER=ntmyren TARGET=25Q4
+# OWNER=kiranmr TARGET=25Q4
 flag {
   name: "redact_otp_sms"
   namespace: "telephony"
@@ -29,7 +18,7 @@ flag {
   bug: "351976749"
 }
 
-# OWNER=ntmyren TARGET=25Q4
+# OWNER=kiranmr TARGET=25Q4
 flag {
   name: "redact_otp_sms_api"
   is_exported: true
@@ -38,21 +27,74 @@ flag {
   bug: "351976749"
 }
 
-# OWNER=ntmyren TARGET=25Q4
+# OWNER=prajogo TARGET=26Q2
 flag {
-  name: "limit_raw_table_visibility"
+  name: "redact_webotp_sms"
   namespace: "telephony"
-  description: "limits the visibility of the raw SMS table"
-  bug: "430572311"
-  metadata {
-      purpose: PURPOSE_BUGFIX
-  }
+  description: "Redact WebOTP SMS messages from untrusted packages"
+  bug: "437043173"
 }
 
-# OWNER=nykkumar TARGET=25Q2
+# OWNER=prajogo TARGET=26Q2
 flag {
-  name: "sms_mms_deliver_broadcasts_redirect_to_main_user"
+  name: "redact_generic_otp_sms"
   namespace: "telephony"
-  description: "This flag controls the redirection of SMS_DELIVER AND WAP_PUSH_DELIVER broadcasts to the MAIN user."
-  bug: "314321617"
+  description: "Redact Generic OTP SMS messages from untrusted packages"
+  bug: "437043173"
+}
+
+# OWNER=jferec TARGET=26Q2
+flag {
+  name: "secure_access_to_restricted_rcs_messages"
+  namespace: "telephony"
+  description: "Introduces access restrictions to reading and writing restricted RCS messages in the messaging database."
+  bug: "459576374"
+  is_exported: true
+}
+
+# OWNER=paulsoumyadeep TARGET=26q2
+flag {
+ name: "cache_sms_application_data"
+ namespace: "telephony"
+ description: "Caches the result of getApplicationCollectionInternal to reduce PackageManager queries."
+ bug: "350569741"
+ metadata {
+     purpose: PURPOSE_BUGFIX
+ }
+}
+
+# OWNER=braydenhass TARGET=26Q2
+flag {
+    name: "sms_network_security_events"
+    namespace: "telephony"
+    description: "Guard system API for SMS network security events."
+    bug: "407790397"
+    metadata {
+        purpose: PURPOSE_FEATURE
+    }
+}
+
+# OWNER=nishantpanwar TARGET=26Q2
+flag {
+  name: "message_promotion"
+  is_exported: true
+  namespace: "telephony"
+  description: "Include the Default Messaging App in outgoing message flows to support sending RCS messages"
+  bug: "469744736"
+}
+
+# OWNER=gargakash TARGET=26Q3
+flag {
+  name: "fix_sql_injection_hbpcd"
+  namespace: "telephony"
+  description: "Fix SQL injection in HbpcdLookupProvider"
+  bug: "458580054"
+}
+
+# OWNER=arunvoddu TARGET=26Q3
+flag {
+  name: "write_sim_async"
+  namespace: "telephony"
+  description: "Moving the file I/O operations to background thread to avoid ANR"
+  bug: "469506704"
 }

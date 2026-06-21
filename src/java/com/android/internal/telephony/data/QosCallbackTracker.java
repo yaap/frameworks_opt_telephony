@@ -18,6 +18,7 @@ package com.android.internal.telephony.data;
 
 import android.annotation.NonNull;
 import android.annotation.Nullable;
+import android.net.IpPrefix;
 import android.net.LinkAddress;
 import android.net.NetworkAgent;
 import android.net.QosFilter;
@@ -76,21 +77,25 @@ public class QosCallbackTracker extends Handler {
          * Filter using the local address.
          *
          * @param address The local address.
+         * @param prefixLength The prefix length of the local address.
          * @param startPort Starting port.
          * @param endPort Ending port.
          * @return {@code true} if matches, {@code false} otherwise.
          */
-        boolean matchesLocalAddress(InetAddress address, int startPort, int endPort);
+        boolean matchesLocalAddress(
+                InetAddress address, int prefixLength, int startPort, int endPort);
 
         /**
          * Filter using the remote address.
          *
          * @param address The remote address.
+         * @param prefixLength The prefix length of the remote address.
          * @param startPort Starting port.
          * @param endPort Ending port.
          * @return {@code true} if matches, {@code false} otherwise.
          */
-        boolean matchesRemoteAddress(InetAddress address, int startPort, int endPort);
+        boolean matchesRemoteAddress(
+                InetAddress address, int prefixLength, int startPort, int endPort);
 
         /**
          * Filter using the protocol
@@ -107,7 +112,9 @@ public class QosCallbackTracker extends Handler {
      * @param networkAgent The network agent to send events to.
      * @param phone The phone instance.
      */
-    public QosCallbackTracker(@NonNull TelephonyNetworkAgent networkAgent, @NonNull Phone phone) {
+    public QosCallbackTracker(
+            @NonNull TelephonyNetworkAgent networkAgent,
+            @NonNull Phone phone) {
         mQosBearerSessions = new HashMap<>();
         mCallbacksToFilter = new HashMap<>();
         mNetworkAgent = networkAgent;
@@ -145,18 +152,20 @@ public class QosCallbackTracker extends Handler {
                                 new QosCallbackTracker.IFilter() {
                                     @Override
                                     public boolean matchesLocalAddress(
-                                            @NonNull InetAddress address, int startPort,
-                                            int endPort) {
-                                        return filter.matchesLocalAddress(address, startPort,
-                                                endPort);
+                                            @NonNull InetAddress address, int prefixLength,
+                                            int startPort, int endPort) {
+                                        return filter.matchesLocalPrefix(
+                                                new IpPrefix(address, prefixLength),
+                                                startPort, endPort);
                                     }
 
                                     @Override
                                     public boolean matchesRemoteAddress(
-                                            @NonNull InetAddress address, int startPort,
-                                            int endPort) {
-                                        return filter.matchesRemoteAddress(address, startPort,
-                                                endPort);
+                                            @NonNull InetAddress address, int prefixLength,
+                                            int startPort, int endPort) {
+                                        return filter.matchesRemotePrefix(
+                                                new IpPrefix(address, prefixLength),
+                                                startPort, endPort);
                                     }
 
                                     @Override
@@ -164,6 +173,11 @@ public class QosCallbackTracker extends Handler {
                                         return filter.matchesProtocol(protocol);
                                     }
                                 });
+                    }
+
+                    @Override
+                    public void onQosCallbackUnregistered(int qosCallbackId) {
+                        removeFilter(qosCallbackId);
                     }
                 });
     }
@@ -326,10 +340,11 @@ public class QosCallbackTracker extends Handler {
             } catch (UnknownHostException e) {
                 return false;
             }
-            return filter.matchesLocalAddress(anyAddress, portStart, portEnd);
+            return filter.matchesLocalAddress(anyAddress, 32, portStart, portEnd);
         } else {
             for (final LinkAddress qosAddress : sessionFilter.getLocalAddresses()) {
-                return filter.matchesLocalAddress(qosAddress.getAddress(), portStart, portEnd);
+                return filter.matchesLocalAddress(
+                        qosAddress.getAddress(), qosAddress.getPrefixLength(), portStart, portEnd);
             }
         }
         return false;
@@ -356,10 +371,11 @@ public class QosCallbackTracker extends Handler {
             } catch (UnknownHostException e) {
                 return false;
             }
-            result = filter.matchesRemoteAddress(anyAddress, portStart, portEnd);
+            result = filter.matchesRemoteAddress(anyAddress, 32, portStart, portEnd);
         } else {
             for (final LinkAddress qosAddress : sessionFilter.getRemoteAddresses()) {
-                result = filter.matchesRemoteAddress(qosAddress.getAddress(), portStart, portEnd);
+                return filter.matchesRemoteAddress(
+                        qosAddress.getAddress(), qosAddress.getPrefixLength(), portStart, portEnd);
             }
         }
         return result;

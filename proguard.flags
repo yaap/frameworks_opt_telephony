@@ -1,9 +1,3 @@
-# Uncomment the following to show all included rules during build
-#-printconfiguration
-
-# Generate usage file (for shrinking)
--printusage
-
 # Keep deprecated GSM SMS API
 -keepclasseswithmembers class android.telephony.gsm.SmsManager,android.telephony.gsm.SmsManager$* {
     public *;

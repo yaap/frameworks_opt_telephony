@@ -40,6 +40,7 @@ import android.telephony.AccessNetworkConstants;
 import android.telephony.AccessNetworkConstants.AccessNetworkType;
 import android.telephony.TelephonyManager;
 import android.telephony.data.ApnSetting;
+import android.telephony.data.DataCallResponse;
 import android.telephony.data.DataProfile;
 import android.telephony.data.DataService;
 import android.telephony.data.DataServiceCallback;
@@ -58,6 +59,7 @@ import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.List;
 
 @RunWith(AndroidTestingRunner.class)
@@ -394,7 +396,90 @@ public class DataServiceManagerTest extends TelephonyTest {
                 TelephonyManager.DATA_CONNECTED, AccessNetworkConstants.TRANSPORT_TYPE_WWAN, 0,
                 message);
         waitAndVerifyResult(message, DataServiceCallback.RESULT_SUCCESS);
-        verify(mSimulatedCommandsVerifier).notifyImsDataNetwork(anyInt(), anyInt(),
-                anyInt(), anyInt(), any(Message.class));
+        verify(mSimulatedCommandsVerifier)
+                .notifyImsDataNetwork(anyInt(), anyInt(), anyInt(), anyInt(), any(Message.class));
+    }
+
+    @Test
+    public void testRequestDataCallList_ignoreInactive() throws Exception {
+        doReturn(true).when(mFeatureFlags).ignoreInactiveDataCallsInPoll();
+        createDataServiceManager(true);
+
+        DataCallResponse activeCall =
+                new DataCallResponse.Builder()
+                        .setId(1)
+                        .setLinkStatus(DataCallResponse.LINK_STATUS_ACTIVE)
+                        .setProtocolType(ApnSetting.PROTOCOL_IP)
+                        .setInterfaceName("rmnet0")
+                        .build();
+        DataCallResponse inactiveCall =
+                new DataCallResponse.Builder()
+                        .setId(2)
+                        .setLinkStatus(DataCallResponse.LINK_STATUS_INACTIVE)
+                        .setProtocolType(ApnSetting.PROTOCOL_IP)
+                        .setInterfaceName("rmnet1")
+                        .build();
+
+        // Set initial state: one active, one inactive
+        Field field = DataServiceManager.class.getDeclaredField("mLastDataCallResponseList");
+        field.setAccessible(true);
+        field.set(mDataServiceManagerUT, new ArrayList<>(List.of(activeCall, inactiveCall)));
+
+        // Simulate onRequestDataCallListComplete with only the active call
+        // Use reflection to call the inner class method
+        Class<?> callbackClass = Class.forName(DataServiceManager.class.getName()
+            + "$DataServiceCallbackWrapper");
+        java.lang.reflect.Constructor<?> constructor =
+                callbackClass.getDeclaredConstructor(DataServiceManager.class, String.class);
+        constructor.setAccessible(true);
+        Object callback = constructor.newInstance(mDataServiceManagerUT, "testTag");
+
+        java.lang.reflect.Method method =
+                callbackClass.getDeclaredMethod(
+                        "onRequestDataCallListComplete", int.class, List.class);
+        method.setAccessible(true);
+        method.invoke(callback, DataServiceCallback.RESULT_SUCCESS, List.of(activeCall));
+
+        // Verification: mLastDataCallResponseList should now only contain the active call
+        List<DataCallResponse> lastDataCallResponseList =
+                (List<DataCallResponse>) field.get(mDataServiceManagerUT);
+        assertThat(lastDataCallResponseList).containsExactly(activeCall);
+    }
+
+    @Test
+    public void testRequestDataCallList_failureResultDoesNotReportAnomaly() throws Exception {
+        createDataServiceManager(true);
+
+        DataCallResponse activeCall =
+                new DataCallResponse.Builder()
+                        .setId(1)
+                        .setLinkStatus(DataCallResponse.LINK_STATUS_ACTIVE)
+                        .setProtocolType(ApnSetting.PROTOCOL_IP)
+                        .setInterfaceName("rmnet0")
+                        .build();
+
+        // Set initial state: one active call
+        Field field = DataServiceManager.class.getDeclaredField("mLastDataCallResponseList");
+        field.setAccessible(true);
+        field.set(mDataServiceManagerUT, new ArrayList<>(List.of(activeCall)));
+
+        // Simulate onRequestDataCallListComplete with a failure resultCode and an empty list
+        Class<?> callbackClass = Class.forName(DataServiceManager.class.getName()
+                + "$DataServiceCallbackWrapper");
+        java.lang.reflect.Constructor<?> constructor =
+                callbackClass.getDeclaredConstructor(DataServiceManager.class, String.class);
+        constructor.setAccessible(true);
+        Object callback = constructor.newInstance(mDataServiceManagerUT, "testTag");
+
+        java.lang.reflect.Method method =
+                callbackClass.getDeclaredMethod(
+                        "onRequestDataCallListComplete", int.class, List.class);
+        method.setAccessible(true);
+        method.invoke(callback, DataServiceCallback.RESULT_ERROR_ILLEGAL_STATE, new ArrayList<>());
+
+        // Verification: mLastDataCallResponseList should still contain the active call
+        List<DataCallResponse> lastDataCallResponseList =
+                (List<DataCallResponse>) field.get(mDataServiceManagerUT);
+        assertThat(lastDataCallResponseList).containsExactly(activeCall);
     }
 }

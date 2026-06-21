@@ -16,7 +16,11 @@
 package com.android.internal.telephony;
 
 import static org.junit.Assert.assertEquals;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -170,6 +174,60 @@ public class CarrierActionAgentTest extends TelephonyTest {
         verify(mRadioActionHandler, times(2)).sendMessageAtTime(message.capture(), anyLong());
         assertEquals(RADIO_CARRIER_ACTION_EVENT, message.getValue().what);
         assertEquals(true, ((AsyncResult) message.getValue().obj).result);
+    }
+
+    /**
+     * Helper method to process ACTION_SIM_STATE_CHANGED broadcast.
+     * @param iccState The SIM state to broadcast (e.g., INTENT_VALUE_ICC_LOADED).
+     */
+    private void sendSimStateChanged(String iccState) {
+        final Intent intent = new Intent(TelephonyIntents.ACTION_SIM_STATE_CHANGED);
+        intent.putExtra(IccCardConstants.INTENT_KEY_ICC_STATE, iccState);
+        intent.putExtra(PhoneConstants.PHONE_KEY, mPhone.getPhoneId());
+        mContext.sendBroadcast(intent);
+        processAllMessages();
+    }
+
+    @Test
+    @SmallTest
+    public void testDataRoamingOffRegistration() {
+        // Initial state of mIsDataRoamingOffRegistered flag is false
+
+        // 1. First ICC_LOADED: registerForDataRoamingOff is called, and flag becomes true
+        sendSimStateChanged(IccCardConstants.INTENT_VALUE_ICC_LOADED);
+        verify(mSST, times(1))
+                .registerForDataRoamingOff(any(), anyInt(), any(), anyBoolean());
+        verify(mSST, times(0)).unregisterForDataRoamingOff(any());
+
+        // 2. ICC_UNKNOWN: unregisterForDataRoamingOff is called, and flag becomes false
+        sendSimStateChanged(IccCardConstants.INTENT_VALUE_ICC_UNKNOWN);
+        verify(mSST, times(1))
+                .unregisterForDataRoamingOff(eq(mCarrierActionAgentUT));
+
+        // 3. Second ICC_LOADED: registerForDataRoamingOff is called, and flag becomes true
+        sendSimStateChanged(IccCardConstants.INTENT_VALUE_ICC_LOADED);
+        verify(mSST, times(2))
+                .registerForDataRoamingOff(any(), anyInt(), any(), anyBoolean());
+        // unregister count should still be 1
+        verify(mSST, times(1))
+                .unregisterForDataRoamingOff(eq(mCarrierActionAgentUT));
+
+        // 4. Duplicate ICC_LOADED: registerForDataRoamingOff is not called (flag is already true)
+        sendSimStateChanged(IccCardConstants.INTENT_VALUE_ICC_LOADED);
+        // register count should still be 2
+        verify(mSST, times(2))
+                .registerForDataRoamingOff(any(), anyInt(), any(), anyBoolean());
+
+        // 5. ICC_ABSENT: unregisterForDataRoamingOff is called, and flag becomes false
+        sendSimStateChanged(IccCardConstants.INTENT_VALUE_ICC_ABSENT);
+        verify(mSST, times(2))
+                .unregisterForDataRoamingOff(eq(mCarrierActionAgentUT));
+
+        // 6. ICC_NOT_READY: unregisterForDataRoamingOff is not called (flag is already false)
+        sendSimStateChanged(IccCardConstants.INTENT_VALUE_ICC_NOT_READY);
+        // unregister count should still be 2
+        verify(mSST, times(2))
+                .unregisterForDataRoamingOff(eq(mCarrierActionAgentUT));
     }
 
     @After
